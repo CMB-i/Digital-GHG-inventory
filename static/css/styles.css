@@ -1,0 +1,11 @@
+.nav-link {
+  display: block;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  color: rgb(51 65 85);
+}
+
+.nav-link:hover {
+  background: rgb(241 245 249);
+  color: rgb(15 23 42);
+}

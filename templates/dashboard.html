@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Digital GHG Inventory{% endblock %}
+
+{% block content %}
+<section class="space-y-6">
+  <div>
+    <h1 class="text-3xl font-semibold tracking-tight">Digital GHG Inventory</h1>
+    <p class="mt-2 text-slate-600">Phase 0 repository and development environment scaffold.</p>
+  </div>
+  <div class="grid gap-4 md:grid-cols-3">
+    <div class="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 class="font-medium">Application Shell</h2>
+      <p class="mt-2 text-sm text-slate-600">Flask app factory, dashboard, health routes, and module navigation are available.</p>
+    </div>
+    <div class="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 class="font-medium">Database Wiring</h2>
+      <p class="mt-2 text-sm text-slate-600">SQLAlchemy and Flask-Migrate are initialized without business tables.</p>
+    </div>
+    <div class="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 class="font-medium">Phase Boundary</h2>
+      <p class="mt-2 text-sm text-slate-600">Auth, permissions, audit logging, and business workflows remain placeholders.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}
