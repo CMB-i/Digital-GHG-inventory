@@ -2,7 +2,7 @@ from flask import Flask, jsonify, redirect, render_template
 from sqlalchemy import text
 
 from app.config import Config
-from app.database import db, migrate
+from app.database import db
 from app.modules.ACCESS import bp as access_bp
 from app.modules.APPROV import bp as approv_bp
 from app.modules.AUDITL import bp as auditl_bp
@@ -40,7 +40,6 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
 
     db.init_app(app)
-    migrate.init_app(app, db)
 
     for blueprint in MODULE_BLUEPRINTS:
         app.register_blueprint(blueprint)

@@ -7,42 +7,87 @@ Phase 0 scaffold for the ESG / GHG Data Governance Platform.
 - Backend: Flask
 - Database: PostgreSQL
 - Templates: Flask Jinja
-- Styling: Tailwind CSS CDN
+- Styling: Tailwind CSS CDN (no Python package required)
 - JavaScript: Vanilla JS
-- Migrations: Alembic / Flask-Migrate
-- Dev/deploy: Docker Compose
+- Migrations: Alembic (configured once during Phase 0; `alembic.ini` and `migrations/env.py` are set up manually)
+- WSGI server: Waitress (pure Python, works on Mac and Windows)
 
 ## Setup
 
-Copy the sample environment file:
+### 1. Clone and create a virtual environment
 
-```bash
-cp .env.example .env
-```
-
-Run with Docker Compose:
-
-```bash
-docker-compose up --build
-```
-
-Run locally:
-
+**Mac / Linux:**
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+```
+
+**Windows:**
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+### 2. Install dependencies
+
+```bash
 pip install -r requirements.txt
+```
+
+### 3. Configure environment
+
+```bash
 cp .env.example .env
+```
+
+Open `.env` and set `DATABASE_URL` to point to your local PostgreSQL instance, or to a shared dev database if your team has one configured:
+
+```
+DATABASE_URL=postgresql://ghg_user:ghg_password@localhost:5432/ghg_inventory
+```
+
+### 4. Run database migrations
+
+Migrations are managed with Alembic directly. `alembic.ini` and `migrations/env.py` are configured once during Phase 0 setup and committed to the repo.
+
+```bash
+alembic upgrade head
+```
+
+Do not use `flask db upgrade` — Flask-Migrate is not used in this project.
+
+### 5. Start the development server
+
+```bash
 python run.py
 ```
 
-For local runs without Docker, set `DATABASE_URL` to a reachable PostgreSQL instance.
+For a production-style startup using Waitress:
+
+```bash
+waitress-serve --call app:create_app
+```
+
+Waitress is pure Python and works on both Mac and Windows without additional system dependencies.
+
+## File storage (MinIO / local filesystem)
+
+MinIO is used for object storage in production. For local development, choose one of the following:
+
+- **MinIO binary (no Docker):** Download the MinIO binary for your OS from [min.io/download](https://min.io/download) and run it directly. No Docker required.
+- **Local filesystem fallback:** For development, a simple local filesystem path can be used instead of MinIO. MinIO is only required in production.
+
+Do not rely on a Docker-based MinIO setup for local development.
 
 ## Phase 0 Verification Checklist
 
-- `docker-compose up --build` starts the Flask and PostgreSQL services.
+- venv is activated and `pip install -r requirements.txt` runs clean with no errors.
+- `.env` is configured with a valid `DATABASE_URL` pointing to a reachable PostgreSQL instance.
+- `alembic upgrade head` completes without errors.
+- `python run.py` starts the Flask development server.
 - `/health` returns `{"status": "ok"}`.
-- `/db-health` returns `{"database": "connected"}` when PostgreSQL is available.
+- `/db-health` returns `{"database": "connected"}`.
+- `/login` page loads successfully.
 - `/dashboard` loads.
 - `/module/ACCESS/` loads.
 - Tailwind styling is visible.
