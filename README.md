@@ -62,6 +62,8 @@ Do not use `flask db upgrade` — Flask-Migrate is not used in this project.
 python run.py
 ```
 
+The local Flask development server runs on port `5001`.
+
 For a production-style startup using Waitress:
 
 ```bash
@@ -69,6 +71,25 @@ waitress-serve --call app:create_app
 ```
 
 Waitress is pure Python and works on both Mac and Windows without additional system dependencies.
+
+## Phase 2 Local Login
+
+Run migrations and seed the development account:
+
+```bash
+.venv/bin/alembic upgrade head
+.venv/bin/python scripts/seed.py
+.venv/bin/python run.py
+```
+
+Open `http://localhost:5001/login` and sign in with:
+
+```text
+Email: admin@example.com
+Password: ChangeMe123!
+```
+
+The seed script also grants the dev admin global `access_matrix` permissions with all 11 permission flags enabled.
 
 ## File storage (MinIO / local filesystem)
 

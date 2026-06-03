@@ -9,28 +9,20 @@
 </head>
 <body class="bg-slate-50 text-slate-900">
   <div class="min-h-screen lg:flex">
+    {% if current_user %}
     <aside class="bg-white border-r border-slate-200 lg:w-72">
       <div class="px-5 py-4 border-b border-slate-200">
         <a href="{{ url_for('dashboard') }}" class="text-lg font-semibold">Digital GHG Inventory</a>
-        <p class="text-xs text-slate-500">Phase 0 scaffold</p>
+        <p class="text-xs text-slate-500">{{ current_user.full_name }}</p>
       </div>
       <nav class="p-3 grid gap-1 text-sm">
-        <a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
-        <a class="nav-link" href="/module/ACCESS/">Access Matrix</a>
-        <a class="nav-link" href="/module/USRMGMT/">Users</a>
-        <a class="nav-link" href="/module/SITEMST/">Sites</a>
-        <a class="nav-link" href="/module/FORMBLD/">Form Builder</a>
-        <a class="nav-link" href="/module/FRMULA/">Formula Builder</a>
-        <a class="nav-link" href="/module/VALSET/">Value Sets</a>
-        <a class="nav-link" href="/module/WFLWBLD/">Workflow Builder</a>
-        <a class="nav-link" href="/module/SUBMIT/">SPOC Entry</a>
-        <a class="nav-link" href="/module/APPROV/">Approval Queue</a>
-        <a class="nav-link" href="/module/RPTBLD/">Reports</a>
-        <a class="nav-link" href="/module/AUDITL/">Audit Log</a>
-        <a class="nav-link" href="/module/NOTIFY/">Notifications</a>
-        <a class="nav-link" href="/module/PERIOD/">Periods</a>
+        {% for item in nav_items %}
+        <a class="nav-link" href="{{ item.href }}">{{ item.label }}</a>
+        {% endfor %}
+        <a class="nav-link" href="{{ url_for('auth.logout') }}">Logout</a>
       </nav>
     </aside>
+    {% endif %}
     <main class="flex-1">
       <div class="mx-auto max-w-6xl px-5 py-8">
         {% block content %}{% endblock %}

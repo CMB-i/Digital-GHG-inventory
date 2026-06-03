@@ -1,26 +1,32 @@
 from functools import wraps
 
-from flask import redirect, url_for
+from flask import render_template
+
+from app.common.auth import current_user, require_login
+from app.common.permissions import has_permission
 
 
-def login_required(view_func):
-    # TODO Phase 2: replace with real session/auth enforcement.
-    @wraps(view_func)
-    def wrapper(*args, **kwargs):
-        return view_func(*args, **kwargs)
-
-    return wrapper
-
-
-def permission_required(permission_code):
-    # TODO Phase 3: check module/action permissions from access configuration.
+def require_permission(entity_type, action, scope_site_id_param=None, entity_id_param=None):
     def decorator(view_func):
+        @require_login
         @wraps(view_func)
         def wrapper(*args, **kwargs):
-            if not permission_code:
-                return redirect(url_for("no_access"))
+            user = current_user()
+            scope_site_id = kwargs.get(scope_site_id_param) if scope_site_id_param else None
+            entity_id = kwargs.get(entity_id_param) if entity_id_param else None
+            actions = action if isinstance(action, (tuple, list, set)) else (action,)
+            allowed = any(
+                has_permission(user.id, entity_type, item, scope_site_id, entity_id)
+                for item in actions
+            )
+            if not allowed:
+                return render_template("no_access.html"), 403
             return view_func(*args, **kwargs)
 
         return wrapper
 
     return decorator
+
+
+login_required = require_login
+permission_required = require_permission

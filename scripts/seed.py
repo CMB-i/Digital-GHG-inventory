@@ -6,34 +6,50 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import bcrypt
 from sqlalchemy import func
 
 from app import create_app
 import app.models  # noqa: F401
+from app.common.permissions import PERMISSION_FLAGS
 from app.database import db
+from app.modules.ACCESS.model import AccessMatrix
 from app.modules.RPTBLD.model import AppConfig
 from app.modules.SITEMST.model import Site
+from app.modules.USRMGMT.service import hash_password
 from app.modules.USRMGMT.model import User
 
 
 ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "admin@example.com")
 ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "ChangeMe123!")
-
-
-def hash_password(password):
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+ADMIN_ENTITY_TYPES = (
+    "all",
+    "audit_log",
+    "form",
+    "formula",
+    "issue",
+    "notification",
+    "report",
+    "reporting_period",
+    "site",
+    "submission",
+    "user",
+    "value_set",
+    "workflow",
+)
 
 
 def seed_admin_user():
     existing = User.query.filter_by(email=ADMIN_EMAIL).one_or_none()
     if existing:
+        if not existing.password_hash:
+            existing.password_hash = hash_password(ADMIN_PASSWORD)
+        existing.is_active = True
         return existing
 
     next_id = (db.session.query(func.max(User.id)).scalar() or 0) + 1
     admin = User(
         id=next_id,
-        email=ADMIN_EMAIL,
+        email=ADMIN_EMAIL.lower(),
         password_hash=hash_password(ADMIN_PASSWORD),
         full_name="Initial Admin",
         is_active=True,
@@ -42,6 +58,32 @@ def seed_admin_user():
     db.session.add(admin)
     db.session.flush()
     return admin
+
+
+def seed_admin_access(admin):
+    for entity_type in ADMIN_ENTITY_TYPES:
+        existing = AccessMatrix.query.filter_by(
+            user_id=admin.id,
+            scope_type="global",
+            scope_site_id=None,
+            scope_region_id=None,
+            entity_type=entity_type,
+            entity_id=None,
+            is_deleted=False,
+        ).one_or_none()
+        if existing:
+            for flag in PERMISSION_FLAGS:
+                setattr(existing, flag, True)
+            continue
+
+        values = {
+            "user_id": admin.id,
+            "scope_type": "global",
+            "entity_type": entity_type,
+            "created_by": admin.id,
+        }
+        values.update({flag: True for flag in PERMISSION_FLAGS})
+        db.session.add(AccessMatrix(**values))
 
 
 def seed_sites(admin):
@@ -87,10 +129,14 @@ def run():
     app = create_app()
     with app.app_context():
         admin = seed_admin_user()
+        seed_admin_access(admin)
         seed_sites(admin)
         seed_app_config(admin)
         db.session.commit()
         print("Seed complete.")
+        if app.config.get("FLASK_ENV") == "development":
+            print(f"Dev admin email: {ADMIN_EMAIL}")
+            print(f"Dev admin password: {ADMIN_PASSWORD}")
 
 
 if __name__ == "__main__":
