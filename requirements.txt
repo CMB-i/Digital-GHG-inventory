@@ -7,3 +7,4 @@ flask-jwt-extended
 bcrypt
 simpleeval
 waitress
+openpyxl
