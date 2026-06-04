@@ -118,5 +118,5 @@ Do not rely on a Docker-based MinIO setup for local development.
 
 - Phase 1: business models, migrations, and service logic.
 - Phase 2: authentication and session enforcement.
-- Phase 3: configurable role and permission checks.
+- Phase 3: configurable Access Matrix permission checks.
 - MVP later: full audit log implementation.

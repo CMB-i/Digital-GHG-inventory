@@ -1,6 +1,14 @@
 {% extends "base.html" %}
-{% block title %}VALSET - Digital GHG Inventory{% endblock %}
+{% block title %}Value Sets - Digital GHG Inventory{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold">VALSET</h1>
-<p class="mt-2 text-slate-600">Value Sets placeholder for Phase 0.</p>
+<section class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Value Sets</h1>
+    <p class="mt-2 text-sm text-slate-600">Manage controlled values used by configurable form fields.</p>
+  </div>
+  {% set empty_title = "No value sets configured yet." %}
+  {% set empty_body = "Create value sets when forms need consistent selectable options." %}
+  {% set empty_action = "Create value set" %}
+  {% include "partials/empty_state.html" %}
+</section>
 {% endblock %}

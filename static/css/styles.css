@@ -9,3 +9,275 @@
   background: rgb(241 245 249);
   color: rgb(15 23 42);
 }
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1rem;
+}
+
+.status-badge-success {
+  background: rgb(236 253 245);
+  color: rgb(4 120 87);
+}
+
+.status-badge-warning {
+  background: rgb(255 251 235);
+  color: rgb(180 83 9);
+}
+
+.status-badge-danger {
+  background: rgb(254 242 242);
+  color: rgb(185 28 28);
+}
+
+.status-badge-info {
+  background: rgb(239 246 255);
+  color: rgb(29 78 216);
+}
+
+.status-badge-neutral {
+  background: rgb(241 245 249);
+  color: rgb(71 85 105);
+}
+
+.access-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1rem;
+}
+
+.chip-scope-global {
+  border-color: rgb(203 213 225);
+  background: rgb(30 41 59);
+  color: rgb(248 250 252);
+}
+
+.chip-scope-site {
+  border-color: rgb(191 219 254);
+  background: rgb(239 246 255);
+  color: rgb(30 64 175);
+}
+
+.chip-entity-config {
+  border-color: rgb(221 214 254);
+  background: rgb(245 243 255);
+  color: rgb(109 40 217);
+}
+
+.chip-entity-workflow {
+  border-color: rgb(187 247 208);
+  background: rgb(240 253 244);
+  color: rgb(21 128 61);
+}
+
+.chip-entity-read {
+  border-color: rgb(203 213 225);
+  background: rgb(248 250 252);
+  color: rgb(51 65 85);
+}
+
+.chip-entity-admin {
+  border-color: rgb(253 230 138);
+  background: rgb(255 251 235);
+  color: rgb(146 64 14);
+}
+
+.chip-entity-neutral,
+.chip-no-access {
+  border-color: rgb(226 232 240);
+  background: rgb(248 250 252);
+  color: rgb(100 116 139);
+}
+
+.chip-no-access {
+  border-style: dashed;
+}
+
+.permission-column-read {
+  background: rgb(248 250 252);
+  color: rgb(71 85 105);
+}
+
+.permission-column-admin {
+  background: rgb(255 251 235);
+  color: rgb(146 64 14);
+}
+
+.permission-column-workflow {
+  background: rgb(240 253 244);
+  color: rgb(21 128 61);
+}
+
+.permission-column-warning {
+  background: rgb(254 242 242);
+  color: rgb(153 27 27);
+}
+
+.permission-cell-read {
+  background: rgb(248 250 252 / 0.45);
+}
+
+.permission-cell-admin {
+  background: rgb(255 251 235 / 0.35);
+}
+
+.permission-cell-workflow {
+  background: rgb(240 253 244 / 0.35);
+}
+
+.permission-cell-warning {
+  background: rgb(254 242 242 / 0.45);
+}
+
+.permission-checkbox-read {
+  accent-color: rgb(71 85 105);
+}
+
+.permission-checkbox-admin {
+  accent-color: rgb(180 83 9);
+}
+
+.permission-checkbox-workflow {
+  accent-color: rgb(22 163 74);
+}
+
+.permission-checkbox-warning {
+  accent-color: rgb(185 28 28);
+}
+
+.access-meta-global {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  background: rgb(30 41 59);
+  padding: 0.125rem 0.5rem;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+}
+
+.compact-status {
+  display: inline-flex;
+  align-items: center;
+  color: rgb(71 85 105);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  white-space: nowrap;
+}
+
+.compact-status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  margin-right: 0.375rem;
+}
+
+.action-button {
+  display: inline-flex;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  padding: 0 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  white-space: nowrap;
+}
+
+.action-button-primary {
+  background: rgb(15 23 42);
+  color: white;
+}
+
+.action-button-primary:hover {
+  background: rgb(30 41 59);
+}
+
+.action-button-secondary {
+  border-color: rgb(203 213 225);
+  background: white;
+  color: rgb(51 65 85);
+}
+
+.action-button-secondary:hover {
+  background: rgb(248 250 252);
+}
+
+.action-menu-button {
+  display: inline-flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(203 213 225);
+  border-radius: 0.375rem;
+  background: white;
+  color: rgb(51 65 85);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.action-menu-button:hover,
+.action-menu-button[aria-expanded="true"] {
+  background: rgb(248 250 252);
+  color: rgb(15 23 42);
+}
+
+.action-menu {
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  right: 0;
+  z-index: 30;
+  width: 10rem;
+  overflow: hidden;
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.375rem;
+  background: white;
+  padding: 0.25rem;
+  box-shadow: 0 10px 15px -3px rgb(15 23 42 / 0.12), 0 4px 6px -4px rgb(15 23 42 / 0.12);
+  text-align: left;
+}
+
+.action-menu-item {
+  display: block;
+  width: 100%;
+  border-radius: 0.25rem;
+  padding: 0.5rem 0.625rem;
+  color: rgb(51 65 85);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.action-menu-item:hover {
+  background: rgb(248 250 252);
+  color: rgb(15 23 42);
+}
+
+.user-filter:hover {
+  border-color: rgb(203 213 225);
+  background: rgb(248 250 252);
+  color: rgb(51 65 85);
+}
+
+.user-filter.bg-slate-900:hover {
+  border-color: rgb(15 23 42);
+  background: rgb(15 23 42);
+  color: white;
+}

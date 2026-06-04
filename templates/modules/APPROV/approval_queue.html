@@ -1,6 +1,13 @@
 {% extends "base.html" %}
-{% block title %}APPROV - Digital GHG Inventory{% endblock %}
+{% block title %}Review Queue - Digital GHG Inventory{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold">APPROV</h1>
-<p class="mt-2 text-slate-600">Approval Queue placeholder for Phase 0.</p>
+<section class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Review Queue</h1>
+    <p class="mt-2 text-sm text-slate-600">Review submitted sheets and record approval decisions.</p>
+  </div>
+  {% set empty_title = "No sheets awaiting review." %}
+  {% set empty_body = "Submitted sheets assigned to your review level will appear here." %}
+  {% include "partials/empty_state.html" %}
+</section>
 {% endblock %}

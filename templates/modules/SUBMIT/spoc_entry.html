@@ -1,6 +1,13 @@
 {% extends "base.html" %}
-{% block title %}SUBMIT - Digital GHG Inventory{% endblock %}
+{% block title %}My Sheets - Digital GHG Inventory{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold">SUBMIT</h1>
-<p class="mt-2 text-slate-600">SPOC Entry placeholder for Phase 0.</p>
+<section class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold">My Sheets</h1>
+    <p class="mt-2 text-sm text-slate-600">Monthly site data entry and submission.</p>
+  </div>
+  {% set empty_title = "No sheets available." %}
+  {% set empty_body = "Sheets will appear after a reporting period is opened and a published form is assigned." %}
+  {% include "partials/empty_state.html" %}
+</section>
 {% endblock %}

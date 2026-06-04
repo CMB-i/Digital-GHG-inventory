@@ -15,11 +15,22 @@
         <a href="{{ url_for('dashboard') }}" class="text-lg font-semibold">Digital GHG Inventory</a>
         <p class="text-xs text-slate-500">{{ current_user.full_name }}</p>
       </div>
-      <nav class="p-3 grid gap-1 text-sm">
-        {% for item in nav_items %}
-        <a class="nav-link" href="{{ item.href }}">{{ item.label }}</a>
+      <nav class="flex min-h-[calc(100vh-73px)] flex-col p-3 text-sm">
+        <div class="grid gap-4">
+        {% for group in nav_items %}
+          <div class="grid gap-1">
+            {% if group["label"] %}
+            <p class="px-3 pt-2 text-[11px] font-semibold uppercase text-slate-400">{{ group["label"] }}</p>
+            {% endif %}
+            {% for item in group["items"] %}
+            <a class="nav-link" href="{{ item.href }}">{{ item.label }}</a>
+            {% endfor %}
+          </div>
         {% endfor %}
+        </div>
+        <div class="mt-auto border-t border-slate-200 pt-3">
         <a class="nav-link" href="{{ url_for('auth.logout') }}">Logout</a>
+        </div>
       </nav>
     </aside>
     {% endif %}
@@ -30,6 +41,7 @@
     </main>
   </div>
   <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/phone_input.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,6 +1,13 @@
 {% extends "base.html" %}
-{% block title %}RPTBLD - Digital GHG Inventory{% endblock %}
+{% block title %}Reports - Digital GHG Inventory{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold">RPTBLD</h1>
-<p class="mt-2 text-slate-600">Reports placeholder for Phase 0.</p>
+<section class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Reports</h1>
+    <p class="mt-2 text-sm text-slate-600">View and export approved monthly GHG data.</p>
+  </div>
+  {% set empty_title = "No report data available yet." %}
+  {% set empty_body = "Approved submissions will become available for reporting and export." %}
+  {% include "partials/empty_state.html" %}
+</section>
 {% endblock %}

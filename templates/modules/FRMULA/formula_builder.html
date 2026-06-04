@@ -1,6 +1,77 @@
 {% extends "base.html" %}
-{% block title %}FRMULA - Digital GHG Inventory{% endblock %}
+{% block title %}Formula Builder - Digital GHG Inventory{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold">FRMULA</h1>
-<p class="mt-2 text-slate-600">Formula Builder placeholder for Phase 0.</p>
+<section class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Formula Builder</h1>
+    <p class="mt-2 text-sm text-slate-600">Validate numeric formulas using published form fields.</p>
+  </div>
+
+  <form class="rounded-md border border-slate-200 bg-white p-4" method="get">
+    <label class="text-xs font-medium text-slate-600" for="form_version_id">Form version</label>
+    <select class="mt-1 w-full max-w-xl rounded-md border border-slate-300 px-3 py-2 text-sm" id="form_version_id" name="form_version_id" onchange="this.form.submit()">
+      {% for form_version, form in form_versions %}
+      <option value="{{ form_version.id }}" {% if selected_form_version_id == form_version.id %}selected{% endif %}>{{ form.name }} · version {{ form_version.version_number }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  {% if compatible_fields %}
+  <div class="grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
+    <aside class="rounded-md border border-slate-200 bg-white p-4">
+      <h2 class="text-sm font-semibold">Numeric fields</h2>
+      <p class="mt-1 text-xs text-slate-500">Select a field to insert its code.</p>
+      <div class="mt-3 grid gap-2">
+        {% for field in compatible_fields %}
+        <button class="formula-field rounded-md border border-slate-300 px-3 py-2 text-left text-sm hover:bg-slate-50" data-field-code="{{ field.field_code }}" type="button">
+          <span class="block font-medium">{{ field.field_name }}</span>
+          <span class="text-xs text-slate-500">{{ field.field_code }} · {{ field.field_type }}</span>
+        </button>
+        {% endfor %}
+      </div>
+    </aside>
+
+    <div class="space-y-5">
+      <form class="space-y-4 rounded-md border border-slate-200 bg-white p-4" method="post">
+        <input type="hidden" name="form_version_id" value="{{ selected_form_version_id }}">
+        <div>
+          <label class="text-xs font-medium text-slate-600" for="expression">Formula expression</label>
+          <textarea class="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm" id="expression" name="expression" required>{{ expression }}</textarea>
+          <p class="mt-2 text-xs text-slate-500">Supported functions: <code>min(diesel_litres, petrol_litres)</code> and <code>max(scope1_emissions, scope2_emissions)</code>.</p>
+        </div>
+        {% if validation_message %}
+        <p class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{{ validation_message }}</p>
+        {% endif %}
+        {% if validation_error %}
+        <p class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ validation_error }}</p>
+        {% endif %}
+        <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Validate Formula</button>
+      </form>
+
+      <div class="rounded-md border border-slate-200 bg-white p-4">
+        <h2 class="text-sm font-semibold">Browser preview</h2>
+        <p class="mt-1 text-xs text-slate-500">Preview is local and restricted. Backend validation remains authoritative.</p>
+        <div class="mt-4 grid gap-3 sm:grid-cols-2">
+          {% for field in compatible_fields %}
+          <div>
+            <label class="text-xs font-medium text-slate-600" for="preview_{{ field.field_code }}">{{ field.field_name }}</label>
+            <input class="formula-preview-value mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" data-field-code="{{ field.field_code }}" id="preview_{{ field.field_code }}" type="number" step="any" value="0">
+          </div>
+          {% endfor %}
+        </div>
+        <button class="mt-4 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium" id="preview_formula" type="button">Preview Formula</button>
+        <p class="mt-3 text-sm" id="formula_preview_result"></p>
+      </div>
+    </div>
+  </div>
+  {% else %}
+    {% set empty_title = "No numeric fields available for formulas. Add a number field in Form Builder first." %}
+    {% set empty_body = "Text, date, file, select, and deferred table fields are excluded from formula operands." %}
+    {% include "partials/empty_state.html" %}
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/formula_builder.js') }}"></script>
 {% endblock %}

@@ -8,6 +8,6 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 
 
 @bp.route("/")
-@require_permission("reporting_period", "view")
+@require_permission("period", "view")
 def index():
     return render_template("modules/PERIOD/periods.html", module_code=MODULE_CODE)

@@ -1,4 +1,7 @@
-from flask import Flask, jsonify, redirect, render_template
+from datetime import timezone
+from zoneinfo import ZoneInfo
+
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import text
 
 from app.common.auth import current_user, require_login
@@ -6,18 +9,25 @@ from app.common.permissions import has_permission
 from app.config import Config
 from app.database import db
 from app.modules.ACCESS import bp as access_bp
+from app.modules.ACCESS.model import AccessMatrix
 from app.modules.APPROV import bp as approv_bp
 from app.modules.AUDITL import bp as auditl_bp
 from app.modules.FORMBLD import bp as formbld_bp
+from app.modules.FORMBLD.model import FormVersion
 from app.modules.FRMULA import bp as frmula_bp
 from app.modules.NOTIFY import bp as notify_bp
 from app.modules.PERIOD import bp as period_bp
+from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.RPTBLD import bp as rptbld_bp
 from app.modules.SITEMST import bp as sitemst_bp
+from app.modules.SITEMST.model import Site
 from app.modules.SUBMIT import bp as submit_bp
+from app.modules.SUBMIT.model import Submission
 from app.modules.USRMGMT import auth_bp, bp as usrmgmt_bp
+from app.modules.USRMGMT.model import User
 from app.modules.VALSET import bp as valset_bp
 from app.modules.WFLWBLD import bp as wflwbld_bp
+from app.modules.WFLWBLD.model import WorkflowLevelApprover
 
 
 MODULE_BLUEPRINTS = [
@@ -43,10 +53,36 @@ def create_app(config_class=Config):
 
     db.init_app(app)
 
+    @app.template_filter("local_datetime")
+    def local_datetime(value):
+        if value is None:
+            return "Never"
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        local_value = value.astimezone(ZoneInfo("Asia/Kolkata"))
+        return local_value.strftime("%d %b %Y, %I:%M %p IST")
+
+    @app.template_filter("compact_local_datetime")
+    def compact_local_datetime(value):
+        if value is None:
+            return "Never"
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        local_value = value.astimezone(ZoneInfo("Asia/Kolkata"))
+        return local_value.strftime("%d %b %Y, %I:%M %p")
+
     for blueprint in MODULE_BLUEPRINTS:
         app.register_blueprint(blueprint)
 
     app.register_blueprint(auth_bp)
+
+    @app.after_request
+    def disable_app_page_caching(response):
+        if request.endpoint != "static":
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
 
     @app.context_processor
     def inject_auth_context():
@@ -58,7 +94,9 @@ def create_app(config_class=Config):
 
     @app.route("/")
     def index():
-        return redirect("/dashboard")
+        if current_user() is None:
+            return redirect(url_for("auth.login"))
+        return redirect(url_for("dashboard"))
 
     @app.route("/dashboard")
     @require_login
@@ -67,6 +105,7 @@ def create_app(config_class=Config):
         return render_template(
             "dashboard.html",
             dashboard_cards=build_dashboard_cards(user),
+            setup_checklist=build_setup_checklist(),
         )
 
     @app.route("/health")
@@ -98,76 +137,94 @@ def build_nav_items(user):
     if not user:
         return []
 
-    items = [
-        {"label": "Dashboard", "href": "/dashboard", "visible": True},
+    groups = [
         {
-            "label": "Users & Access",
-            "href": "/module/ACCESS/",
-            "visible": user_can(user, "user", "manage_users"),
+            "label": None,
+            "items": [{"label": "Dashboard", "href": "/dashboard", "visible": True}],
         },
         {
-            "label": "Users",
-            "href": "/module/USRMGMT/",
-            "visible": user_can(user, "user", "manage_users"),
+            "label": "Operations",
+            "items": [
+                {
+                    "label": "My Sheets",
+                    "href": "/module/SUBMIT/",
+                    "visible": user_can(user, "submission", "submit", "view")
+                    or user_can(user, "form", "view"),
+                },
+                {
+                    "label": "Review Queue",
+                    "href": "/module/APPROV/",
+                    "visible": user_can(user, "submission", "approve", "reject"),
+                },
+                {
+                    "label": "Reports",
+                    "href": "/module/RPTBLD/",
+                    "visible": user_can(user, "report", "export", "view"),
+                },
+            ],
         },
         {
-            "label": "Sites",
-            "href": "/module/SITEMST/",
-            "visible": user_can(user, "site", "view"),
+            "label": "Configuration",
+            "items": [
+                {
+                    "label": "Sites",
+                    "href": "/module/SITEMST/",
+                    "visible": user_can(user, "site", "view"),
+                },
+                {
+                    "label": "Reporting Periods",
+                    "href": "/module/PERIOD/",
+                    "visible": user_can(user, "period", "view"),
+                },
+                {
+                    "label": "Form Builder",
+                    "href": "/module/FORMBLD/",
+                    "visible": user_can(user, "form", "manage_forms"),
+                },
+                {
+                    "label": "Formula Builder",
+                    "href": "/module/FRMULA/",
+                    "visible": user_can(user, "formula", "view"),
+                },
+                {
+                    "label": "Value Sets",
+                    "href": "/module/VALSET/",
+                    "visible": user_can(user, "value_set", "view"),
+                },
+                {
+                    "label": "Workflow Builder",
+                    "href": "/module/WFLWBLD/",
+                    "visible": user_can(user, "workflow", "view"),
+                },
+            ],
         },
         {
-            "label": "Form Builder",
-            "href": "/module/FORMBLD/",
-            "visible": user_can(user, "form", "manage_forms"),
-        },
-        {
-            "label": "Formula Builder",
-            "href": "/module/FRMULA/",
-            "visible": user_can(user, "formula", "view"),
-        },
-        {
-            "label": "Value Sets",
-            "href": "/module/VALSET/",
-            "visible": user_can(user, "value_set", "view"),
-        },
-        {
-            "label": "Workflow Builder",
-            "href": "/module/WFLWBLD/",
-            "visible": user_can(user, "workflow", "view"),
-        },
-        {
-            "label": "My Sheets",
-            "href": "/module/SUBMIT/",
-            "visible": user_can(user, "submission", "submit", "view")
-            or user_can(user, "form", "view"),
-        },
-        {
-            "label": "Review Queue",
-            "href": "/module/APPROV/",
-            "visible": user_can(user, "submission", "approve", "reject"),
-        },
-        {
-            "label": "Reports",
-            "href": "/module/RPTBLD/",
-            "visible": user_can(user, "report", "export", "view"),
-        },
-        {
-            "label": "Audit Log",
-            "href": "/module/AUDITL/",
-            "visible": user_can(user, "audit_log", "view"),
-        },
-        {
-            "label": "Notifications",
-            "href": "/module/NOTIFY/",
-            "visible": user_can(user, "notification", "view"),
-        },
-        {
-            "label": "Periods",
-            "href": "/module/PERIOD/",
-            "visible": user_can(user, "reporting_period", "view"),
+            "label": "Administration",
+            "items": [
+                {
+                    "label": "Users & Access",
+                    "href": "/module/ACCESS/",
+                    "visible": user_can(user, "user", "manage_users"),
+                },
+                {
+                    "label": "Notifications",
+                    "href": "/module/NOTIFY/",
+                    "visible": user_can(user, "notification", "view"),
+                },
+                {
+                    "label": "Audit Log",
+                    "href": "/module/AUDITL/",
+                    "visible": user_can(user, "audit", "view"),
+                },
+            ],
         },
     ]
-    return [item for item in items if item["visible"]]
+    visible_groups = []
+    for group in groups:
+        items = [item for item in group["items"] if item["visible"]]
+        if items:
+            visible_groups.append({"label": group["label"], "items": items})
+    return visible_groups
 
 
 def build_dashboard_cards(user):
@@ -188,20 +245,48 @@ def build_dashboard_cards(user):
         {
             "title": "Users & Access",
             "href": "/module/ACCESS/",
-            "description": "Permission matrix and user access foundation.",
+            "description": "Manage users and access.",
             "visible": user_can(user, "user", "manage_users"),
         },
         {
             "title": "Form Builder",
             "href": "/module/FORMBLD/",
-            "description": "Form configuration area for authorized users.",
+            "description": "Configure forms for monthly site data entry.",
             "visible": user_can(user, "form", "manage_forms"),
         },
         {
             "title": "Reports",
             "href": "/module/RPTBLD/",
-            "description": "Report exports and reporting templates.",
+            "description": "View and export approved GHG data.",
             "visible": user_can(user, "report", "export", "view"),
         },
     ]
     return [card for card in cards if card["visible"]]
+
+
+def build_setup_checklist():
+    checks = [
+        (
+            "Users & Access configured",
+            User.query.filter_by(is_deleted=False).count() > 0
+            and AccessMatrix.query.filter_by(is_deleted=False).count() > 0,
+        ),
+        ("Sites configured", Site.query.filter_by(is_deleted=False).count() > 0),
+        (
+            "Reporting periods opened",
+            ReportingPeriod.query.filter_by(is_deleted=False, status="OPEN").count() > 0,
+        ),
+        (
+            "Forms published",
+            FormVersion.query.filter(FormVersion.published_at.is_not(None)).count() > 0,
+        ),
+        (
+            "Workflows assigned",
+            WorkflowLevelApprover.query.filter_by(is_deleted=False).count() > 0,
+        ),
+        (
+            "Test submission completed",
+            Submission.query.filter_by(is_deleted=False, status="Approved").count() > 0,
+        ),
+    ]
+    return [{"label": label, "done": done} for label, done in checks]
