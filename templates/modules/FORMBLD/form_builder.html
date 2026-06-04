@@ -1,14 +1,347 @@
 {% extends "base.html" %}
 {% block title %}Form Builder - Digital GHG Inventory{% endblock %}
+
 {% block content %}
-<section class="space-y-6">
-  <div>
-    <h1 class="text-2xl font-semibold">Form Builder</h1>
-    <p class="mt-2 text-sm text-slate-600">Create configurable forms with fields, value sets, formulas, and publishing workflow.</p>
+<div class="space-y-6">
+  <!-- Toast notification container -->
+  <div id="toast-container" class="fixed top-5 right-5 z-50 space-y-2 pointer-events-none"></div>
+
+  <!-- 1. LIST VIEW -->
+  <div id="list-view">
+    <div class="text-xs text-slate-500 mb-2">Configuration · <strong class="text-indigo-600">All Forms</strong></div>
+    <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-800">Form Builder</h1>
+        <p class="text-xs text-slate-500 mt-1">Configure layout, fields, validations, and approval paths for ESG/GHG site reports.</p>
+      </div>
+      <button onclick="startNew()" class="inline-flex items-center justify-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
+        <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+        Create New Form
+      </button>
+    </div>
+
+    <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+      <table class="min-w-full divide-y divide-slate-200 text-left text-xs">
+        <thead class="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+          <tr>
+            <th class="px-6 py-3.5 w-1/4">Form Name</th>
+            <th class="px-6 py-3.5 w-[12%]">GRI Code</th>
+            <th class="px-6 py-3.5 w-1/4">Site Applicability</th>
+            <th class="px-6 py-3.5 w-[12%]">Frequency</th>
+            <th class="px-6 py-3.5 w-[12%]">Status</th>
+            <th class="px-6 py-3.5 w-[8%]">Version</th>
+            <th class="px-6 py-3.5 text-right w-[15%]">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="forms-list-body" class="divide-y divide-slate-100 font-medium text-slate-700">
+          <!-- Populated dynamically via JS -->
+          <tr>
+            <td colspan="7" class="px-6 py-12 text-center text-slate-400 italic">Loading forms...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
-  {% set empty_title = "No forms published yet." %}
-  {% set empty_body = "Create and publish a form before site users can enter data." %}
-  {% set empty_action = "Create form" %}
-  {% include "partials/empty_state.html" %}
-</section>
+
+  <!-- 2. STEP 1: FORM DETAILS VIEW -->
+  <div id="step1-view" class="hidden max-w-2xl mx-auto">
+    <button onclick="showList()" class="inline-flex items-center text-xs text-indigo-600 hover:text-indigo-700 font-semibold mb-4 hover:underline">
+      ← Back to all forms
+    </button>
+    <div class="bg-white rounded-xl border border-slate-200/80 shadow-md overflow-hidden">
+      <div class="px-6 py-4 bg-slate-50 border-b border-slate-200/80">
+        <h2 id="step1-title" class="text-base font-bold text-slate-800">New Form · Step 1 — Form Details</h2>
+      </div>
+      <form id="form-details-submit" class="p-6 space-y-4 text-xs font-semibold text-slate-700">
+        <div>
+          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Form Name (Internal Code)</label>
+          <input type="text" id="df-code" required placeholder="e.g. diesel_combustion" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border font-mono uppercase">
+        </div>
+        <div>
+          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Display Name (what SPOC sees)</label>
+          <input type="text" id="df-name" required placeholder="e.g. Diesel Combustion Emissions" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border">
+        </div>
+        <div>
+          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">GRI / Reference Tag (optional)</label>
+          <input type="text" id="df-gri" placeholder="e.g. 305-1" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border font-mono">
+        </div>
+        <div>
+          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Site Applicability</label>
+          <div id="df-sites-list" class="mt-2 grid grid-cols-2 gap-2 max-h-[150px] overflow-y-auto p-3 border rounded-lg bg-slate-50/50">
+            <!-- Loaded dynamically -->
+          </div>
+        </div>
+        <div>
+          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Frequency</label>
+          <select id="df-frequency" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
+            <option value="Monthly">Monthly</option>
+            <option value="Quarterly">Quarterly</option>
+            <option value="Annual">Annual</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Approval Workflow</label>
+          <select id="df-workflow" required class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
+            <option value="">Select workflow...</option>
+            <!-- Loaded dynamically -->
+          </select>
+        </div>
+        <div>
+          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Form Description</label>
+          <textarea id="df-desc" rows="2" placeholder="Briefly describe the reporting guidelines..." class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs p-3 border font-medium"></textarea>
+        </div>
+        <div class="pt-2 flex justify-end">
+          <button type="submit" class="inline-flex items-center justify-center px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors">
+            Next: Add Fields →
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. STEP 2: BUILDER CANVAS VIEW -->
+  <div id="step2-view" class="hidden space-y-6">
+    <div class="flex items-center justify-between border-b border-slate-200 pb-4">
+      <div class="flex items-center space-x-3">
+        <button onclick="showList()" class="inline-flex items-center text-xs text-slate-500 hover:text-slate-700 font-bold">
+          ← Forms
+        </button>
+        <span class="text-slate-300">|</span>
+        <h1 id="builder-form-title" class="text-xl font-bold text-slate-800">Electricity Consumed</h1>
+        <span id="builder-version-badge" class="px-2 py-0.5 rounded-full font-bold uppercase text-[9px] bg-amber-100 text-amber-800">Draft</span>
+      </div>
+      <div class="flex items-center space-x-2">
+        <button id="btn-save-layout" class="inline-flex items-center justify-center px-3.5 py-1.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition">
+          Save Draft
+        </button>
+        <button onclick="openPreviewFromBuilder()" class="inline-flex items-center justify-center px-3.5 py-1.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition">
+          Preview as SPOC
+        </button>
+        <button id="btn-publish-form" class="inline-flex items-center justify-center px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow transition">
+          Publish Form
+        </button>
+      </div>
+    </div>
+
+    <!-- Error Alert Box -->
+    <div id="publish-errors" class="hidden p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
+      <h4 class="text-xs font-bold text-rose-800">Resolve before publishing:</h4>
+      <ul id="publish-errors-list" class="list-disc pl-5 text-xs text-rose-700 space-y-1"></ul>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <!-- Left Panel: Palette (Col 3) -->
+      <div class="lg:col-span-3 space-y-4">
+        <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+          <div class="px-4 py-3 bg-slate-50 border-b border-slate-200/80">
+            <h2 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Field Palette</h2>
+          </div>
+          <div class="p-4 space-y-2" id="palette-container">
+            <p class="text-[10px] text-slate-400 mb-2">Click a field type to add it to your form layout workspace.</p>
+            
+            <button class="palette-btn flex items-center p-2.5 rounded-lg border border-slate-200 hover:border-indigo-500 bg-white hover:bg-slate-50 text-left transition w-full group text-xs font-semibold text-slate-700" data-type="text">
+              Text
+            </button>
+            <button class="palette-btn flex items-center p-2.5 rounded-lg border border-slate-200 hover:border-indigo-500 bg-white hover:bg-slate-50 text-left transition w-full group text-xs font-semibold text-slate-700" data-type="integer">
+              Integer
+            </button>
+            <button class="palette-btn flex items-center p-2.5 rounded-lg border border-slate-200 hover:border-indigo-500 bg-white hover:bg-slate-50 text-left transition w-full group text-xs font-semibold text-slate-700" data-type="number">
+              Decimal / Float
+            </button>
+            <button class="palette-btn flex items-center p-2.5 rounded-lg border border-slate-200 hover:border-indigo-500 bg-white hover:bg-slate-50 text-left transition w-full group text-xs font-semibold text-slate-700" data-type="dropdown">
+              Dropdown Menu
+            </button>
+            <button class="palette-btn flex items-center p-2.5 rounded-lg border border-slate-200 hover:border-indigo-500 bg-white hover:bg-slate-50 text-left transition w-full group text-xs font-semibold text-slate-700" data-type="date">
+              Date Selection
+            </button>
+            <button class="palette-btn flex items-center p-2.5 rounded-lg border border-slate-200 hover:border-indigo-500 bg-white hover:bg-slate-50 text-left transition w-full group text-xs font-semibold text-slate-700" data-type="boolean">
+              Boolean (Yes/No)
+            </button>
+            <button class="palette-btn flex items-center p-2.5 rounded-lg border border-slate-200 hover:border-indigo-500 bg-white hover:bg-slate-50 text-left transition w-full group text-xs font-semibold text-slate-700" data-type="file">
+              File Proof Upload
+            </button>
+            <button class="palette-btn flex items-center p-2.5 rounded-lg border border-slate-200 hover:border-indigo-500 bg-white hover:bg-slate-50 text-left transition w-full group text-xs font-semibold text-slate-700 text-purple-700" data-type="calculated">
+              Calculated Value 🔒
+            </button>
+            <button class="palette-btn flex items-center p-2.5 rounded-lg border border-slate-200 hover:border-indigo-500 bg-white hover:bg-slate-50 text-left transition w-full group text-xs font-semibold text-slate-700 text-purple-700" data-type="reference">
+              Read-only Reference 🔒
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Center Panel: Workspace (Col 6) -->
+      <div class="lg:col-span-6 space-y-4">
+        <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+          <div class="px-5 py-3.5 bg-slate-50 border-b border-slate-200/80 flex items-center justify-between">
+            <h2 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Form Workspace Preview</h2>
+            <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">MODE: BUILDER</span>
+          </div>
+          
+          <div id="form-workspace" class="p-6 min-h-[400px] border-b border-slate-100 space-y-4">
+            <div class="text-center py-16 text-slate-400 italic text-sm">
+              Loading form preview...
+            </div>
+          </div>
+
+          <div class="p-4 bg-slate-50/50 flex items-center justify-between text-xs text-slate-400 font-medium">
+            <span id="save-status-text">All changes saved</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Panel: Properties (Col 3) -->
+      <div class="lg:col-span-3 space-y-4">
+        <div id="inspector-panel" class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden hidden">
+          <div class="px-4 py-3 bg-slate-50 border-b border-slate-200/80 flex items-center justify-between">
+            <h2 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Field Inspector</h2>
+            <button id="btn-delete-field" class="text-xs font-bold text-rose-600 hover:underline">Delete</button>
+          </div>
+          
+          <form id="form-field-properties" class="p-4 space-y-4 text-xs font-medium text-slate-700">
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Field Label / Name</label>
+              <input type="text" id="prop-name" required placeholder="e.g. Fuel Consumed" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Field Code (Unique ID)</label>
+              <input type="text" id="prop-code" required placeholder="e.g. fuel_qty" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border font-mono uppercase">
+            </div>
+            <div class="flex items-center justify-between py-1 border-b border-slate-100">
+              <label class="text-xs font-semibold text-slate-700">Is Required?</label>
+              <input type="checkbox" id="prop-required" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded">
+            </div>
+            <div class="flex items-center justify-between py-1 border-b border-slate-100">
+              <label class="text-xs font-semibold text-slate-700">Remarks Required?</label>
+              <input type="checkbox" id="prop-remarks-req" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded">
+            </div>
+            <div class="flex items-center justify-between py-1 border-b border-slate-100">
+              <label class="text-xs font-semibold text-slate-700">Upload Proof Required?</label>
+              <input type="checkbox" id="prop-proof-req" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded">
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Help Text / Tooltip</label>
+              <textarea id="prop-help" placeholder="Help instructions for the SPOC..." rows="2" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs p-2.5 border font-medium"></textarea>
+            </div>
+
+            <!-- Number / Decimal validation -->
+            <div id="prop-section-numeric" class="space-y-4 border-t border-slate-100 pt-3 hidden">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unit of Measurement</label>
+                <input type="text" id="prop-unit" placeholder="e.g. MWh, Litres" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border">
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Min Value</label>
+                  <input type="number" step="any" id="prop-min" placeholder="0" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border">
+                </div>
+                <div>
+                  <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Max Value</label>
+                  <input type="number" step="any" id="prop-max" placeholder="999999" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border">
+                </div>
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Anomaly Threshold %</label>
+                <input type="number" id="prop-anomaly" placeholder="e.g. 10 (blank = no check)" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border">
+              </div>
+            </div>
+
+            <!-- Value Set dropdown binding -->
+            <div id="prop-section-dropdown" class="space-y-4 border-t border-slate-100 pt-3 hidden">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Value Set Binding</label>
+                <select id="prop-valueset" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
+                  <!-- Loaded dynamically -->
+                </select>
+              </div>
+            </div>
+
+            <!-- Calculated Formula binding -->
+            <div id="prop-section-calculated" class="space-y-4 border-t border-slate-100 pt-3 hidden">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Formula Binding</label>
+                <select id="prop-formula" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
+                  <!-- Loaded dynamically -->
+                </select>
+              </div>
+            </div>
+
+            <!-- File Upload Mime Types -->
+            <div id="prop-section-file" class="space-y-3 border-t border-slate-100 pt-3 hidden">
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Accepted File Formats</label>
+              <div class="grid grid-cols-2 gap-2 text-slate-600 font-semibold">
+                <label class="flex items-center space-x-1.5 cursor-pointer">
+                  <input type="checkbox" name="mime-types" value="application/pdf" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5">
+                  <span>PDF (.pdf)</span>
+                </label>
+                <label class="flex items-center space-x-1.5 cursor-pointer">
+                  <input type="checkbox" name="mime-types" value="image/png" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5">
+                  <span>PNG (.png)</span>
+                </label>
+                <label class="flex items-center space-x-1.5 cursor-pointer">
+                  <input type="checkbox" name="mime-types" value="image/jpeg" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5">
+                  <span>JPEG (.jpg)</span>
+                </label>
+                <label class="flex items-center space-x-1.5 cursor-pointer">
+                  <input type="checkbox" name="mime-types" value="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5">
+                  <span>Excel (.xlsx)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Order & Placement -->
+            <div class="border-t border-slate-100 pt-3 flex items-center justify-between">
+              <span class="text-xs text-slate-500 font-semibold">Re-order Field:</span>
+              <div class="flex items-center space-x-1">
+                <button type="button" id="btn-move-up" class="p-1 px-2 border border-slate-200 hover:bg-slate-50 rounded text-slate-500 font-bold">▲</button>
+                <button type="button" id="btn-move-down" class="p-1 px-2 border border-slate-200 hover:bg-slate-50 rounded text-slate-500 font-bold">▼</button>
+              </div>
+            </div>
+
+            <div class="pt-2">
+              <button type="submit" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow-sm transition">
+                Apply Changes
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Empty state inspector -->
+        <div id="inspector-empty-state" class="bg-white rounded-xl border border-slate-200/80 shadow-sm p-8 text-center flex flex-col items-center justify-center min-h-[300px]">
+          <svg class="h-8 w-8 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+          </svg>
+          <p class="mt-3 text-xs text-slate-400 font-medium">Click on any field row inside the workspace to inspect and edit its parameters.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SPOC Preview Overlay Modal -->
+<div id="preview-overlay" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-start justify-center hidden p-8 overflow-y-auto">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xl max-w-3xl w-full overflow-hidden transition-all transform scale-100">
+    <div class="px-6 py-4 bg-indigo-900 text-white flex items-center justify-between">
+      <h3 class="text-sm font-bold tracking-wider uppercase">Preview as SPOC</h3>
+      <button onclick="closePreview()" class="text-indigo-200 hover:text-white font-bold text-xs uppercase underline">Close ✕</button>
+    </div>
+    <div class="p-6 space-y-4">
+      <div>
+        <h2 id="pv-title" class="text-lg font-bold text-slate-800">Form Preview</h2>
+        <div id="pv-meta" class="text-xs text-slate-400 font-semibold mt-1">SWPL Goa · FY 2025–26 · May 2025</div>
+      </div>
+      
+      <!-- Target Element for renderForm inside preview -->
+      <div id="preview-workspace-el" class="space-y-4"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/formula_runtime.js') }}"></script>
+<script src="{{ url_for('static', filename='js/form_renderer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/form_builder.js') }}"></script>
 {% endblock %}

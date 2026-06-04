@@ -1,1 +1,232 @@
-"""WFLWBLD service placeholders for Phase 0."""
+from datetime import datetime, timezone
+from app.database import db
+from app.modules.WFLWBLD.model import Workflow, WorkflowVersion, WorkflowLevel, WorkflowLevelApprover
+from app.modules.USRMGMT.model import User
+
+def list_workflows():
+    return Workflow.query.filter_by(is_deleted=False).all()
+
+def get_workflow(workflow_id):
+    return Workflow.query.filter_by(id=workflow_id, is_deleted=False).one_or_none()
+
+def get_workflow_by_code(code):
+    return Workflow.query.filter_by(code=code, is_deleted=False).one_or_none()
+
+def create_workflow(name, code, user_id):
+    if not name or not name.strip():
+        raise ValueError("Workflow name is required.")
+    if not code or not code.strip():
+        raise ValueError("Workflow code is required.")
+        
+    existing = get_workflow_by_code(code)
+    if existing:
+        raise ValueError(f"Workflow with code '{code}' already exists.")
+        
+    workflow = Workflow(
+        name=name.strip(),
+        code=code.strip(),
+        created_by=user_id,
+        updated_by=user_id
+    )
+    db.session.add(workflow)
+    db.session.flush()
+    
+    version = WorkflowVersion(
+        workflow_id=workflow.id,
+        version_number=1,
+        created_by=user_id
+    )
+    db.session.add(version)
+    db.session.flush()
+    
+    return workflow
+
+def get_workflow_version(version_id):
+    return WorkflowVersion.query.get(version_id)
+
+def get_workflow_version_levels(workflow_version_id):
+    return (
+        WorkflowLevel.query.filter_by(workflow_version_id=workflow_version_id, is_deleted=False)
+        .order_by(WorkflowLevel.level_number.asc())
+        .all()
+    )
+
+def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
+    version = WorkflowVersion.query.get(workflow_version_id)
+    if not version:
+        raise ValueError("Workflow version not found.")
+    if version.published_at is not None:
+        raise ValueError("Only Draft versions can be modified.")
+        
+    # Delete existing approvers and levels for this draft version
+    existing_levels = WorkflowLevel.query.filter_by(workflow_version_id=workflow_version_id).all()
+    for lvl in existing_levels:
+        WorkflowLevelApprover.query.filter_by(workflow_level_id=lvl.id).delete(synchronize_session=False)
+        db.session.delete(lvl)
+    db.session.flush()
+    
+    # Insert new levels and their approvers
+    for idx, l_data in enumerate(levels_list):
+        level_number = l_data.get("level_number", idx + 1)
+        level_name = l_data.get("level_name")
+        approval_mode = l_data.get("approval_mode")
+        approvers = l_data.get("approvers", [])
+        
+        if not level_name or not level_name.strip():
+            raise ValueError(f"Level name is required for level {level_number}.")
+        if approval_mode not in ("ANY_ONE", "SEQUENTIAL"):
+            raise ValueError(f"Invalid approval mode '{approval_mode}' for level {level_number}. Must be ANY_ONE or SEQUENTIAL.")
+        if not approvers:
+            raise ValueError(f"At least one approver is required for level {level_number}.")
+            
+        lvl = WorkflowLevel(
+            workflow_version_id=workflow_version_id,
+            level_number=level_number,
+            level_name=level_name.strip(),
+            approval_mode=approval_mode,
+            created_by=user_id,
+            updated_by=user_id
+        )
+        db.session.add(lvl)
+        db.session.flush()
+        
+        for seq, app_data in enumerate(approvers):
+            if isinstance(app_data, dict):
+                u_id = app_data.get("user_id")
+                s_num = app_data.get("sequence_number")
+            else:
+                u_id = app_data
+                s_num = None
+                
+            if not u_id:
+                raise ValueError(f"User ID is required for approver in level {level_number}.")
+                
+            # Verify user exists and is active
+            user = User.query.filter_by(id=u_id, is_deleted=False, is_active=True).first()
+            if not user:
+                raise ValueError(f"Approver user with ID {u_id} does not exist or is inactive.")
+                
+            if approval_mode == "SEQUENTIAL":
+                if s_num is None:
+                    s_num = seq + 1
+            else:
+                s_num = None
+                
+            approver = WorkflowLevelApprover(
+                workflow_level_id=lvl.id,
+                user_id=u_id,
+                sequence_number=s_num,
+                created_by=user_id,
+                updated_by=user_id
+            )
+            db.session.add(approver)
+            
+    db.session.flush()
+    return True
+
+def publish_workflow_version(workflow_version_id, user_id):
+    version = WorkflowVersion.query.get(workflow_version_id)
+    if not version:
+        raise ValueError("Workflow version not found.")
+    if version.published_at is not None:
+        raise ValueError("Workflow version is already published.")
+        
+    levels = WorkflowLevel.query.filter_by(workflow_version_id=workflow_version_id, is_deleted=False).order_by(WorkflowLevel.level_number.asc()).all()
+    if not levels:
+        raise ValueError("Cannot publish workflow without any levels.")
+        
+    for lvl in levels:
+        approvers = WorkflowLevelApprover.query.filter_by(workflow_level_id=lvl.id, is_deleted=False).all()
+        if not approvers:
+            raise ValueError(f"Level '{lvl.level_name}' has no approvers assigned.")
+            
+        for app in approvers:
+            user = User.query.filter_by(id=app.user_id, is_deleted=False, is_active=True).first()
+            if not user:
+                raise ValueError(f"Approver user with ID {app.user_id} in level '{lvl.level_name}' is inactive or deleted.")
+                
+        if lvl.approval_mode == "SEQUENTIAL":
+            seq_nums = [app.sequence_number for app in approvers]
+            if any(s is None for s in seq_nums):
+                raise ValueError(f"All approvers in sequential level '{lvl.level_name}' must have a sequence number.")
+            if len(seq_nums) != len(set(seq_nums)):
+                raise ValueError(f"Sequence numbers must be unique within sequential level '{lvl.level_name}'.")
+                
+    # Mark as published
+    version.published_at = datetime.now(timezone.utc)
+    version.published_by = user_id
+    
+    # Update parent workflow
+    workflow = get_workflow(version.workflow_id)
+    if workflow:
+        workflow.current_version_id = version.id
+        workflow.updated_by = user_id
+        
+    return version
+
+def create_new_workflow_version_draft(workflow_id, user_id):
+    workflow = get_workflow(workflow_id)
+    if not workflow:
+        raise ValueError("Workflow not found.")
+        
+    pending_draft = WorkflowVersion.query.filter_by(
+        workflow_id=workflow_id,
+        published_at=None
+    ).first()
+    if pending_draft:
+        raise ValueError("A Draft version already exists. Work on that version first.")
+        
+    max_ver = db.session.query(db.func.max(WorkflowVersion.version_number)).filter_by(
+        workflow_id=workflow_id
+    ).scalar() or 0
+    
+    new_version = WorkflowVersion(
+        workflow_id=workflow_id,
+        version_number=max_ver + 1,
+        created_by=user_id
+    )
+    db.session.add(new_version)
+    db.session.flush()
+    
+    # Copy from latest version
+    latest_ver = WorkflowVersion.query.filter_by(
+        workflow_id=workflow_id
+    ).filter(WorkflowVersion.id != new_version.id).order_by(WorkflowVersion.version_number.desc()).first()
+    
+    if latest_ver:
+        prev_levels = WorkflowLevel.query.filter_by(workflow_version_id=latest_ver.id, is_deleted=False).order_by(WorkflowLevel.level_number.asc()).all()
+        for pl in prev_levels:
+            new_level = WorkflowLevel(
+                workflow_version_id=new_version.id,
+                level_number=pl.level_number,
+                level_name=pl.level_name,
+                approval_mode=pl.approval_mode,
+                created_by=user_id,
+                updated_by=user_id
+            )
+            db.session.add(new_level)
+            db.session.flush()
+            
+            prev_approvers = WorkflowLevelApprover.query.filter_by(workflow_level_id=pl.id, is_deleted=False).all()
+            for pa in prev_approvers:
+                new_app = WorkflowLevelApprover(
+                    workflow_level_id=new_level.id,
+                    user_id=pa.user_id,
+                    sequence_number=pa.sequence_number,
+                    created_by=user_id,
+                    updated_by=user_id
+                )
+                db.session.add(new_app)
+                
+    db.session.flush()
+    return new_version
+
+def delete_workflow(workflow_id, user_id):
+    workflow = get_workflow(workflow_id)
+    if not workflow:
+        raise ValueError("Workflow not found.")
+    workflow.is_deleted = True
+    workflow.deleted_by = user_id
+    workflow.deleted_at = datetime.now(timezone.utc)
+    workflow.delete_reason = "Deleted by user"
+    return True
