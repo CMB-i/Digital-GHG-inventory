@@ -1,14 +1,298 @@
 {% extends "base.html" %}
 {% block title %}Reporting Periods - Digital GHG Inventory{% endblock %}
+
 {% block content %}
-<section class="space-y-6">
-  <div>
-    <h1 class="text-2xl font-semibold">Reporting Periods</h1>
-    <p class="mt-2 text-sm text-slate-600">Open, close, lock, and reopen monthly reporting periods for each site.</p>
+<section class="min-w-0 space-y-6">
+
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold">Reporting Periods</h1>
+      <p class="mt-1 text-sm text-slate-600">Open, close, lock, and reopen monthly reporting periods for each site.</p>
+    </div>
+    {% if perm_create %}
+    <a class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+       href="{{ url_for('period.index', drawer='create') }}">Open Period</a>
+    {% endif %}
   </div>
-  {% set empty_title = "No reporting periods open." %}
-  {% set empty_body = "Open a monthly period before site users can submit data." %}
-  {% set empty_action = "Open period" %}
-  {% include "partials/empty_state.html" %}
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="space-y-2">
+      {% for category, message in messages %}
+      <div class="rounded-md border px-4 py-3 text-sm
+        {%- if category == 'error' %} border-red-200 bg-red-50 text-red-700
+        {%- else %} border-emerald-200 bg-emerald-50 text-emerald-700{% endif %}">
+        {{ message }}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
+  <form class="flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-white px-4 py-3"
+        method="get" action="{{ url_for('period.index') }}">
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-medium text-slate-600" for="filter_site_id">Site</label>
+      <select class="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+              id="filter_site_id" name="site_id">
+        <option value="">All sites</option>
+        {% for site in sites %}
+        <option value="{{ site.id }}" {% if filter_site_id == site.id %}selected{% endif %}>{{ site.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-medium text-slate-600" for="filter_status">Status</label>
+      <select class="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+              id="filter_status" name="status">
+        <option value="">All statuses</option>
+        {% for s in valid_statuses %}
+        <option value="{{ s }}" {% if filter_status == s %}selected{% endif %}>{{ status_labels[s] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50" type="submit">Filter</button>
+    {% if filter_site_id or filter_status %}
+    <a class="text-xs font-medium text-slate-500 underline hover:text-slate-900"
+       href="{{ url_for('period.index') }}">Clear</a>
+    {% endif %}
+  </form>
+
+  <div class="w-full overflow-x-auto rounded-md border border-slate-200 bg-white lg:overflow-x-visible">
+    <table class="w-full table-fixed text-sm max-lg:min-w-[800px]">
+      <colgroup>
+        <col class="w-[20%]">
+        <col class="w-[22%]">
+        <col class="w-[18%]">
+        <col class="w-[16%]">
+        <col class="w-[24%]">
+      </colgroup>
+      <thead class="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <tr>
+          <th class="px-4 py-2.5">Period</th>
+          <th class="px-3 py-2.5">Site</th>
+          <th class="px-3 py-2.5">Status</th>
+          <th class="px-3 py-2.5">Deadline</th>
+          <th class="px-3 py-2.5 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set status_colors = {
+          "OPEN": "bg-emerald-50 text-emerald-700",
+          "SUBMISSION_CLOSED": "bg-amber-50 text-amber-800",
+          "LOCKED": "bg-red-50 text-red-700",
+          "REOPENED": "bg-blue-50 text-blue-700"
+        } %}
+        {% for period in periods %}
+        {% set site = site_map.get(period.site_id) %}
+        {% set next_status = valid_transitions.get(period.status) %}
+        <tr class="border-b border-slate-100 align-middle hover:bg-slate-50">
+          <td class="px-4 py-3">
+            <span class="text-sm font-semibold text-slate-900">
+              {{ month_names[period.month] }} {{ period.year }}
+            </span>
+          </td>
+          <td class="max-w-0 overflow-hidden px-3 py-3">
+            <div class="truncate text-sm text-slate-700" title="{{ site.name if site else '' }}">
+              {{ site.name if site else "—" }}
+            </div>
+            {% if site %}
+            <div class="truncate text-xs text-slate-400">{{ site.code }}</div>
+            {% endif %}
+          </td>
+          <td class="px-3 py-3">
+            <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium
+              {{ status_colors.get(period.status, 'bg-slate-100 text-slate-600') }}">
+              {{ status_labels.get(period.status, period.status) }}
+            </span>
+          </td>
+          <td class="whitespace-nowrap px-3 py-3 text-sm text-slate-600">
+            {{ period.deadline.strftime("%d %b %Y") if period.deadline else "—" }}
+          </td>
+          <td class="whitespace-nowrap px-3 py-3 text-right">
+            {% if next_status %}
+              {% if period.status == "LOCKED" %}
+                {% if perm_reopen %}
+                <button class="action-button action-button-secondary reopen-button"
+                        data-period-id="{{ period.id }}"
+                        data-transition-url="{{ url_for('period.transition', period_id=period.id) }}"
+                        data-period-label="{{ month_names[period.month] }} {{ period.year }}{% if site %} — {{ site.name }}{% endif %}"
+                        type="button">Reopen</button>
+                {% else %}
+                <span class="text-xs text-slate-400">—</span>
+                {% endif %}
+              {% else %}
+                {% if perm_edit %}
+                <form class="period-transition-form inline"
+                      data-confirm="Move {{ month_names[period.month] }} {{ period.year }} to '{{ status_labels.get(next_status, next_status) }}'?"
+                      method="post"
+                      action="{{ url_for('period.transition', period_id=period.id) }}">
+                  <input type="hidden" name="target_status" value="{{ next_status }}">
+                  <button class="action-button action-button-secondary" type="submit">
+                    {{ transition_labels.get(period.status, "Advance") }}
+                  </button>
+                </form>
+                {% else %}
+                <span class="text-xs text-slate-400">—</span>
+                {% endif %}
+              {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td class="px-5 py-10 text-center" colspan="5">
+            <div class="mx-auto flex max-w-xs flex-col items-center">
+              <p class="text-sm font-medium text-slate-700">No reporting periods found.</p>
+              <p class="mt-1 text-xs text-slate-500">
+                {% if filter_site_id or filter_status %}
+                No periods match the current filters.
+                {% else %}
+                Open a period to allow monthly site data submissions.
+                {% endif %}
+              </p>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
 </section>
+
+<div class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4" id="reopen_modal">
+  <div class="w-full max-w-md rounded-md bg-white shadow-xl" role="dialog" aria-modal="true" aria-labelledby="reopen_modal_title">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="text-lg font-semibold" id="reopen_modal_title">Reopen Period</h2>
+      <p class="mt-1 text-sm text-slate-600" id="reopen_modal_period"></p>
+    </div>
+    <form class="space-y-4 px-5 py-5" id="reopen_form" method="post">
+      <input type="hidden" name="target_status" value="REOPENED">
+      <div>
+        <label class="text-xs font-medium text-slate-600" for="reopen_reason_input">Reason for reopening</label>
+        <textarea class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  id="reopen_reason_input" name="reopen_reason" rows="3" required
+                  placeholder="Describe why this period is being reopened…"></textarea>
+      </div>
+      <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
+        <button class="reopen-cancel rounded-md border border-slate-300 px-4 py-2 text-sm font-medium" type="button">Cancel</button>
+        <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Reopen Period</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if create_drawer_open and perm_create %}
+<div class="fixed inset-0 z-40 bg-slate-900/30" aria-hidden="true"></div>
+<aside class="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-xl">
+  <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+    <div>
+      <h2 class="text-lg font-semibold">Open Period</h2>
+      <p class="mt-1 text-sm text-slate-600">Open a new monthly reporting period for a site.</p>
+    </div>
+    <a class="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+       href="{{ url_for('period.index') }}">Cancel</a>
+  </div>
+  <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5"
+        method="post"
+        action="{{ url_for('period.create') }}">
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="create_site_id">Site</label>
+      <select class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              id="create_site_id" name="site_id" required>
+        <option value="">Select a site…</option>
+        {% for site in sites %}
+        <option value="{{ site.id }}">{{ site.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="text-xs font-medium text-slate-600" for="create_year">Year</label>
+        <select class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                id="create_year" name="year" required>
+          {% for y in years %}
+          <option value="{{ y }}" {% if y == current_year %}selected{% endif %}>{{ y }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-600" for="create_month">Month</label>
+        <select class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                id="create_month" name="month" required>
+          {% for m_num, m_name in month_names.items() %}
+          <option value="{{ m_num }}" {% if m_num == current_month %}selected{% endif %}>{{ m_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="create_deadline">
+        Deadline <span class="font-normal text-slate-400">(optional)</span>
+      </label>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+             id="create_deadline" name="deadline" type="date">
+    </div>
+    <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
+      <a class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium"
+         href="{{ url_for('period.index') }}">Cancel</a>
+      <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Open Period</button>
+    </div>
+  </form>
+</aside>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    document.querySelectorAll(".period-transition-form").forEach(function (form) {
+      form.addEventListener("submit", function (event) {
+        if (!window.confirm(form.dataset.confirm)) {
+          event.preventDefault();
+        }
+      });
+    });
+
+    var modal = document.getElementById("reopen_modal");
+    var reopenForm = document.getElementById("reopen_form");
+    var modalPeriod = document.getElementById("reopen_modal_period");
+    var reasonInput = document.getElementById("reopen_reason_input");
+
+    function closeModal() {
+      if (!modal) { return; }
+      modal.classList.add("hidden");
+      modal.classList.remove("flex");
+      if (reopenForm) { reopenForm.reset(); }
+    }
+
+    document.querySelectorAll(".reopen-button").forEach(function (button) {
+      button.addEventListener("click", function () {
+        if (reopenForm) { reopenForm.action = button.dataset.transitionUrl; }
+        if (modalPeriod) { modalPeriod.textContent = button.dataset.periodLabel; }
+        if (modal) {
+          modal.classList.remove("hidden");
+          modal.classList.add("flex");
+        }
+        if (reasonInput) { reasonInput.focus(); }
+      });
+    });
+
+    document.querySelectorAll(".reopen-cancel").forEach(function (button) {
+      button.addEventListener("click", closeModal);
+    });
+
+    if (modal) {
+      modal.addEventListener("click", function (event) {
+        if (event.target === modal) { closeModal(); }
+      });
+    }
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") { closeModal(); }
+    });
+  })();
+</script>
 {% endblock %}

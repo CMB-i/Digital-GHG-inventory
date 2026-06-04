@@ -1,14 +1,266 @@
 {% extends "base.html" %}
 {% block title %}Sites - Digital GHG Inventory{% endblock %}
+
 {% block content %}
-<section class="space-y-6">
-  <div>
-    <h1 class="text-2xl font-semibold">Sites</h1>
-    <p class="mt-2 text-sm text-slate-600">Add and manage port/site master data used for monthly GHG submissions.</p>
+<section class="min-w-0 space-y-6">
+
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold">Sites</h1>
+      <p class="mt-1 text-sm text-slate-600">Add and manage site master data used for monthly GHG submissions.</p>
+    </div>
+    {% if perm_create %}
+    <a class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+       href="{{ url_for('sitemst.index', drawer='create') }}">Create Site</a>
+    {% endif %}
   </div>
-  {% set empty_title = "No sites added yet." %}
-  {% set empty_body = "Add your first site to begin configuring monthly GHG submissions." %}
-  {% set empty_action = "Add site" %}
-  {% include "partials/empty_state.html" %}
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="space-y-2">
+      {% for category, message in messages %}
+      <div class="rounded-md border px-4 py-3 text-sm
+        {%- if category == 'error' %} border-red-200 bg-red-50 text-red-700
+        {%- else %} border-emerald-200 bg-emerald-50 text-emerald-700{% endif %}">
+        {{ message }}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
+  <div class="w-full overflow-x-auto rounded-md border border-slate-200 bg-white lg:overflow-x-visible">
+    <table class="w-full table-fixed text-sm max-lg:min-w-[640px]">
+      <colgroup>
+        <col class="w-[36%]">
+        <col class="w-[16%]">
+        <col class="w-[24%]">
+        <col class="w-[24%]">
+      </colgroup>
+      <thead class="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <tr>
+          <th class="px-4 py-2.5">Site</th>
+          <th class="px-3 py-2.5">Code</th>
+          <th class="px-3 py-2.5">Company</th>
+          <th class="px-3 py-2.5 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for site in active_sites %}
+        <tr class="border-b border-slate-100 align-middle hover:bg-slate-50">
+          <td class="max-w-0 overflow-hidden px-4 py-3">
+            <div class="truncate text-sm font-semibold text-slate-900" title="{{ site.name }}">{{ site.name }}</div>
+            {% if site.description %}
+            <div class="truncate text-xs text-slate-400" title="{{ site.description }}">{{ site.description }}</div>
+            {% endif %}
+          </td>
+          <td class="px-3 py-3 font-mono text-sm text-slate-700">{{ site.code }}</td>
+          <td class="max-w-0 overflow-hidden px-3 py-3">
+            <div class="truncate text-sm text-slate-600" title="{{ site.company_name or '' }}">
+              {{ site.company_name or "—" }}
+            </div>
+          </td>
+          <td class="whitespace-nowrap px-3 py-3 text-right">
+            {% if perm_edit or perm_delete %}
+            <div class="inline-flex items-center justify-end gap-2">
+              {% if perm_edit %}
+              <a class="action-button action-button-secondary"
+                 href="{{ url_for('sitemst.index', site_id=site.id, drawer='edit') }}">Edit</a>
+              {% endif %}
+              {% if perm_delete %}
+              <form class="site-action-form"
+                    data-confirm="Deactivate {{ site.name }}?"
+                    method="post"
+                    action="{{ url_for('sitemst.deactivate', site_id=site.id) }}">
+                <button class="action-button action-button-secondary" type="submit">Deactivate</button>
+              </form>
+              {% endif %}
+            </div>
+            {% else %}
+            <span class="text-xs text-slate-400">View only</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td class="px-5 py-10 text-center" colspan="4">
+            <div class="mx-auto flex max-w-xs flex-col items-center">
+              <p class="text-sm font-medium text-slate-700">No sites added yet.</p>
+              <p class="mt-1 text-xs text-slate-500">Create your first site to begin configuring monthly GHG submissions.</p>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if inactive_sites %}
+  <div>
+    <button class="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900"
+            id="toggle_inactive" type="button" aria-expanded="false">
+      <span class="inline-block w-3 text-slate-400" id="toggle_icon" aria-hidden="true">▶</span>
+      Deactivated sites ({{ inactive_sites | length }})
+    </button>
+    <div class="mt-3 hidden overflow-x-auto rounded-md border border-slate-200 bg-white" id="inactive_panel">
+      <table class="w-full table-fixed text-sm max-lg:min-w-[640px]">
+        <colgroup>
+          <col class="w-[36%]">
+          <col class="w-[16%]">
+          <col class="w-[24%]">
+          <col class="w-[24%]">
+        </colgroup>
+        <thead class="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <tr>
+            <th class="px-4 py-2.5">Site</th>
+            <th class="px-3 py-2.5">Code</th>
+            <th class="px-3 py-2.5">Company</th>
+            <th class="px-3 py-2.5 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for site in inactive_sites %}
+          <tr class="border-b border-slate-100 align-middle">
+            <td class="max-w-0 overflow-hidden px-4 py-3">
+              <div class="truncate text-sm font-semibold text-slate-400" title="{{ site.name }}">{{ site.name }}</div>
+            </td>
+            <td class="px-3 py-3 font-mono text-sm text-slate-400">{{ site.code }}</td>
+            <td class="max-w-0 overflow-hidden px-3 py-3">
+              <div class="truncate text-sm text-slate-400">{{ site.company_name or "—" }}</div>
+            </td>
+            <td class="whitespace-nowrap px-3 py-3 text-right">
+              {% if perm_edit %}
+              <form method="post" action="{{ url_for('sitemst.reactivate', site_id=site.id) }}">
+                <button class="action-button action-button-secondary" type="submit">Reactivate</button>
+              </form>
+              {% else %}
+              <span class="text-xs text-slate-400">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
 </section>
+
+{% if create_drawer_open and perm_create %}
+<div class="fixed inset-0 z-40 bg-slate-900/30" aria-hidden="true"></div>
+<aside class="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-xl">
+  <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+    <div>
+      <h2 class="text-lg font-semibold">Create Site</h2>
+      <p class="mt-1 text-sm text-slate-600">Add a new site for monthly GHG submissions.</p>
+    </div>
+    <a class="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+       href="{{ url_for('sitemst.index') }}">Cancel</a>
+  </div>
+  <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5"
+        method="post"
+        action="{{ url_for('sitemst.create') }}">
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="create_name">Name</label>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+             id="create_name" name="name" maxlength="255" required autofocus>
+    </div>
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="create_code">Code</label>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
+             id="create_code" name="code" maxlength="50" pattern="[A-Za-z0-9_-]+" required>
+      <p class="mt-1 text-xs text-slate-500">Letters, numbers, underscore, or hyphen only.</p>
+    </div>
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="create_company_name">Company name <span class="font-normal text-slate-400">(optional)</span></label>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+             id="create_company_name" name="company_name" maxlength="255">
+    </div>
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="create_description">Description <span class="font-normal text-slate-400">(optional)</span></label>
+      <textarea class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                id="create_description" name="description" rows="3"></textarea>
+    </div>
+    <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
+      <a class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium"
+         href="{{ url_for('sitemst.index') }}">Cancel</a>
+      <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Create Site</button>
+    </div>
+  </form>
+</aside>
+{% endif %}
+
+{% if edit_drawer_open and selected_site and perm_edit %}
+<div class="fixed inset-0 z-40 bg-slate-900/30" aria-hidden="true"></div>
+<aside class="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-xl">
+  <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+    <div>
+      <h2 class="text-lg font-semibold">Edit Site</h2>
+      <p class="mt-1 text-sm text-slate-600">{{ selected_site.name }}</p>
+    </div>
+    <a class="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+       href="{{ url_for('sitemst.index') }}">Close</a>
+  </div>
+  <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5"
+        method="post"
+        action="{{ url_for('sitemst.edit', site_id=selected_site.id) }}">
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="edit_name">Name</label>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+             id="edit_name" name="name" maxlength="255" value="{{ selected_site.name }}" required autofocus>
+    </div>
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="edit_code">Code</label>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
+             id="edit_code" name="code" maxlength="50" pattern="[A-Za-z0-9_-]+"
+             value="{{ selected_site.code }}" required>
+      <p class="mt-1 text-xs text-slate-500">Letters, numbers, underscore, or hyphen only.</p>
+    </div>
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="edit_company_name">Company name <span class="font-normal text-slate-400">(optional)</span></label>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+             id="edit_company_name" name="company_name" maxlength="255"
+             value="{{ selected_site.company_name or '' }}">
+    </div>
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="edit_description">Description <span class="font-normal text-slate-400">(optional)</span></label>
+      <textarea class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                id="edit_description" name="description" rows="3">{{ selected_site.description or '' }}</textarea>
+    </div>
+    <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
+      <a class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium"
+         href="{{ url_for('sitemst.index') }}">Cancel</a>
+      <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Save Changes</button>
+    </div>
+  </form>
+</aside>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var toggleBtn = document.getElementById("toggle_inactive");
+    var panel = document.getElementById("inactive_panel");
+    var icon = document.getElementById("toggle_icon");
+    if (toggleBtn && panel) {
+      toggleBtn.addEventListener("click", function () {
+        var isHidden = panel.classList.contains("hidden");
+        panel.classList.toggle("hidden", !isHidden);
+        toggleBtn.setAttribute("aria-expanded", String(isHidden));
+        if (icon) { icon.textContent = isHidden ? "▼" : "▶"; }
+      });
+    }
+
+    document.querySelectorAll(".site-action-form").forEach(function (form) {
+      form.addEventListener("submit", function (event) {
+        if (!window.confirm(form.dataset.confirm)) {
+          event.preventDefault();
+        }
+      });
+    });
+  })();
+</script>
 {% endblock %}
