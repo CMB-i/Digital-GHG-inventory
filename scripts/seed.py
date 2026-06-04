@@ -23,13 +23,13 @@ ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "admin@example.com")
 ADMIN_PASSWORD = os.getenv("SEED_ADMIN_PASSWORD", "ChangeMe123!")
 ADMIN_ENTITY_TYPES = (
     "all",
-    "audit_log",
+    "audit",
     "form",
     "formula",
     "issue",
     "notification",
     "report",
-    "reporting_period",
+    "period",
     "site",
     "submission",
     "user",
@@ -70,7 +70,7 @@ def seed_admin_access(admin):
             entity_type=entity_type,
             entity_id=None,
             is_deleted=False,
-        ).one_or_none()
+        ).first()
         if existing:
             for flag in PERMISSION_FLAGS:
                 setattr(existing, flag, True)

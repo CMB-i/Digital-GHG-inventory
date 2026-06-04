@@ -1,6 +1,14 @@
 {% extends "base.html" %}
-{% block title %}SITEMST - Digital GHG Inventory{% endblock %}
+{% block title %}Sites - Digital GHG Inventory{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold">SITEMST</h1>
-<p class="mt-2 text-slate-600">Sites placeholder for Phase 0.</p>
+<section class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Sites</h1>
+    <p class="mt-2 text-sm text-slate-600">Add and manage port/site master data used for monthly GHG submissions.</p>
+  </div>
+  {% set empty_title = "No sites added yet." %}
+  {% set empty_body = "Add your first site to begin configuring monthly GHG submissions." %}
+  {% set empty_action = "Add site" %}
+  {% include "partials/empty_state.html" %}
+</section>
 {% endblock %}

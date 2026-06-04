@@ -1,6 +1,13 @@
 {% extends "base.html" %}
-{% block title %}AUDITL - Digital GHG Inventory{% endblock %}
+{% block title %}Audit Log - Digital GHG Inventory{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold">AUDITL</h1>
-<p class="mt-2 text-slate-600">Audit Log placeholder for Phase 0.</p>
+<section class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Audit Log</h1>
+    <p class="mt-2 text-sm text-slate-600">Full old/new value audit history is deferred for MVP.</p>
+  </div>
+  {% set empty_title = "Detailed audit history is not available yet." %}
+  {% set empty_body = "MVP currently stores lifecycle metadata on core records." %}
+  {% include "partials/empty_state.html" %}
+</section>
 {% endblock %}

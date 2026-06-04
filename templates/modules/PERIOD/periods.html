@@ -1,6 +1,14 @@
 {% extends "base.html" %}
-{% block title %}PERIOD - Digital GHG Inventory{% endblock %}
+{% block title %}Reporting Periods - Digital GHG Inventory{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold">PERIOD</h1>
-<p class="mt-2 text-slate-600">Periods placeholder for Phase 0.</p>
+<section class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Reporting Periods</h1>
+    <p class="mt-2 text-sm text-slate-600">Open, close, lock, and reopen monthly reporting periods for each site.</p>
+  </div>
+  {% set empty_title = "No reporting periods open." %}
+  {% set empty_body = "Open a monthly period before site users can submit data." %}
+  {% set empty_action = "Open period" %}
+  {% include "partials/empty_state.html" %}
+</section>
 {% endblock %}

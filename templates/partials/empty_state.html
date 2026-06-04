@@ -1,0 +1,7 @@
+<div class="rounded-md border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
+  <h2 class="text-base font-semibold text-slate-900">{{ empty_title }}</h2>
+  <p class="mx-auto mt-2 max-w-xl text-sm text-slate-600">{{ empty_body }}</p>
+  {% if empty_action %}
+  <button class="mt-5 cursor-not-allowed rounded-md border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-500" type="button" disabled>{{ empty_action }}</button>
+  {% endif %}
+</div>

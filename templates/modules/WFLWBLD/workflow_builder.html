@@ -1,6 +1,14 @@
 {% extends "base.html" %}
-{% block title %}WFLWBLD - Digital GHG Inventory{% endblock %}
+{% block title %}Workflow Builder - Digital GHG Inventory{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-semibold">WFLWBLD</h1>
-<p class="mt-2 text-slate-600">Workflow Builder placeholder for Phase 0.</p>
+<section class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Workflow Builder</h1>
+    <p class="mt-2 text-sm text-slate-600">Configure submission review levels and assign approvers.</p>
+  </div>
+  {% set empty_title = "No workflows configured yet." %}
+  {% set empty_body = "Create a workflow before monthly submissions can move through review." %}
+  {% set empty_action = "Create workflow" %}
+  {% include "partials/empty_state.html" %}
+</section>
 {% endblock %}

@@ -1,4 +1,11 @@
 (function () {
+  window.addEventListener("pageshow", function (event) {
+    const navigation = window.performance.getEntriesByType("navigation")[0];
+    if (event.persisted || (navigation && navigation.type === "back_forward")) {
+      window.location.reload();
+    }
+  });
+
   const links = document.querySelectorAll(".nav-link");
   const currentPath = window.location.pathname;
 
