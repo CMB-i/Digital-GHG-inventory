@@ -204,7 +204,7 @@ def build_nav_items(user):
                 {
                     "label": "Users & Access",
                     "href": "/module/ACCESS/",
-                    "visible": user_can(user, "user", "manage_users"),
+                    "visible": user_can(user, "user", "view", "manage_users"),
                 },
                 {
                     "label": "Notifications",

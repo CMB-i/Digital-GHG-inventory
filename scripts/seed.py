@@ -1,4 +1,5 @@
 import os
+from datetime import date
 from pathlib import Path
 import sys
 
@@ -13,6 +14,7 @@ import app.models  # noqa: F401
 from app.common.permissions import PERMISSION_FLAGS
 from app.database import db
 from app.modules.ACCESS.model import AccessMatrix
+from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.RPTBLD.model import AppConfig
 from app.modules.SITEMST.model import Site
 from app.modules.USRMGMT.service import hash_password
@@ -109,6 +111,38 @@ def seed_sites(admin):
         db.session.add(Site(**site_data, created_by=admin.id))
 
 
+def seed_reporting_periods(admin):
+    today = date.today()
+    current_year, current_month = today.year, today.month
+    if current_month == 1:
+        prev_year, prev_month = current_year - 1, 12
+    else:
+        prev_year, prev_month = current_year, current_month - 1
+
+    periods_to_seed = [(current_year, current_month), (prev_year, prev_month)]
+    sites = Site.query.filter_by(is_deleted=False).all()
+
+    for site in sites:
+        for year, month in periods_to_seed:
+            existing = ReportingPeriod.query.filter_by(
+                site_id=site.id,
+                year=year,
+                month=month,
+                is_deleted=False,
+            ).first()
+            if existing:
+                continue
+            db.session.add(
+                ReportingPeriod(
+                    site_id=site.id,
+                    year=year,
+                    month=month,
+                    status="OPEN",
+                    created_by=admin.id,
+                )
+            )
+
+
 def seed_app_config(admin):
     existing = AppConfig.query.filter_by(config_key="financial_year_start_month").one_or_none()
     if existing:
@@ -131,6 +165,8 @@ def run():
         admin = seed_admin_user()
         seed_admin_access(admin)
         seed_sites(admin)
+        db.session.flush()
+        seed_reporting_periods(admin)
         seed_app_config(admin)
         db.session.commit()
         print("Seed complete.")

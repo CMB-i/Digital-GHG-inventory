@@ -2,6 +2,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.common.auth import current_user
 from app.common.decorators import require_permission
+from app.common.permissions import has_permission
 from app.common.validators import ValidationError
 from app.database import db
 from app.modules.ACCESS.service import (
@@ -34,16 +35,26 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 
 
 @bp.route("/")
-@require_permission("user", "manage_users")
+@require_permission("user", "view")
 def index():
+    actor = current_user()
+    perm_manage_users = has_permission(actor.id, "user", "manage_users")
+    perm_create = has_permission(actor.id, "user", "create")
+    perm_edit = has_permission(actor.id, "user", "edit")
+    perm_delete = has_permission(actor.id, "user", "delete")
+
     selected_user_id = request.args.get("user_id", type=int)
-    drawer_open = request.args.get("drawer") == "permissions"
-    create_drawer_open = request.args.get("drawer") == "create"
+    # Gate drawer states: unauthorized users cannot open these even via URL manipulation.
+    drawer_open = request.args.get("drawer") == "permissions" and perm_manage_users
+    create_drawer_open = (
+        request.args.get("drawer") == "create"
+        and (perm_create or perm_manage_users)
+    )
     selected_scope_type = request.args.get("scope_type") or "global"
     selected_scope_site_id = request.args.get("scope_site_id", type=int)
     users = list_users()
     sites = Site.query.filter_by(is_deleted=False).order_by(Site.name.asc()).all()
-    selected_user = next((user for user in users if user.id == selected_user_id), None)
+    selected_user = next((u for u in users if u.id == selected_user_id), None)
     if selected_user is None:
         selected_user_id = None
         drawer_open = False
@@ -80,11 +91,15 @@ def index():
         entity_types=ENTITY_TYPES,
         entity_labels=ENTITY_LABELS,
         entity_rows=ENTITY_ROWS,
+        perm_manage_users=perm_manage_users,
+        perm_create=perm_create,
+        perm_edit=perm_edit,
+        perm_delete=perm_delete,
     )
 
 
 @bp.route("/users/create", methods=["POST"])
-@require_permission("user", "manage_users")
+@require_permission("user", ("create", "manage_users"))
 def create():
     actor = current_user()
     try:
@@ -108,7 +123,7 @@ def create():
 
 
 @bp.route("/users/<int:user_id>/edit", methods=["POST"])
-@require_permission("user", "manage_users")
+@require_permission("user", ("edit", "manage_users"))
 def edit(user_id):
     try:
         user = update_user(
@@ -132,7 +147,7 @@ def edit(user_id):
 
 
 @bp.route("/users/<int:user_id>/password", methods=["POST"])
-@require_permission("user", "manage_users")
+@require_permission("user", ("edit", "manage_users"))
 def password(user_id):
     try:
         user = set_temporary_password(user_id, request.form.get("temporary_password"))
@@ -151,7 +166,7 @@ def password(user_id):
 
 
 @bp.route("/users/<int:user_id>/toggle-active", methods=["POST"])
-@require_permission("user", "manage_users")
+@require_permission("user", ("edit", "delete"))
 def toggle_active(user_id):
     user, error = set_user_active(user_id, request.form.get("is_active") == "true")
     if error:
