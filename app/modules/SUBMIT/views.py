@@ -1,7 +1,21 @@
-from flask import Blueprint, render_template
-
+from flask import Blueprint, render_template, request, jsonify, send_file
 from app.common.decorators import require_permission
-
+from app.common.auth import current_user
+from app.common.responses import success_response, error_response
+from app.database import db
+from app.common.file_storage import save_file, get_file_path
+from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument
+from app.modules.FORMBLD.model import Form, Field, FieldVersion
+from app.modules.PERIOD.model import ReportingPeriod
+from app.modules.FORMBLD.service import get_form_version_fields
+from app.modules.SUBMIT.service import (
+    get_spoc_sheets_buckets,
+    create_draft_submission,
+    autosave_submission_values,
+    submit_submission,
+    DuplicateSubmissionError,
+    SubmissionValidationError
+)
 
 MODULE_CODE = "SUBMIT"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
@@ -10,4 +24,329 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 @bp.route("/")
 @require_permission("submission", ("submit", "view"))
 def index():
-    return render_template("modules/SUBMIT/spoc_entry.html", module_code=MODULE_CODE)
+    """
+    My Sheets landing dashboard page.
+    """
+    return render_template("modules/SUBMIT/my_sheets.html", module_code=MODULE_CODE)
+
+
+@bp.route("/submissions/<int:submission_id>")
+@require_permission("submission", "view")
+def edit_submission(submission_id):
+    """
+    Form Data Entry page.
+    """
+    sub = Submission.query.get_or_404(submission_id)
+    return render_template(
+        "modules/SUBMIT/data_entry.html",
+        module_code=MODULE_CODE,
+        submission_id=submission_id
+    )
+
+
+@bp.route("/submissions/download/<path:storage_key>")
+@require_permission("submission", "view")
+def download_proof(storage_key):
+    """
+    Serves uploaded proof documents.
+    """
+    try:
+        file_path = get_file_path(storage_key)
+        original_name = storage_key.split('/')[-1]
+        return send_file(file_path, as_attachment=True, download_name=original_name)
+    except Exception as e:
+        return error_response(str(e), 400)
+
+
+# --- REST API Endpoints ---
+
+@bp.route("/api/sheets", methods=["GET"])
+@require_permission("submission", ("submit", "view"))
+def get_sheets():
+    """
+    Get SPOC submission sheets grouped into buckets.
+    """
+    user = current_user()
+    buckets = get_spoc_sheets_buckets(user.id)
+    return jsonify(buckets)
+
+
+@bp.route("/api/submissions", methods=["POST"])
+@require_permission("submission", "create")
+def create_submission_endpoint():
+    """
+    Creates a new Draft submission.
+    """
+    data = request.get_json() or {}
+    site_id = data.get("site_id")
+    form_id = data.get("form_id")
+    reporting_period_id = data.get("reporting_period_id")
+    
+    user = current_user()
+    try:
+        sub = create_draft_submission(site_id, form_id, reporting_period_id, user.id)
+        db.session.commit()
+        return success_response(
+            data={"submission_id": sub.id},
+            message="Draft sheet created successfully."
+        )
+    except DuplicateSubmissionError as e:
+        db.session.rollback()
+        return jsonify({
+            "error": "A submission already exists for this site, form, and period.",
+            "existing_id": e.existing_id
+        }), 409
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/submissions/<int:submission_id>", methods=["GET"])
+@require_permission("submission", "view")
+def get_submission_details(submission_id):
+    """
+    Load form fields and values for a submission.
+    """
+    submission = Submission.query.get(submission_id)
+    if not submission or submission.is_deleted:
+        return error_response("Submission not found.", 404)
+        
+    # Get form fields
+    fields = get_form_version_fields(submission.form_version_id)
+    
+    # Load values
+    db_values = SubmissionValue.query.filter_by(submission_id=submission_id).all()
+    id_to_code = {}
+    fields_data = []
+    
+    for fv, f in fields:
+        id_to_code[f.id] = f.field_code
+        fields_data.append({
+            "id": f.id,
+            "field_id": f.id,
+            "field_code": f.field_code,
+            "field_name": fv.field_name,
+            "field_type": fv.field_type,
+            "field_config": fv.field_config or {},
+            "display_order": f.display_order
+        })
+        
+    values_dict = {}
+    for val in db_values:
+        code = id_to_code.get(val.field_id)
+        if not code:
+            continue
+            
+        f_info = next((fd for fd in fields_data if fd["field_id"] == val.field_id), None)
+        if f_info and f_info["field_type"] == "file":
+            proof = ProofDocument.query.filter_by(
+                submission_id=submission_id,
+                field_id=val.field_id,
+                is_deleted=False
+            ).first()
+            if proof:
+                values_dict[code] = {
+                    "storage_key": proof.storage_key,
+                    "original_name": proof.original_name
+                }
+            else:
+                values_dict[code] = ""
+        else:
+            if val.calculated_value is not None:
+                values_dict[code] = float(val.calculated_value)
+            else:
+                values_dict[code] = val.raw_value or ""
+                
+    # Check for anomalies
+    from app.common.anomaly import check_anomalies
+    anomalies = check_anomalies(submission_id)
+    
+    # Load site/form metadata
+    from app.modules.SITEMST.model import Site
+    site = Site.query.get(submission.site_id)
+    form = Form.query.get(submission.form_id)
+    from app.modules.SUBMIT.service import format_period_label
+    period = ReportingPeriod.query.get(submission.reporting_period_id)
+    period_label = format_period_label(period.year, period.month) if period else ""
+    
+    return jsonify({
+        "submission": {
+            "id": submission.id,
+            "site_id": submission.site_id,
+            "site_name": site.name if site else "",
+            "form_id": submission.form_id,
+            "form_name": form.name if form else "",
+            "reporting_period_id": submission.reporting_period_id,
+            "period_label": period_label,
+            "status": submission.status,
+            "is_locked": submission.is_locked,
+            "form_version_id": submission.form_version_id,
+            "workflow_version_id": submission.workflow_version_id
+        },
+        "fields": fields_data,
+        "values": values_dict,
+        "anomalies": anomalies
+    })
+
+
+@bp.route("/api/submissions/<int:submission_id>/autosave", methods=["PUT"])
+@require_permission("submission", "edit")
+def autosave_endpoint(submission_id):
+    """
+    Saves form draft entries and computes calculated fields.
+    """
+    data = request.get_json() or {}
+    values_dict = data.get("values", {})
+    
+    user = current_user()
+    try:
+        calc_errors = autosave_submission_values(submission_id, values_dict, user.id)
+        db.session.commit()
+        
+        # Load updated values
+        submission = Submission.query.get(submission_id)
+        db_values = SubmissionValue.query.filter_by(submission_id=submission_id).all()
+        fields = get_form_version_fields(submission.form_version_id)
+        
+        id_to_code = {f.id: f.field_code for fv, f in fields}
+        fields_data = [{"field_id": f.id, "field_code": f.field_code, "field_type": fv.field_type} for fv, f in fields]
+        
+        values_dict = {}
+        for val in db_values:
+            code = id_to_code.get(val.field_id)
+            if not code:
+                continue
+            f_info = next((fd for fd in fields_data if fd["field_id"] == val.field_id), None)
+            if f_info and f_info["field_type"] == "file":
+                proof = ProofDocument.query.filter_by(
+                    submission_id=submission_id,
+                    field_id=val.field_id,
+                    is_deleted=False
+                ).first()
+                if proof:
+                    values_dict[code] = {
+                        "storage_key": proof.storage_key,
+                        "original_name": proof.original_name
+                    }
+                else:
+                    values_dict[code] = ""
+            else:
+                if val.calculated_value is not None:
+                    values_dict[code] = float(val.calculated_value)
+                else:
+                    values_dict[code] = val.raw_value or ""
+                    
+        # Check anomalies
+        from app.common.anomaly import check_anomalies
+        anomalies = check_anomalies(submission_id)
+        
+        return success_response(
+            data={
+                "values": values_dict,
+                "calculation_errors": calc_errors,
+                "anomalies": anomalies
+            },
+            message="Autosaved successfully."
+        )
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/submissions/<int:submission_id>/proof/<string:field_code>", methods=["POST"])
+@require_permission("submission", "edit")
+def upload_proof_endpoint(submission_id, field_code):
+    """
+    Handles proof file uploads for a specific field code.
+    """
+    submission = Submission.query.get(submission_id)
+    if not submission or submission.is_deleted:
+        return error_response("Submission not found.", 404)
+        
+    if submission.status not in ("Draft", "Changes Requested"):
+        return error_response(f"Cannot edit submission in status: {submission.status}", 400)
+        
+    if "file" not in request.files:
+        return error_response("No file uploaded.", 400)
+        
+    file = request.files["file"]
+    if file.filename == "":
+        return error_response("No file selected.", 400)
+        
+    field = Field.query.filter_by(form_id=submission.form_id, field_code=field_code, is_deleted=False).first()
+    if not field:
+        return error_response("Field not found.", 404)
+        
+    field_version = FieldVersion.query.filter_by(field_id=field.id, form_version_id=submission.form_version_id).first()
+    if not field_version:
+        return error_response("Field version not found.", 404)
+        
+    try:
+        user = current_user()
+        saved_info = save_file(file)
+        
+        # Save ProofDocument metadata
+        proof = ProofDocument(
+            submission_id=submission_id,
+            field_id=field.id,
+            original_name=saved_info["original_name"],
+            storage_key=saved_info["storage_key"],
+            mime_type=saved_info["mime_type"],
+            file_size_bytes=saved_info["file_size_bytes"],
+            uploaded_by=user.id
+        )
+        db.session.add(proof)
+        db.session.flush()
+        
+        # Save SubmissionValue field link
+        val_row = SubmissionValue.query.filter_by(
+            submission_id=submission_id,
+            field_id=field.id
+        ).first()
+        
+        if not val_row:
+            val_row = SubmissionValue(
+                submission_id=submission_id,
+                field_id=field.id,
+                field_version_id=field_version.id,
+                created_by=user.id
+            )
+            db.session.add(val_row)
+            
+        val_row.raw_value = saved_info["storage_key"]
+        val_row.calculated_value = None
+        val_row.updated_by = user.id
+        
+        db.session.commit()
+        return success_response(
+            data={
+                "storage_key": saved_info["storage_key"],
+                "original_name": saved_info["original_name"]
+            },
+            message="Proof uploaded successfully."
+        )
+    except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/submissions/<int:submission_id>/submit", methods=["POST"])
+@require_permission("submission", "submit")
+def submit_endpoint(submission_id):
+    """
+    Submits a sheet for review.
+    """
+    user = current_user()
+    try:
+        submit_submission(submission_id, user.id)
+        db.session.commit()
+        return success_response(message="Sheet submitted successfully.")
+    except SubmissionValidationError as e:
+        db.session.rollback()
+        return jsonify({
+            "error": str(e),
+            "validation_errors": e.errors
+        }), 422
+    except (ValueError, DuplicateSubmissionError) as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
