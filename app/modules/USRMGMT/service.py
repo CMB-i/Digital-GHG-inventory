@@ -9,6 +9,7 @@ from app.common.validators import (
     validate_temporary_password,
 )
 from app.database import db
+from app.modules.AUDITL.service import log_audit
 from app.modules.ACCESS.model import AccessMatrix
 from app.modules.USRMGMT.model import User
 
@@ -57,10 +58,20 @@ def create_user(full_name, email, phone, temporary_password, actor_id):
     return user
 
 
-def update_user(user_id, full_name, email, phone):
+def _user_snapshot(user):
+    return {
+        "full_name": user.full_name,
+        "email": user.email,
+        "phone": user.phone,
+        "is_active": user.is_active,
+    }
+
+
+def update_user(user_id, full_name, email, phone, actor_id):
     user = User.query.filter_by(id=user_id, is_deleted=False).one_or_none()
     if not user:
         return None
+    old_values = _user_snapshot(user)
     validated_email = validate_email(email)
     duplicate = (
         User.query.filter(User.email == validated_email, User.id != user_id, User.is_deleted.is_(False))
@@ -71,14 +82,31 @@ def update_user(user_id, full_name, email, phone):
     user.full_name = validate_full_name(full_name)
     user.email = validated_email
     user.phone = validate_phone(phone)
+    user.updated_by = actor_id
+    log_audit(
+        actor_id,
+        "user",
+        user.id,
+        "USER_UPDATED",
+        old_values=old_values,
+        new_values=_user_snapshot(user),
+    )
     return user
 
 
-def set_temporary_password(user_id, temporary_password):
+def set_temporary_password(user_id, temporary_password, actor_id):
     user = User.query.filter_by(id=user_id, is_deleted=False).one_or_none()
     if not user:
         return None
     user.password_hash = hash_password(validate_temporary_password(temporary_password))
+    user.updated_by = actor_id
+    log_audit(
+        actor_id,
+        "user",
+        user.id,
+        "USER_PASSWORD_RESET",
+        metadata={"password_reset": True},
+    )
     return user
 
 
@@ -111,11 +139,22 @@ def can_deactivate_user(user_id):
     return not (has_manage_users and manager_count <= 1)
 
 
-def set_user_active(user_id, is_active):
+def set_user_active(user_id, is_active, actor_id):
     user = User.query.filter_by(id=user_id, is_deleted=False).one_or_none()
     if not user:
         return None, "User not found."
     if not is_active and not can_deactivate_user(user_id):
         return None, "Cannot deactivate the last active user with global user-management permission."
+    old_values = {"is_active": user.is_active}
     user.is_active = is_active
+    user.updated_by = actor_id
+    action = "USER_ACTIVATED" if user.is_active else "USER_DEACTIVATED"
+    log_audit(
+        actor_id,
+        "user",
+        user.id,
+        action,
+        old_values=old_values,
+        new_values={"is_active": user.is_active},
+    )
     return user, None

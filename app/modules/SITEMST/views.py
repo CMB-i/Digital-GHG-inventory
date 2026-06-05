@@ -81,6 +81,7 @@ def create():
 @bp.route("/<int:site_id>/edit", methods=["POST"])
 @require_permission("site", "edit")
 def edit(site_id):
+    actor = current_user()
     try:
         site = update_site(
             site_id=site_id,
@@ -88,6 +89,7 @@ def edit(site_id):
             code=request.form.get("code"),
             company_name=request.form.get("company_name"),
             description=request.form.get("description"),
+            actor_id=actor.id,
         )
         if not site:
             flash("Site not found.", "error")

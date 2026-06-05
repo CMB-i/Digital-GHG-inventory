@@ -57,11 +57,13 @@ def create():
 @bp.route("/<int:user_id>/edit", methods=["POST"])
 @require_permission("user", "manage_users")
 def edit(user_id):
+    actor = current_user()
     user = update_user(
         user_id=user_id,
         full_name=request.form.get("full_name"),
         email=request.form.get("email"),
         phone=request.form.get("phone"),
+        actor_id=actor.id,
     )
     if not user:
         flash("User not found.", "error")
@@ -74,12 +76,13 @@ def edit(user_id):
 @bp.route("/<int:user_id>/password", methods=["POST"])
 @require_permission("user", "manage_users")
 def password(user_id):
+    actor = current_user()
     temporary_password = request.form.get("temporary_password")
     if not temporary_password:
         flash("Temporary password is required.", "error")
         return redirect(url_for("usrmgmt.index"))
 
-    user = set_temporary_password(user_id, temporary_password)
+    user = set_temporary_password(user_id, temporary_password, actor.id)
     if not user:
         flash("User not found.", "error")
     else:
@@ -91,8 +94,9 @@ def password(user_id):
 @bp.route("/<int:user_id>/toggle-active", methods=["POST"])
 @require_permission("user", "manage_users")
 def toggle_active(user_id):
+    actor = current_user()
     is_active = request.form.get("is_active") == "true"
-    _, error = set_user_active(user_id, is_active)
+    _, error = set_user_active(user_id, is_active, actor.id)
     if error:
         flash(error, "error")
     else:

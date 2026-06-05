@@ -1,6 +1,7 @@
-from app.modules.ACCESS.model import AccessMatrix
-from app.database import db
 from app.common.validators import ValidationError, validate_code
+from app.database import db
+from app.modules.ACCESS.model import AccessMatrix
+from app.modules.AUDITL.service import log_audit
 
 
 PERMISSION_COLUMNS = (
@@ -229,6 +230,10 @@ def build_user_access_summary(users, sites=None):
     return summaries
 
 
+def _permission_snapshot(row):
+    return {flag: bool(getattr(row, flag)) for flag in PERMISSION_FLAGS}
+
+
 def upsert_access_row(
     user_id,
     scope_type,
@@ -259,6 +264,7 @@ def upsert_access_row(
         is_deleted=False,
     ).first()
 
+    old_values = _permission_snapshot(row) if row is not None else None
     if row is None:
         row = AccessMatrix(
             user_id=user_id,
@@ -268,11 +274,31 @@ def upsert_access_row(
             entity_type=validated_entity_type,
             entity_id=None,
             created_by=actor_id,
+            updated_by=actor_id,
         )
         db.session.add(row)
+        db.session.flush()
 
     for flag in PERMISSION_FLAGS:
         setattr(row, flag, bool(permission_values.get(flag)))
+
+    row.updated_by = actor_id
+    new_values = _permission_snapshot(row)
+    if old_values != new_values:
+        log_audit(
+            actor_id,
+            "access_matrix",
+            row.id,
+            "ACCESS_UPDATED",
+            old_values=old_values,
+            new_values=new_values,
+            metadata={
+                "user_id": user_id,
+                "scope_type": scope_type,
+                "scope_site_id": normalized_scope_site_id,
+                "entity_type": validated_entity_type,
+            },
+        )
 
     return row
 
