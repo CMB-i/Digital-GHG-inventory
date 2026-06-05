@@ -1,243 +1,77 @@
 {% extends "base.html" %}
 {% block title %}Formula Builder - Digital GHG Inventory{% endblock %}
-
 {% block content %}
-<div class="space-y-6">
-  <!-- Toast notification container -->
-  <div id="toast-container" class="fixed top-5 right-5 z-50 space-y-2 pointer-events-none"></div>
-
-  <!-- 1. LIST VIEW -->
-  <div id="list-view">
-    <div class="text-xs text-slate-500 mb-2">Configuration · <strong class="text-indigo-600">All Formulas</strong></div>
-    <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-6">
-      <div>
-        <h1 class="text-2xl font-bold text-slate-800">Formula Builder</h1>
-        <p class="text-xs text-slate-500 mt-1">Configure arithmetic formulas and expressions to calculate emission metrics.</p>
-      </div>
-      <button onclick="startNewFormula()" class="inline-flex items-center justify-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
-        <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-        </svg>
-        Create Formula
-      </button>
-    </div>
-
-    <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-      <table class="min-w-full divide-y divide-slate-200 text-left text-xs">
-        <thead class="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
-          <tr>
-            <th class="px-6 py-3.5 w-1/3">Formula Name</th>
-            <th class="px-6 py-3.5 w-[20%]">Code</th>
-            <th class="px-6 py-3.5 w-[15%]">Status</th>
-            <th class="px-6 py-3.5 w-[12%]">Version</th>
-            <th class="px-6 py-3.5 text-right w-[20%]">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="formulas-list-body" class="divide-y divide-slate-100 font-medium text-slate-700">
-          <tr>
-            <td colspan="5" class="px-6 py-12 text-center text-slate-400 italic">Loading formulas...</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+<section class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold">Formula Builder</h1>
+    <p class="mt-2 text-sm text-slate-600">Validate numeric formulas using published form fields.</p>
   </div>
 
-  <!-- 2. EDITOR VIEW (Split Two-Column Panel) -->
-  <div id="editor-view" class="hidden space-y-6">
-    <div class="flex items-center justify-between border-b border-slate-200 pb-4">
-      <div class="flex items-center space-x-3">
-        <button onclick="showList()" class="inline-flex items-center text-xs text-slate-500 hover:text-slate-700 font-bold">
-          ← Back to formulas
+  <form class="rounded-md border border-slate-200 bg-white p-4" method="get">
+    <label class="text-xs font-medium text-slate-600" for="form_version_id">Form version</label>
+    <select class="mt-1 w-full max-w-xl rounded-md border border-slate-300 px-3 py-2 text-sm" id="form_version_id" name="form_version_id" onchange="this.form.submit()">
+      {% for form_version, form in form_versions %}
+      <option value="{{ form_version.id }}" {% if selected_form_version_id == form_version.id %}selected{% endif %}>{{ form.name }} · version {{ form_version.version_number }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  {% if compatible_fields %}
+  <div class="grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
+    <aside class="rounded-md border border-slate-200 bg-white p-4">
+      <h2 class="text-sm font-semibold">Numeric fields</h2>
+      <p class="mt-1 text-xs text-slate-500">Select a field to insert its code.</p>
+      <div class="mt-3 grid gap-2">
+        {% for field in compatible_fields %}
+        <button class="formula-field rounded-md border border-slate-300 px-3 py-2 text-left text-sm hover:bg-slate-50" data-field-code="{{ field.field_code }}" type="button">
+          <span class="block font-medium">{{ field.field_name }}</span>
+          <span class="text-xs text-slate-500">{{ field.field_code }} · {{ field.field_type }}</span>
         </button>
-        <span class="text-slate-300">|</span>
-        <h1 id="editor-title" class="text-xl font-bold text-slate-800">Edit Formula</h1>
-        <span id="editor-status-badge" class="px-2 py-0.5 rounded-full font-bold uppercase text-[9px] bg-amber-100 text-amber-800">Draft</span>
+        {% endfor %}
       </div>
-      <div class="flex items-center space-x-2">
-        <button id="btn-save-formula" class="inline-flex items-center justify-center px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow transition">
-          Save Draft
-        </button>
-        <button id="btn-publish-formula" class="inline-flex items-center justify-center px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition">
-          Publish Version
-        </button>
-      </div>
-    </div>
+    </aside>
 
-    <!-- Main Grid Editor Layout -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-      
-      <!-- Left Column: Operand Palettes (Column Span 4) -->
-      <div class="lg:col-span-4 space-y-4">
-        
-        <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div class="p-4 bg-slate-50 border-b border-slate-200/80 space-y-3">
-            <h2 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Formula Operand Palette</h2>
-            <!-- Form selector for operands -->
-            <div class="space-y-1.5">
-              <label class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Select Form context for fields:</label>
-              <select id="form-version-select" class="w-full text-xs rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 py-1.5 border bg-white">
-                {% for form_version, form in form_versions %}
-                <option value="{{ form_version.id }}" {% if selected_form_version_id == form_version.id %}selected{% endif %}>
-                  {{ form.name }} (v{{ form_version.version_number }})
-                </option>
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-
-          <div class="p-4 space-y-4 max-h-[450px] overflow-y-auto">
-            <!-- Numeric Fields Section -->
-            <div>
-              <h3 class="text-xs font-bold text-indigo-600 uppercase tracking-wider border-b border-slate-100 pb-1 flex items-center justify-between">
-                <span>Form Fields</span>
-                <span class="text-[9px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-bold uppercase">Click to Insert</span>
-              </h3>
-              <div id="fields-palette" class="mt-2.5 grid gap-1.5">
-                <!-- Loaded dynamically on form select change -->
-              </div>
-            </div>
-
-            <!-- Value Set Constant Section -->
-            <div>
-              <h3 class="text-xs font-bold text-emerald-600 uppercase tracking-wider border-b border-slate-100 pb-1 flex items-center justify-between mt-2">
-                <span>Value Set Constants</span>
-                <span class="text-[9px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded font-bold uppercase">Click to Insert</span>
-              </h3>
-              <div id="valsets-palette" class="mt-2.5 grid gap-1.5">
-                {% if valset_options %}
-                  {% for opt in valset_options %}
-                  <button class="palette-btn-valset flex items-center justify-between p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-left transition text-xs font-medium w-full" data-code="{{ opt.entry_code }}" title="Value Set: {{ opt.value_set_name }}">
-                    <div class="flex flex-col truncate mr-2">
-                      <span class="font-semibold text-slate-700 truncate">{{ opt.entry_code }}</span>
-                      <span class="text-[10px] text-slate-400 truncate">{{ opt.value_set_name }}</span>
-                    </div>
-                    <span class="font-mono bg-slate-50 text-slate-500 border border-slate-100 px-1.5 py-0.5 rounded-md text-[10px]">{{ opt.entry_label }}</span>
-                  </button>
-                  {% endfor %}
-                {% else %}
-                  <p class="text-xs text-slate-400 italic">No approved value sets found.</p>
-                {% endif %}
-              </div>
-            </div>
-          </div>
+    <div class="space-y-5">
+      <form class="space-y-4 rounded-md border border-slate-200 bg-white p-4" method="post">
+        <input type="hidden" name="form_version_id" value="{{ selected_form_version_id }}">
+        <div>
+          <label class="text-xs font-medium text-slate-600" for="expression">Formula expression</label>
+          <textarea class="mt-1 min-h-28 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm" id="expression" name="expression" required>{{ expression }}</textarea>
+          <p class="mt-2 text-xs text-slate-500">Supported functions: <code>min(diesel_litres, petrol_litres)</code> and <code>max(scope1_emissions, scope2_emissions)</code>.</p>
         </div>
+        {% if validation_message %}
+        <p class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{{ validation_message }}</p>
+        {% endif %}
+        {% if validation_error %}
+        <p class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ validation_error }}</p>
+        {% endif %}
+        <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Validate Formula</button>
+      </form>
 
-      </div>
-
-      <!-- Right Column: Detail Editor, Operators, Live Preview & Validation (Column Span 8) -->
-      <div class="lg:col-span-8 bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-        
-        <!-- Formula Editor Fields -->
-        <div class="p-5 space-y-4">
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Formula Name</label>
-              <input type="text" id="df-name" required placeholder="e.g. Scope 2 Emissions" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border">
-            </div>
-            <div>
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Formula Code</label>
-              <input type="text" id="df-code" required placeholder="e.g. scope2_emissions" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border font-mono uppercase">
-            </div>
-          </div>
-
+      <div class="rounded-md border border-slate-200 bg-white p-4">
+        <h2 class="text-sm font-semibold">Browser preview</h2>
+        <p class="mt-1 text-xs text-slate-500">Preview is local and restricted. Backend validation remains authoritative.</p>
+        <div class="mt-4 grid gap-3 sm:grid-cols-2">
+          {% for field in compatible_fields %}
           <div>
-            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Formula Math Expression</label>
-            <div class="flex gap-1.5 my-2">
-              <button type="button" onclick="insertOperator(' + ')" class="op-btn font-mono text-sm w-9 h-8 border border-slate-200 bg-white hover:bg-slate-50 hover:border-indigo-500 rounded font-bold shadow-sm transition text-indigo-600">+</button>
-              <button type="button" onclick="insertOperator(' - ')" class="op-btn font-mono text-sm w-9 h-8 border border-slate-200 bg-white hover:bg-slate-50 hover:border-indigo-500 rounded font-bold shadow-sm transition text-indigo-600">−</button>
-              <button type="button" onclick="insertOperator(' * ')" class="op-btn font-mono text-sm w-9 h-8 border border-slate-200 bg-white hover:bg-slate-50 hover:border-indigo-500 rounded font-bold shadow-sm transition text-indigo-600">×</button>
-              <button type="button" onclick="insertOperator(' / ')" class="op-btn font-mono text-sm w-9 h-8 border border-slate-200 bg-white hover:bg-slate-50 hover:border-indigo-500 rounded font-bold shadow-sm transition text-indigo-600">÷</button>
-              <button type="button" onclick="insertOperator('(')" class="op-btn font-mono text-sm w-9 h-8 border border-slate-200 bg-white hover:bg-slate-50 hover:border-indigo-500 rounded font-bold shadow-sm transition text-indigo-600">(</button>
-              <button type="button" onclick="insertOperator(')')" class="op-btn font-mono text-sm w-9 h-8 border border-slate-200 bg-white hover:bg-slate-50 hover:border-indigo-500 rounded font-bold shadow-sm transition text-indigo-600">)</button>
-            </div>
-            <textarea id="expression" required placeholder="e.g. net_electricity * grid_ef" rows="3" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs font-mono p-3 border"></textarea>
-            <p class="mt-1.5 text-[10px] text-slate-400 leading-normal">
-              Insert fields/constants from the left palette or type them directly. Supported operations include standard math variables and functions: <code>min(a, b)</code>, <code>max(a, b)</code>.
-            </p>
+            <label class="text-xs font-medium text-slate-600" for="preview_{{ field.field_code }}">{{ field.field_name }}</label>
+            <input class="formula-preview-value mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" data-field-code="{{ field.field_code }}" id="preview_{{ field.field_code }}" type="number" step="any" value="0">
           </div>
-
-          <div class="flex items-center justify-between pt-2">
-            <button id="btn-validate-formula" class="inline-flex items-center justify-center px-3.5 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold rounded-lg shadow-sm transition">
-              Validate Formula Syntax
-            </button>
-          </div>
-          
-          <div id="validation-result-container" class="hidden">
-            <p id="validation-result" class="p-3 rounded-lg text-xs font-medium"></p>
-          </div>
+          {% endfor %}
         </div>
-
-        <!-- Live Preview Area -->
-        <div class="p-5 bg-slate-50/50 border-t border-slate-100 space-y-4">
-          <div>
-            <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Browser Real-Time Preview</h3>
-            <p class="text-[10px] text-slate-400 mt-1">Enter test values for your variables to preview the calculated result instantly.</p>
-          </div>
-
-          <!-- Dynamic inputs for variables -->
-          <div id="preview-inputs-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <p class="col-span-2 text-xs text-slate-400 italic">No variables detected in the formula expression yet.</p>
-          </div>
-
-          <!-- Result box -->
-          <div class="flex items-center justify-between p-3.5 bg-indigo-50 border border-indigo-100 rounded-xl">
-            <span class="text-xs font-bold text-indigo-700 uppercase tracking-wider">Preview Result</span>
-            <span id="preview-result-value" class="text-lg font-black text-indigo-900">—</span>
-          </div>
-
-          <div class="text-[10px] text-slate-400 flex items-center space-x-1.5 pt-2">
-            <svg class="h-3.5 w-3.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="9"/>
-              <path d="M12 8h.01M11 12h1v4h1"/>
-            </svg>
-            <span>SPOCs never see this formula math or code — they only see the calculated read-only result.</span>
-          </div>
-        </div>
-
+        <button class="mt-4 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium" id="preview_formula" type="button">Preview Formula</button>
+        <p class="mt-3 text-sm" id="formula_preview_result"></p>
       </div>
-
     </div>
   </div>
-</div>
-
-<!-- Create Formula Dialog Modal -->
-<div id="modal-create" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
-  <div class="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden transition-all transform scale-100">
-    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-      <h3 class="text-base font-bold text-slate-800">Create New Formula</h3>
-      <button id="btn-close-modal" class="text-slate-400 hover:text-slate-500">
-        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-    </div>
-    <form id="form-create-formula" class="p-6 space-y-4">
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 uppercase">Formula Name</label>
-        <input type="text" id="formula-name" required placeholder="e.g. Coal Combustion Emissions" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm h-10 px-3 border">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 uppercase">Unique Code</label>
-        <input type="text" id="formula-code" required placeholder="e.g. COAL_COMBUSTION" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm h-10 px-3 border font-mono uppercase">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 uppercase">Initial Expression</label>
-        <input type="text" id="formula-expression" required placeholder="e.g. quantity * factor" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm h-10 px-3 border font-mono">
-      </div>
-      <div class="pt-2 flex justify-end space-x-2">
-        <button type="button" id="btn-cancel-modal" class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded-lg transition-colors">
-          Cancel
-        </button>
-        <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
-          Create Formula
-        </button>
-      </div>
-    </form>
-  </div>
-</div>
+  {% else %}
+    {% set empty_title = "No numeric fields available for formulas. Add a number field in Form Builder first." %}
+    {% set empty_body = "Text, date, file, select, and deferred table fields are excluded from formula operands." %}
+    {% include "partials/empty_state.html" %}
+  {% endif %}
+</section>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/formula_runtime.js') }}"></script>
 <script src="{{ url_for('static', filename='js/formula_builder.js') }}"></script>
 {% endblock %}

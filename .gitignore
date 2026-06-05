@@ -13,7 +13,3 @@ postgres_data/
 minio_data/
 
 *.log
-# .graphifyignore
-node_modules/
-dist/
-*.generated.py
