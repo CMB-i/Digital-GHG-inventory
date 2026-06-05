@@ -246,6 +246,22 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id):
     )
     db.session.add(sub)
     db.session.flush()
+
+    from app.modules.AUDITL.service import log_audit
+    log_audit(
+        actor_user_id=user_id,
+        entity_type="submission",
+        entity_id=sub.id,
+        action="CREATE_DRAFT",
+        old_values=None,
+        new_values={
+            "status": "Draft",
+            "site_id": site_id,
+            "form_id": form_id,
+            "reporting_period_id": reporting_period_id
+        }
+    )
+
     return sub
 
 def autosave_submission_values(submission_id, values_dict, user_id):
@@ -448,6 +464,34 @@ def submit_submission(submission_id, user_id):
         if fv.field_type == "calculated":
             if not val_obj or val_obj.calculated_value is None:
                 validation_errors[f.field_code] = f"Calculated value is missing or has formula errors."
+                continue
+
+        # 4. Numeric type validation
+        from app.modules.FORMBLD.service import NUMERIC_FIELD_TYPES
+        is_num_type = (fv.field_type in NUMERIC_FIELD_TYPES or 
+                       config.get("is_numeric") is True or 
+                       str(config.get("result_type") or config.get("value_type") or "").lower() in NUMERIC_FIELD_TYPES)
+        if is_num_type and val_obj and val_obj.raw_value is not None and val_obj.raw_value != "":
+            try:
+                float(val_obj.raw_value)
+            except ValueError:
+                validation_errors[f.field_code] = f"{fv.field_name} must be a valid number."
+                continue
+
+        # 5. Dropdown validation
+        if fv.field_type == "dropdown" and val_obj and val_obj.raw_value is not None and val_obj.raw_value != "":
+            vsv_id = config.get("value_set_version_id")
+            if vsv_id:
+                from app.modules.VALSET.model import ValueSetEntry
+                entry = ValueSetEntry.query.filter_by(
+                    value_set_version_id=vsv_id,
+                    entry_code=val_obj.raw_value,
+                    is_active=True,
+                    is_deleted=False
+                ).first()
+                if not entry:
+                    validation_errors[f.field_code] = f"Invalid option selected for {fv.field_name}."
+                    continue
                 
     if validation_errors:
         raise SubmissionValidationError("Validation failed. Please correct the fields.", validation_errors)
@@ -464,11 +508,26 @@ def submit_submission(submission_id, user_id):
         raise DuplicateSubmissionError(existing.id)
         
     # Transition status
-    submission.status = "Submitted"
+    old_status = submission.status
+    new_status = "Resubmitted" if old_status == "Changes Requested" else "Submitted"
+    
+    submission.status = "Under Review"
     submission.submitted_by = user_id
     submission.submitted_at = datetime.now(timezone.utc)
     submission.last_status_changed_at = datetime.now(timezone.utc)
     submission.updated_by = user_id
+    
+    # Audit log
+    from app.modules.AUDITL.service import log_audit
+    log_audit(
+        actor_user_id=user_id,
+        entity_type="submission",
+        entity_id=submission.id,
+        action="SUBMIT",
+        old_values={"status": old_status},
+        new_values={"status": "Under Review"},
+        metadata={"interim_status": new_status}
+    )
     
     # Trigger NOTIFY event
     from app.modules.NOTIFY.service import create_notification

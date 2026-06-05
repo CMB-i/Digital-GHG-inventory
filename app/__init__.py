@@ -98,6 +98,10 @@ def create_app(config_class=Config):
             return redirect(url_for("auth.login"))
         return redirect(url_for("dashboard"))
 
+    @app.route("/spoc/submissions/download/<path:storage_key>")
+    def spoc_download_redirect(storage_key):
+        return redirect(url_for("submit.download_proof", storage_key=storage_key))
+
     @app.route("/dashboard")
     @require_login
     def dashboard():

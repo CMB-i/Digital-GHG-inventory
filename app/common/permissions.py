@@ -35,12 +35,31 @@ def has_permission(user_id, entity_type, action, scope_site_id=None, entity_id=N
     if flag not in PERMISSION_FLAGS:
         return False
 
-    scope_type = "site" if scope_site_id is not None else "global"
-    permissions = get_user_permissions(
-        user_id=user_id,
-        scope_type=scope_type,
-        scope_site_id=scope_site_id,
-        entity_type=entity_type,
-        entity_id=entity_id,
-    )
-    return permissions.get(flag, False)
+    if scope_site_id is not None:
+        permissions = get_user_permissions(
+            user_id=user_id,
+            scope_type="site",
+            scope_site_id=scope_site_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+        )
+        return permissions.get(flag, False)
+    else:
+        # Check global first
+        permissions = get_user_permissions(
+            user_id=user_id,
+            scope_type="global",
+            entity_type=entity_type,
+            entity_id=entity_id,
+        )
+        if permissions.get(flag, False):
+            return True
+            
+        # Fallback: check if they have permission in *any* site scope (scope_type=None aggregates both)
+        any_site_perms = get_user_permissions(
+            user_id=user_id,
+            scope_type=None,
+            entity_type=entity_type,
+            entity_id=entity_id,
+        )
+        return any_site_perms.get(flag, False)

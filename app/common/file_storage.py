@@ -10,6 +10,19 @@ def get_storage_folder():
         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     return UPLOAD_FOLDER
 
+ALLOWED_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png', '.webp', '.xls', '.xlsx', '.csv'}
+ALLOWED_MIMETYPES = {
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/csv',
+    'application/csv',
+    'text/plain',
+}
+
 def save_file(file_storage, folder="proofs"):
     """
     Saves a Flask FileStorage object to the local directory.
@@ -22,9 +35,16 @@ def save_file(file_storage, folder="proofs"):
     if not original_name:
         original_name = "uploaded_file"
         
+    ext = os.path.splitext(original_name)[1].lower()
+    mime_type = file_storage.content_type or "application/octet-stream"
+    
+    if ext not in ALLOWED_EXTENSIONS or mime_type.lower() not in ALLOWED_MIMETYPES:
+        raise ValueError(
+            f"File type not allowed. Allowed extensions are: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+        )
+        
     # Generate unique ID and relative key
     unique_id = uuid.uuid4().hex
-    ext = os.path.splitext(original_name)[1]
     storage_key = f"{folder}/{unique_id}{ext}"
     
     # Absolute path for saving
@@ -40,7 +60,7 @@ def save_file(file_storage, folder="proofs"):
     return {
         "storage_key": storage_key,
         "original_name": original_name,
-        "mime_type": file_storage.content_type or "application/octet-stream",
+        "mime_type": mime_type,
         "file_size_bytes": size_bytes
     }
 
