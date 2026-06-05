@@ -45,7 +45,9 @@ def index():
 
     selected_user_id = request.args.get("user_id", type=int)
     # Gate drawer states: unauthorized users cannot open these even via URL manipulation.
-    drawer_open = request.args.get("drawer") == "permissions" and perm_manage_users
+    requested_drawer = request.args.get("drawer")
+    drawer_open = requested_drawer == "permissions" and perm_manage_users
+    details_drawer_open = requested_drawer == "details" and perm_manage_users
     create_drawer_open = (
         request.args.get("drawer") == "create"
         and (perm_create or perm_manage_users)
@@ -58,6 +60,7 @@ def index():
     if selected_user is None:
         selected_user_id = None
         drawer_open = False
+        details_drawer_open = False
     if selected_scope_type not in ("global", "site"):
         selected_scope_type = "global"
     if selected_scope_type == "global":
@@ -83,6 +86,7 @@ def index():
         selected_scope_type=selected_scope_type,
         selected_scope_site_id=selected_scope_site_id,
         drawer_open=drawer_open,
+        details_drawer_open=details_drawer_open,
         create_drawer_open=create_drawer_open,
         permission_flags=PERMISSION_FLAGS,
         permission_labels=PERMISSION_LABELS,
@@ -123,14 +127,16 @@ def create():
 
 
 @bp.route("/users/<int:user_id>/edit", methods=["POST"])
-@require_permission("user", ("edit", "manage_users"))
+@require_permission("user", "manage_users")
 def edit(user_id):
+    actor = current_user()
     try:
         user = update_user(
             user_id=user_id,
             full_name=request.form.get("full_name"),
             email=request.form.get("email"),
             phone=request.form.get("phone"),
+            actor_id=actor.id,
         )
         if not user:
             flash("User not found.", "error")
@@ -147,10 +153,15 @@ def edit(user_id):
 
 
 @bp.route("/users/<int:user_id>/password", methods=["POST"])
-@require_permission("user", ("edit", "manage_users"))
+@require_permission("user", "manage_users")
 def password(user_id):
+    actor = current_user()
     try:
-        user = set_temporary_password(user_id, request.form.get("temporary_password"))
+        user = set_temporary_password(
+            user_id,
+            request.form.get("temporary_password"),
+            actor.id,
+        )
         if not user:
             flash("User not found.", "error")
         else:
@@ -168,7 +179,12 @@ def password(user_id):
 @bp.route("/users/<int:user_id>/toggle-active", methods=["POST"])
 @require_permission("user", ("edit", "delete"))
 def toggle_active(user_id):
-    user, error = set_user_active(user_id, request.form.get("is_active") == "true")
+    actor = current_user()
+    user, error = set_user_active(
+        user_id,
+        request.form.get("is_active") == "true",
+        actor.id,
+    )
     if error:
         flash(error, "error")
     elif not user:

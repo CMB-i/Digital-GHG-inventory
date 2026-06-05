@@ -106,6 +106,7 @@
             {% if perm_manage_users or perm_edit or perm_delete %}
             <div class="relative inline-flex items-center justify-end gap-2">
               {% if perm_manage_users %}
+              <a class="action-button" href="{{ url_for('access.index', user_id=user.id, drawer='details') }}">Edit details</a>
               <a class="action-button action-button-primary" href="{{ url_for('access.index', user_id=user.id, drawer='permissions') }}">Edit permissions</a>
               {% endif %}
               {% if perm_edit or perm_delete or perm_manage_users %}
@@ -197,6 +198,42 @@
     <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
       <a class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium" href="{{ url_for('access.index') }}">Cancel</a>
       <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Create User</button>
+    </div>
+  </form>
+</aside>
+{% endif %}
+
+{% if details_drawer_open and selected_user and perm_manage_users %}
+<div class="fixed inset-0 z-40 bg-slate-900/30" aria-hidden="true"></div>
+<aside class="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-xl">
+  <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+    <div>
+      <h2 class="text-lg font-semibold">Edit user details</h2>
+      <p class="mt-1 text-sm text-slate-600">Identity and account fields for {{ selected_user.full_name }}.</p>
+    </div>
+    <a class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" href="{{ url_for('access.index') }}">Cancel</a>
+  </div>
+  <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5" method="post" action="{{ url_for('access.edit', user_id=selected_user.id) }}">
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="edit_full_name">Full name</label>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="edit_full_name" name="full_name" value="{{ selected_user.full_name }}" maxlength="255" pattern="[A-Za-z0-9 .,'_-]+" required>
+    </div>
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="edit_email">Email</label>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="edit_email" name="email" type="email" value="{{ selected_user.email }}" maxlength="255" required>
+    </div>
+    <div>
+      <label class="text-xs font-medium text-slate-600" for="edit_phone">Phone</label>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="edit_phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="9876543210" value="{{ selected_user.phone or '' }}" pattern="[6-9][0-9]{9}" maxlength="10" data-indian-mobile>
+      <p class="mt-1 text-xs text-slate-500">Enter a 10-digit Indian mobile number.</p>
+    </div>
+    <div class="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <p class="text-xs font-medium text-slate-600">Status</p>
+      <p class="mt-1 text-sm text-slate-800">{{ "Active" if selected_user.is_active else "Inactive" }}</p>
+    </div>
+    <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
+      <a class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium" href="{{ url_for('access.index') }}">Cancel</a>
+      <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Save details</button>
     </div>
   </form>
 </aside>
