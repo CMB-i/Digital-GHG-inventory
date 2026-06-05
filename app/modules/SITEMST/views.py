@@ -1,4 +1,4 @@
-from flask import Blueprint, flash, redirect, render_template, request, url_for, jsonify
+from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from app.common.auth import current_user
 from app.common.decorators import require_permission
@@ -137,16 +137,3 @@ def reactivate(site_id):
         db.session.rollback()
         flash("Could not reactivate site.", "error")
     return redirect(url_for("sitemst.index"))
-
-
-@bp.route("/api", methods=["GET"])
-@require_permission("site", "view")
-def get_list():
-    """Expose active sites list for use in Form Builder site applicability picker."""
-    active_sites, _ = list_sites()
-    return jsonify([{
-        "id": s.id,
-        "name": s.name,
-        "code": s.code,
-        "company_name": s.company_name
-    } for s in active_sites])
