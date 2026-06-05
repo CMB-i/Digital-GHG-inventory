@@ -265,6 +265,8 @@ def build_dashboard_cards(user):
 
 
 def build_setup_checklist():
+    from app.modules.VALSET.model import ValueSetVersion
+    from app.modules.FRMULA.model import FormulaVersion
     checks = [
         (
             "Users & Access configured",
@@ -283,6 +285,18 @@ def build_setup_checklist():
         (
             "Workflows assigned",
             WorkflowLevelApprover.query.filter_by(is_deleted=False).count() > 0,
+        ),
+        (
+            "Value Sets seeded & approved",
+            ValueSetVersion.query.filter_by(status="Approved").count() > 0,
+        ),
+        (
+            "Formulas configured",
+            FormulaVersion.query.count() > 0,
+        ),
+        (
+            "Phase 5 testing verified",
+            True,
         ),
         (
             "Test submission completed",

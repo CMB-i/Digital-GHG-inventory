@@ -17,10 +17,31 @@ from app.modules.FRMULA.service import (
     create_new_formula_draft,
 )
 from app.modules.USRMGMT.model import User
+from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
 
 
 MODULE_CODE = "FRMULA"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
+
+
+def _get_active_valset_codes():
+    """Return the set of all entry_code values from currently approved value sets."""
+    approved = (
+        ValueSet.query.filter_by(is_deleted=False)
+        .join(ValueSetVersion, ValueSetVersion.id == ValueSet.current_version_id)
+        .filter(ValueSetVersion.status == "Approved")
+        .all()
+    )
+    codes = set()
+    for vs in approved:
+        entries = ValueSetEntry.query.filter_by(
+            value_set_version_id=vs.current_version_id,
+            is_deleted=False,
+            is_active=True,
+        ).all()
+        for e in entries:
+            codes.add(e.entry_code)
+    return codes
 
 
 @bp.route("/", methods=["GET", "POST"])
@@ -124,9 +145,10 @@ def create():
 
     user = current_user()
     try:
-        # Validate expression with its token keys
-        validate_formula(expression, set(tokens.keys()))
-        
+        # Merge token keys with all active valset codes for validation
+        allowed_names = set(tokens.keys()) | _get_active_valset_codes()
+        validate_formula(expression, allowed_names)
+
         formula = create_formula(name, code, expression, tokens, user.id)
         db.session.commit()
         return success_response(
@@ -163,10 +185,12 @@ def update_details(formula_id):
 def validate_endpoint():
     data = request.get_json() or {}
     expression = data.get("expression")
-    field_codes = data.get("field_codes", [])
-    
+    field_codes = set(data.get("field_codes", []))
+    # Merge in all active value set entry codes so valset-only formulas pass
+    field_codes |= _get_active_valset_codes()
+
     try:
-        validate_formula(expression, set(field_codes))
+        validate_formula(expression, field_codes)
         return jsonify({"valid": True, "message": "Formula is valid."})
     except FormulaValidationError as e:
         return jsonify({"valid": False, "error": str(e)})
@@ -223,7 +247,9 @@ def create_new_version(formula_id):
 
     user = current_user()
     try:
-        validate_formula(expression, set(tokens.keys()))
+        # Merge token keys with all active valset codes for validation
+        allowed_names = set(tokens.keys()) | _get_active_valset_codes()
+        validate_formula(expression, allowed_names)
         new_version = create_new_formula_draft(formula_id, expression, tokens, user.id)
         db.session.commit()
         return success_response(

@@ -3,6 +3,8 @@ document.addEventListener("DOMContentLoaded", function () {
   let selectedFormulaId = null;
   let selectedVersionId = null;
   let isPublished = false;
+  // Track value set entry codes inserted via palette — used when building tokens for save/validate
+  const insertedValsetCodes = new Set();
 
   // View elements
   const listView = document.getElementById("list-view");
@@ -223,9 +225,10 @@ document.addEventListener("DOMContentLoaded", function () {
     scanVariablesAndInitPreview();
   };
 
-  // Bind palette constants click
+  // Bind palette constants click — also record the code so it's included in field_codes during validate/save
   document.querySelectorAll(".palette-btn-valset").forEach(btn => {
     btn.onclick = () => {
+      insertedValsetCodes.add(btn.dataset.code);
       insertToken(btn.dataset.code);
     };
   });
@@ -377,8 +380,8 @@ document.addEventListener("DOMContentLoaded", function () {
       });
   };
 
-  // --- Save Draft ---
-  btnSaveFormula.onclick = function () {
+  // --- Save Draft (async/await to fix broken promise chain) ---
+  btnSaveFormula.onclick = async function () {
     const expression = expressionTextarea.value.trim();
     if (!expression) {
       showToast("Formula expression is empty.", "error");
@@ -389,107 +392,127 @@ document.addEventListener("DOMContentLoaded", function () {
       showToast("Formula name is required.", "error");
       return;
     }
+
+    // Build tokens from all detected variables (form fields + any valset codes used)
     const variables = scanVariables();
     const tokens = {};
     variables.forEach(v => tokens[v] = v);
+    // Merge in any explicitly inserted valset codes (in case they overlap with variable scan)
+    insertedValsetCodes.forEach(c => {
+      if (variables.includes(c)) tokens[c] = c;
+    });
 
-    // Call validation first
-    fetch("/module/FRMULA/api/validate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expression, field_codes: variables })
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (!data.valid) {
-          showToast(`Validate error: ${data.error}`, "error");
+    // All field codes to pass to validation = form variables + inserted valset codes
+    const field_codes = [...new Set([...variables, ...insertedValsetCodes])];
+
+    // Disable button to prevent double-clicks
+    btnSaveFormula.disabled = true;
+    const originalText = btnSaveFormula.textContent;
+    btnSaveFormula.textContent = "Saving...";
+
+    try {
+      // Step 1: Validate expression
+      const validateRes = await fetch("/module/FRMULA/api/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expression, field_codes })
+      });
+      const validateData = await validateRes.json();
+
+      if (!validateData.valid) {
+        showToast(`Syntax error: ${validateData.error}`, "error");
+        return;
+      }
+
+      if (selectedFormulaId === null) {
+        // Creating a new formula directly from the editor
+        const code = dfCode.value.trim().toUpperCase().replace(/\s+/g, "_");
+        if (!code) {
+          showToast("Formula code is required.", "error");
+          return;
+        }
+        const createRes = await fetch("/module/FRMULA/api", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, code, expression, tokens })
+        });
+        const createData = await createRes.json();
+        if (createData.error) {
+          showToast(createData.error, "error");
+        } else {
+          showToast("Formula created successfully!");
+          showList();
+        }
+      } else {
+        // Step 2: Update the formula name via PUT
+        const putRes = await fetch(`/module/FRMULA/api/${selectedFormulaId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name })
+        });
+        const putData = await putRes.json();
+        if (putData.error) {
+          showToast(putData.error, "error");
           return;
         }
 
-        if (selectedFormulaId === null) {
-          // Creating a new formula
-          const code = dfCode.value.trim().toUpperCase().replace(/\s+/g, "_");
-          if (!code) {
-            showToast("Formula code is required.", "error");
-            return;
-          }
-
-          fetch("/module/FRMULA/api", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, code, expression, tokens })
-          })
-            .then(res => res.json())
-            .then(resData => {
-              if (resData.error) {
-                showToast(resData.error, "error");
-              } else {
-                showToast("Formula created successfully!");
-                showList();
-              }
-            });
+        // Step 3: Save the expression as a new draft version via POST
+        const draftRes = await fetch(`/module/FRMULA/api/${selectedFormulaId}/new-version`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ expression, tokens })
+        });
+        const draftData = await draftRes.json();
+        if (draftData.error) {
+          showToast(draftData.error, "error");
         } else {
-          // Saving an existing formula details and expression draft
-          // 1. Update the formula name (PUT)
-          fetch(`/module/FRMULA/api/${selectedFormulaId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name })
-          })
-            .then(res => res.json())
-            .then(resData => {
-              if (resData.error) {
-                showToast(resData.error, "error");
-                throw new Error(resData.error);
-              }
-              
-              // 2. Update/Save the draft expression and tokens (POST)
-              return fetch(`/module/FRMULA/api/${selectedFormulaId}/new-version`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ expression, tokens })
-              });
-            })
-            .then(res => res.json())
-            .then(resData => {
-              if (resData.error) {
-                showToast(resData.error, "error");
-              } else {
-                showToast("Formula draft saved successfully!");
-                showList();
-              }
-            })
-            .catch(err => {
-              console.error("Error saving formula:", err);
-            });
+          showToast("Formula draft saved successfully!");
+          // Reload version to reflect new version id
+          if (draftData.data && draftData.data.version_id) {
+            selectedVersionId = draftData.data.version_id;
+          }
+          loadVersionDetails(selectedVersionId);
         }
-      });
+      }
+    } catch (err) {
+      console.error("Error saving formula:", err);
+      showToast("Failed to save formula. Check console for details.", "error");
+    } finally {
+      btnSaveFormula.disabled = false;
+      btnSaveFormula.textContent = originalText;
+    }
   };
 
   // --- Publish Version ---
-  btnPublishFormula.onclick = function () {
+  btnPublishFormula.onclick = async function () {
     if (!selectedVersionId) return;
 
     if (!confirm("Are you sure you want to publish this formula version? It will become active and immutable.")) {
       return;
     }
 
-    fetch(`/module/FRMULA/api/version/${selectedVersionId}/publish`, {
-      method: "POST"
-    })
-      .then(res => res.json())
-      .then(resData => {
-        if (resData.error) {
-          showToast(resData.error, "error");
-        } else {
-          showToast("Formula published successfully!");
-          showList();
-        }
-      })
-      .catch(err => {
-        console.error("Error publishing formula:", err);
-        showToast("Failed to publish formula.", "error");
+    btnPublishFormula.disabled = true;
+    const originalText = btnPublishFormula.textContent;
+    btnPublishFormula.textContent = "Publishing...";
+
+    try {
+      const res = await fetch(`/module/FRMULA/api/version/${selectedVersionId}/publish`, {
+        method: "POST"
       });
+      const resData = await res.json();
+      if (resData.error) {
+        showToast(resData.error, "error");
+      } else {
+        showToast("Formula published successfully!");
+        showList();
+      }
+    } catch (err) {
+      console.error("Error publishing formula:", err);
+      showToast("Failed to publish formula.", "error");
+    } finally {
+      btnPublishFormula.disabled = false;
+      btnPublishFormula.textContent = originalText;
+    }
   };
 
   // Modal actions
