@@ -8,6 +8,7 @@ class ValueSet(FullLifecycleMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
     code = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=True)
     current_version_id = db.Column(
         db.Integer,
         db.ForeignKey("value_set_versions.id", use_alter=True, name="fk_value_sets_current_version_id"),
