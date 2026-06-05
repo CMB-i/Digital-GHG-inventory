@@ -2,6 +2,7 @@
 
 from app.modules.ACCESS import model as access_model  # noqa: F401
 from app.modules.APPROV import model as approv_model  # noqa: F401
+from app.modules.AUDITL import model as auditl_model  # noqa: F401
 from app.modules.FORMBLD import model as formbld_model  # noqa: F401
 from app.modules.FRMULA import model as frmula_model  # noqa: F401
 from app.modules.NOTIFY import model as notify_model  # noqa: F401

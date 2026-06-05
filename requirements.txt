@@ -3,7 +3,6 @@ Flask-SQLAlchemy
 alembic
 psycopg2-binary
 python-dotenv
-flask-jwt-extended
 bcrypt
 simpleeval
 waitress

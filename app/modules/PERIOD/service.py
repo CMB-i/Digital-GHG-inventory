@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 
 from app.common.validators import ValidationError
 from app.database import db
+from app.modules.AUDITL.service import log_audit
 from app.modules.PERIOD.model import ReportingPeriod
 
 
@@ -130,6 +131,7 @@ def transition_period(period_id, target_status, actor_id, reopen_reason=None):
             f"Cannot transition from {period.status} to {target_status}."
         )
 
+    old_status = period.status
     if target_status == "REOPENED":
         reason = (reopen_reason or "").strip()
         if not reason:
@@ -139,4 +141,13 @@ def transition_period(period_id, target_status, actor_id, reopen_reason=None):
         period.reopened_by = actor_id
 
     period.status = target_status
+    period.updated_by = actor_id
+    log_audit(
+        actor_id,
+        "period",
+        period.id,
+        "PERIOD_STATUS_CHANGED",
+        old_values={"status": old_status},
+        new_values={"status": target_status},
+    )
     return period

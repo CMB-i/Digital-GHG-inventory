@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from app.common.validators import ValidationError, validate_code, validate_text_length
 from app.database import db
+from app.modules.AUDITL.service import log_audit
 from app.modules.SITEMST.model import Site
 
 
@@ -29,6 +30,16 @@ def _validate_site_fields(name, code, company_name, description):
     return name, code, company_name, description
 
 
+def _site_snapshot(site):
+    return {
+        "name": site.name,
+        "code": site.code,
+        "company_name": site.company_name,
+        "description": site.description,
+        "is_deleted": site.is_deleted,
+    }
+
+
 def create_site(name, code, company_name, description, actor_id):
     name, code, company_name, description = _validate_site_fields(
         name, code, company_name, description
@@ -52,10 +63,11 @@ def create_site(name, code, company_name, description, actor_id):
     return site
 
 
-def update_site(site_id, name, code, company_name, description):
+def update_site(site_id, name, code, company_name, description, actor_id):
     site = Site.query.filter_by(id=site_id).one_or_none()
     if not site:
         return None
+    old_values = _site_snapshot(site)
     name, code, company_name, description = _validate_site_fields(
         name, code, company_name, description
     )
@@ -71,6 +83,15 @@ def update_site(site_id, name, code, company_name, description):
     site.code = code
     site.company_name = company_name
     site.description = description
+    site.updated_by = actor_id
+    log_audit(
+        actor_id,
+        "site",
+        site.id,
+        "SITE_UPDATED",
+        old_values=old_values,
+        new_values=_site_snapshot(site),
+    )
     return site
 
 
@@ -81,6 +102,15 @@ def deactivate_site(site_id, actor_id):
     site.is_deleted = True
     site.deleted_at = _utc_now()
     site.deleted_by = actor_id
+    site.updated_by = actor_id
+    log_audit(
+        actor_id,
+        "site",
+        site.id,
+        "SITE_DEACTIVATED",
+        old_values={"is_deleted": False},
+        new_values={"is_deleted": True},
+    )
     return site
 
 
@@ -93,4 +123,14 @@ def reactivate_site(site_id, actor_id):
     site.is_deleted = False
     site.deleted_at = None
     site.deleted_by = None
+    site.delete_reason = None
+    site.updated_by = actor_id
+    log_audit(
+        actor_id,
+        "site",
+        site.id,
+        "SITE_REACTIVATED",
+        old_values={"is_deleted": True},
+        new_values={"is_deleted": False},
+    )
     return site

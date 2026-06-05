@@ -76,6 +76,7 @@ def seed_admin_access(admin):
         if existing:
             for flag in PERMISSION_FLAGS:
                 setattr(existing, flag, True)
+            existing.updated_by = admin.id
             continue
 
         values = {
