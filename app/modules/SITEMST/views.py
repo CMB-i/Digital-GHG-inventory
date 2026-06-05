@@ -140,6 +140,7 @@ def reactivate(site_id):
 @bp.route("/api", methods=["GET"])
 @require_permission("site", "view")
 def get_list():
+    """Expose active sites list for use in Form Builder site applicability picker."""
     active_sites, _ = list_sites()
     return jsonify([{
         "id": s.id,

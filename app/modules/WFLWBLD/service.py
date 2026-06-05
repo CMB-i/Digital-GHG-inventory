@@ -58,11 +58,19 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
     if version.published_at is not None:
         raise ValueError("Only Draft versions can be modified.")
         
-    # Delete existing approvers and levels for this draft version
-    existing_levels = WorkflowLevel.query.filter_by(workflow_version_id=workflow_version_id).all()
+    # Soft-delete existing levels and approvers for this draft version instead of hard-deleting
+    existing_levels = WorkflowLevel.query.filter_by(workflow_version_id=workflow_version_id, is_deleted=False).all()
     for lvl in existing_levels:
-        WorkflowLevelApprover.query.filter_by(workflow_level_id=lvl.id).delete(synchronize_session=False)
-        db.session.delete(lvl)
+        existing_approvers = WorkflowLevelApprover.query.filter_by(workflow_level_id=lvl.id, is_deleted=False).all()
+        for app in existing_approvers:
+            app.is_deleted = True
+            app.deleted_by = user_id
+            app.deleted_at = datetime.now(timezone.utc)
+            app.delete_reason = "Overwritten by new draft save"
+        lvl.is_deleted = True
+        lvl.deleted_by = user_id
+        lvl.deleted_at = datetime.now(timezone.utc)
+        lvl.delete_reason = "Overwritten by new draft save"
     db.session.flush()
     
     # Insert new levels and their approvers

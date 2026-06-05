@@ -147,6 +147,17 @@
         inputEl.type = "date";
         inputEl.className = "form-input block w-full rounded-lg border-slate-300 text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm h-10 px-3 transition-colors";
         inputEl.value = values[field.field_code] || "";
+      } else if (field.field_type === "boolean") {
+        // Boolean Checkbox Element
+        inputEl = document.createElement("input");
+        inputEl.type = "checkbox";
+        inputEl.className = "form-checkbox rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-5 w-5 my-2.5 transition-colors";
+        
+        let val = values[field.field_code];
+        if (val && typeof val === "object") {
+          val = val.raw_value;
+        }
+        inputEl.checked = (val === true || val === "true" || val === "1" || val === 1 || val === "on");
       } else if (field.field_type === "file") {
         // File Element Container
         const fileContainer = document.createElement("div");
@@ -353,23 +364,35 @@
         }
       }
 
-      // For interactive fields (dropdown, date, text, number), apply disabled/readonly depending on mode
+      // For interactive fields (dropdown, date, text, number, boolean), apply disabled/readonly depending on mode
       if (inputEl && field.field_type !== "calculated") {
         if (mode !== "spoc_entry") {
           inputEl.disabled = true;
-          inputEl.classList.add("bg-slate-50", "text-slate-500", "border-slate-200", "cursor-not-allowed");
+          if (field.field_type !== "boolean") {
+            inputEl.classList.add("bg-slate-50", "text-slate-500", "border-slate-200", "cursor-not-allowed");
+          } else {
+            inputEl.classList.add("cursor-not-allowed");
+          }
         } else {
           // Listeners for SPOC Entry (dynamic recalculation)
           const handler = function () {
-            values[field.field_code] = inputEl.value;
+            if (field.field_type === "boolean") {
+              values[field.field_code] = inputEl.checked;
+            } else {
+              values[field.field_code] = inputEl.value;
+            }
             recalculate();
             if (options.onValueChange) {
-              options.onValueChange(field.field_code, inputEl.value, values);
+              options.onValueChange(field.field_code, values[field.field_code], values);
             }
           };
 
-          inputEl.addEventListener("input", handler);
-          inputEl.addEventListener("change", handler);
+          if (field.field_type === "boolean") {
+            inputEl.addEventListener("change", handler);
+          } else {
+            inputEl.addEventListener("input", handler);
+            inputEl.addEventListener("change", handler);
+          }
         }
 
         // Handle Unit styling

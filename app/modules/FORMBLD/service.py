@@ -29,6 +29,7 @@ def get_formula_compatible_fields(form_version_id):
         .join(Field, Field.id == FieldVersion.field_id)
         .filter(
             FieldVersion.form_version_id == form_version_id,
+            FieldVersion.is_deleted.is_(False),
             Field.is_deleted.is_(False),
         )
         .order_by(Field.display_order.asc(), Field.id.asc())
@@ -102,6 +103,7 @@ def get_form_version_fields(form_version_id):
         .join(Field, Field.id == FieldVersion.field_id)
         .filter(
             FieldVersion.form_version_id == form_version_id,
+            FieldVersion.is_deleted.is_(False),
             Field.is_deleted.is_(False),
         )
         .order_by(Field.display_order.asc(), Field.id.asc())
@@ -116,10 +118,23 @@ def save_form_draft_fields(form_version_id, fields_list, user_id):
     if form_version.status != "Draft":
         raise ValueError("Only Draft versions can be modified.")
         
-    # Delete existing field_versions for this form_version_id
-    existing_fvs = FieldVersion.query.filter_by(form_version_id=form_version_id).all()
+    # Check for duplicate field codes in the input list
+    seen_codes = set()
+    for f_data in fields_list:
+        code = f_data.get("field_code")
+        if code:
+            code_strip = code.strip()
+            if code_strip in seen_codes:
+                raise ValueError(f"Duplicate field code '{code_strip}' found in form fields.")
+            seen_codes.add(code_strip)
+
+    # Soft-delete existing field_versions for this form_version_id instead of hard-deleting
+    existing_fvs = FieldVersion.query.filter_by(form_version_id=form_version_id, is_deleted=False).all()
     for fv in existing_fvs:
-        db.session.delete(fv)
+        fv.is_deleted = True
+        fv.deleted_by = user_id
+        fv.deleted_at = datetime.now(timezone.utc)
+        fv.delete_reason = "Overwritten by new draft save"
         
     # Soft-delete fields that are no longer present
     present_codes = {f.get("field_code") for f in fields_list if f.get("field_code")}

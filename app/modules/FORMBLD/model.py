@@ -57,7 +57,7 @@ class Field(FullLifecycleMixin, db.Model):
     )
 
 
-class FieldVersion(CreatedMixin, db.Model):
+class FieldVersion(FullLifecycleMixin, db.Model):
     __tablename__ = "field_versions"
 
     id = db.Column(db.Integer, primary_key=True)

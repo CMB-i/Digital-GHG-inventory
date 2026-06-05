@@ -32,6 +32,8 @@ def validate_formula(expression, operand_names):
         raise FormulaValidationError("Only min() and max() functions are supported.") from error
     except TypeError as error:
         raise FormulaValidationError("min() and max() require numeric operands.") from error
+    except ZeroDivisionError:
+        raise FormulaValidationError("Division by zero in formula.")
     except Exception as error:
         raise FormulaValidationError(f"Invalid formula: {error}.") from error
 
@@ -169,8 +171,35 @@ def publish_formula_version(version_id, user_id):
     if version.published_at is not None:
         raise ValueError("Formula version is already published.")
         
+    tokens_keys = set((version.tokens or {}).keys())
+    
+    # Cross-check tokens against actual live form field codes and approved value set entry codes
+    from app.modules.FORMBLD.model import Field
+    active_field_codes = {f.field_code for f in Field.query.filter_by(is_deleted=False).all()}
+    
+    from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
+    approved_valsets = (
+        ValueSet.query.filter_by(is_deleted=False)
+        .join(ValueSetVersion, ValueSetVersion.id == ValueSet.current_version_id)
+        .filter(ValueSetVersion.status == "Approved")
+        .all()
+    )
+    active_valset_codes = set()
+    for vs in approved_valsets:
+        entries = ValueSetEntry.query.filter_by(
+            value_set_version_id=vs.current_version_id,
+            is_deleted=False,
+            is_active=True
+        ).all()
+        for entry in entries:
+            active_valset_codes.add(entry.entry_code)
+            
+    for t_key in tokens_keys:
+        if t_key not in active_field_codes and t_key not in active_valset_codes:
+            raise FormulaValidationError(f"Referenced field/constant '{t_key}' does not exist as an active field or value set entry in the system.")
+
     # Validate it works (optional, but a great safeguard)
-    validate_formula(version.expression, set((version.tokens or {}).keys()))
+    validate_formula(version.expression, tokens_keys)
 
     # Mark published
     version.published_at = datetime.now(timezone.utc)
