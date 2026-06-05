@@ -1,13 +1,133 @@
 {% extends "base.html" %}
 {% block title %}Review Queue - Digital GHG Inventory{% endblock %}
+
 {% block content %}
-<section class="space-y-6">
-  <div>
-    <h1 class="text-2xl font-semibold">Review Queue</h1>
-    <p class="mt-2 text-sm text-slate-600">Review submitted sheets and record approval decisions.</p>
+<div class="space-y-8 animate-fade-in">
+  <!-- Header Section -->
+  <div class="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-200 pb-5">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Review Queue</h1>
+      <p class="mt-2 text-sm text-slate-500">Review submitted data sheets and record approval/rejection decisions.</p>
+    </div>
   </div>
-  {% set empty_title = "No sheets awaiting review." %}
-  {% set empty_body = "Submitted sheets assigned to your review level will appear here." %}
-  {% include "partials/empty_state.html" %}
-</section>
+
+  <!-- Summary Cards -->
+  <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+    <!-- Pending Review -->
+    <div class="bg-white overflow-hidden shadow-sm rounded-xl border border-indigo-200/80">
+      <div class="p-5">
+        <div class="flex items-center">
+          <div class="flex-shrink-0 bg-indigo-50 rounded-lg p-2.5 text-indigo-600">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div class="ml-4 w-0 flex-1">
+            <dl>
+              <dt class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Awaiting Review</dt>
+              <dd class="flex items-baseline">
+                <div id="stat-pending" class="text-2xl font-bold text-slate-900">0</div>
+                <div class="ml-2 text-xs font-medium text-indigo-600">sheets assigned</div>
+              </dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recently Actioned -->
+    <div class="bg-white overflow-hidden shadow-sm rounded-xl border border-emerald-200/80">
+      <div class="p-5">
+        <div class="flex items-center">
+          <div class="flex-shrink-0 bg-emerald-50 rounded-lg p-2.5 text-emerald-600">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+          </div>
+          <div class="ml-4 w-0 flex-1">
+            <dl>
+              <dt class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Recently Actioned</dt>
+              <dd class="flex items-baseline">
+                <div id="stat-history" class="text-2xl font-bold text-slate-900">0</div>
+                <div class="ml-2 text-xs font-medium text-emerald-600">sheets completed</div>
+              </dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Queue Table: Pending Review -->
+  <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
+      <div>
+        <h2 class="text-md font-bold text-slate-900 flex items-center">
+          <span class="h-2 w-2 rounded-full bg-indigo-500 mr-2.5"></span>
+          Pending Review
+        </h2>
+        <p class="text-xs text-slate-500 mt-0.5">Submissions awaiting your level authorization.</p>
+      </div>
+      <span id="badge-pending" class="bg-indigo-100 text-indigo-800 text-[10px] px-2 py-0.5 rounded-full font-bold">0 sheets</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-200">
+        <thead class="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <tr>
+            <th class="px-6 py-3 text-left">Form Name</th>
+            <th class="px-6 py-3 text-left">Site</th>
+            <th class="px-6 py-3 text-left">Reporting Period</th>
+            <th class="px-6 py-3 text-left">Current Level</th>
+            <th class="px-6 py-3 text-left">Submitted By</th>
+            <th class="px-6 py-3 text-left">Days Waiting</th>
+            <th class="px-6 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="table-pending" class="divide-y divide-slate-100 text-sm text-slate-700">
+          <tr>
+            <td colspan="7" class="px-6 py-8 text-center text-slate-400 italic">Loading review queue...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Queue Table: Actioned History -->
+  <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
+      <div>
+        <h2 class="text-md font-bold text-slate-900 flex items-center">
+          <span class="h-2 w-2 rounded-full bg-slate-400 mr-2.5"></span>
+          Recently Actioned (History)
+        </h2>
+        <p class="text-xs text-slate-500 mt-0.5">Sheets you approved, returned, or rejected recently.</p>
+      </div>
+      <span id="badge-history" class="bg-slate-100 text-slate-800 text-[10px] px-2 py-0.5 rounded-full font-bold">0 sheets</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-200">
+        <thead class="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <tr>
+            <th class="px-6 py-3 text-left">Form Name</th>
+            <th class="px-6 py-3 text-left">Site</th>
+            <th class="px-6 py-3 text-left">Reporting Period</th>
+            <th class="px-6 py-3 text-left">Your Action</th>
+            <th class="px-6 py-3 text-left">Current Status</th>
+            <th class="px-6 py-3 text-left">Action Date</th>
+            <th class="px-6 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="table-history" class="divide-y divide-slate-100 text-sm text-slate-700">
+          <tr>
+            <td colspan="7" class="px-6 py-8 text-center text-slate-400 italic">Loading history...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/approver_queue.js') }}"></script>
 {% endblock %}
