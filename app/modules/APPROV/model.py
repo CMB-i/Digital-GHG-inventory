@@ -28,6 +28,7 @@ class Issue(FullLifecycleMixin, db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     submission_id = db.Column(db.Integer, db.ForeignKey("submissions.id"), nullable=False)
+    field_id = db.Column(db.Integer, db.ForeignKey("fields.id"), nullable=True)
     raised_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text, nullable=False)
@@ -38,6 +39,7 @@ class Issue(FullLifecycleMixin, db.Model):
 
     __table_args__ = (
         db.Index("idx_issues_submission", "submission_id"),
+        db.Index("idx_issues_field", "field_id"),
     )
 
 
