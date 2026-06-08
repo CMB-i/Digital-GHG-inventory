@@ -14,7 +14,7 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 
 
 @bp.route("/")
-@require_permission("notification", "view")
+@require_login
 def index():
     """
     Renders the main notifications page listing all notifications for the user.
