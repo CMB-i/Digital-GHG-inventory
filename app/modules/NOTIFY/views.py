@@ -32,8 +32,8 @@ def index():
             sub = Submission.query.get(n.entity_id)
             if sub and sub.status == "Changes Requested" and sub.submitted_by == user.id:
                 link_url = f"/module/SUBMIT/submissions/{n.entity_id}"
-            elif has_permission(user.id, "submission", "approve", scope_site_id=None) or \
-                 has_permission(user.id, "submission", "reject", scope_site_id=None):
+            elif sub and (has_permission(user.id, "submission", "approve", scope_site_id=sub.site_id) or \
+                          has_permission(user.id, "submission", "reject", scope_site_id=sub.site_id)):
                 link_url = f"/module/APPROV/submissions/{n.entity_id}"
             else:
                 link_url = f"/module/SUBMIT/submissions/{n.entity_id}"
@@ -70,8 +70,8 @@ def recent():
             sub = Submission.query.get(n.entity_id)
             if sub and sub.status == "Changes Requested" and sub.submitted_by == user.id:
                 link_url = f"/module/SUBMIT/submissions/{n.entity_id}"
-            elif has_permission(user.id, "submission", "approve", scope_site_id=None) or \
-                 has_permission(user.id, "submission", "reject", scope_site_id=None):
+            elif sub and (has_permission(user.id, "submission", "approve", scope_site_id=sub.site_id) or \
+                          has_permission(user.id, "submission", "reject", scope_site_id=sub.site_id)):
                 link_url = f"/module/APPROV/submissions/{n.entity_id}"
             else:
                 link_url = f"/module/SUBMIT/submissions/{n.entity_id}"
