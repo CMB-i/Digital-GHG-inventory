@@ -11,9 +11,12 @@
   <div class="min-h-screen lg:flex">
     {% if current_user %}
     <aside class="bg-white border-r border-slate-200 lg:w-72">
-      <div class="px-5 py-4 border-b border-slate-200">
-        <a href="{{ url_for('dashboard') }}" class="text-lg font-semibold">Digital GHG Inventory</a>
-        <p class="text-xs text-slate-500">{{ current_user.full_name }}</p>
+      <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div>
+          <a href="{{ url_for('dashboard') }}" class="text-lg font-semibold text-slate-900">Digital GHG Inventory</a>
+          <p class="text-xs text-slate-500">{{ current_user.full_name }}</p>
+        </div>
+        {% include "partials/notification_bell.html" %}
       </div>
       <nav class="flex min-h-[calc(100vh-73px)] flex-col p-3 text-sm">
         <div class="grid gap-4">
@@ -42,6 +45,7 @@
   </div>
   <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
   <script src="{{ url_for('static', filename='js/phone_input.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
