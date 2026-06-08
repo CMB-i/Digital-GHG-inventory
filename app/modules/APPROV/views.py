@@ -160,6 +160,14 @@ def get_submission_details(submission_id):
         site = Site.query.get(submission.site_id)
         period = ReportingPeriod.query.get(submission.reporting_period_id)
 
+        from app.common.permissions import has_permission
+        can_resubmit = (
+            submission.status == "Changes Requested" and (
+                has_permission(user.id, "submission", "create", scope_site_id=submission.site_id) or
+                has_permission(user.id, "submission", "submit", scope_site_id=submission.site_id)
+            )
+        )
+
         metadata = {
             "submission_id": submission.id,
             "form_name": form.name if form else "",
@@ -168,7 +176,8 @@ def get_submission_details(submission_id):
             "status": submission.status,
             "current_level": submission.current_level,
             "submitted_by": User.query.get(submission.submitted_by).full_name if submission.submitted_by else "",
-            "submitted_at": submission.submitted_at
+            "submitted_at": submission.submitted_at,
+            "can_resubmit": can_resubmit
         }
 
         return success_response(data={

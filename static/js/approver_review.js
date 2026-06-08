@@ -65,11 +65,32 @@ document.addEventListener("DOMContentLoaded", function () {
         badgeStatus.className = `inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${getStatusClass(data.metadata.status)}`;
         badgeStatus.textContent = data.metadata.status;
 
-        // Hide action controls if already Approved or Rejected
-        if (data.metadata.status === "Approved" || data.metadata.status === "Rejected") {
+        // Hide action controls if already Approved, Rejected, or Changes Requested
+        if (data.metadata.status === "Approved" || data.metadata.status === "Rejected" || data.metadata.status === "Changes Requested") {
           const actionsPanel = document.getElementById("actions-panel");
           if (actionsPanel) {
-            actionsPanel.innerHTML = `<div class="text-center py-4 text-slate-500 italic text-sm border-2 border-dashed border-slate-200 rounded-lg">Submission is locked (${data.metadata.status}). No review actions required.</div>`;
+            if (data.metadata.status === "Changes Requested") {
+              if (data.metadata.can_resubmit) {
+                actionsPanel.innerHTML = `
+                  <div class="space-y-4 text-center">
+                    <div class="p-4 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold rounded-lg leading-relaxed">
+                      Changes have been requested for this submission.
+                    </div>
+                    <a href="/module/SUBMIT/submissions/${submissionId}" class="w-full inline-flex justify-center items-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-sm hover:shadow transition-all">
+                      Edit Entry &amp; Resubmit
+                    </a>
+                  </div>
+                `;
+              } else {
+                actionsPanel.innerHTML = `
+                  <div class="text-center py-4 text-slate-500 italic text-sm border-2 border-dashed border-slate-200 rounded-lg leading-relaxed">
+                    Changes have been requested from the submitter. Awaiting resubmission.
+                  </div>
+                `;
+              }
+            } else {
+              actionsPanel.innerHTML = `<div class="text-center py-4 text-slate-500 italic text-sm border-2 border-dashed border-slate-200 rounded-lg">Submission is locked (${data.metadata.status}). No review actions required.</div>`;
+            }
           }
           if (btnRaiseIssueModal) btnRaiseIssueModal.classList.add("hidden");
         }
