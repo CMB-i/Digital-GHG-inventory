@@ -15,18 +15,7 @@ def _utc_now():
     return datetime.now(timezone.utc)
 
 
-def _create_notification(user_id, event_type, entity_type, entity_id, message):
-    from app.modules.NOTIFY.model import Notification
-
-    db.session.add(
-        Notification(
-            user_id=user_id,
-            event_type=event_type,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            message=message,
-        )
-    )
+# (Removed local notification helper, now importing from NOTIFY service)
 
 
 def get_approver_queue(user_id):
@@ -303,25 +292,8 @@ def approve_submission(submission_id, user_id, comment=None):
             submission.updated_by = user_id
 
             # Notify next level approvers
-            from app.modules.SITEMST.model import Site
-            from app.modules.FORMBLD.model import Form
-            site = Site.query.get(submission.site_id)
-            form = Form.query.get(submission.form_id)
-
-            # Get users assigned as approvers for the next level
-            next_approvers = WorkflowLevelApprover.query.filter_by(
-                workflow_level_id=next_lvl.id,
-                is_deleted=False
-            ).all()
-
-            for app in next_approvers:
-                _create_notification(
-                    user_id=app.user_id,
-                    event_type="SUBMITTED",
-                    entity_type="submission",
-                    entity_id=submission_id,
-                    message=f"Submission from {site.name} for {form.name} is now pending your Level {submission.current_level} review."
-                )
+            from app.modules.NOTIFY.service import notify_level_approvers
+            notify_level_approvers(submission_id)
         else:
             # Final Approval
             # Verify no open issues
@@ -355,13 +327,12 @@ def approve_submission(submission_id, user_id, comment=None):
             # Notify SPOC
             from app.modules.SITEMST.model import Site
             from app.modules.FORMBLD.model import Form
+            from app.modules.NOTIFY.service import notify_spoc
             site = Site.query.get(submission.site_id)
             form = Form.query.get(submission.form_id)
-            _create_notification(
-                user_id=submission.submitted_by,
+            notify_spoc(
+                submission_id=submission_id,
                 event_type="APPROVED",
-                entity_type="submission",
-                entity_id=submission_id,
                 message=f"Your submission for {form.name} ({site.name}) has been approved."
             )
 
@@ -432,12 +403,11 @@ def request_changes_submission(submission_id, user_id, comment):
 
     # Notify SPOC
     from app.modules.FORMBLD.model import Form
+    from app.modules.NOTIFY.service import notify_spoc
     form = Form.query.get(submission.form_id)
-    _create_notification(
-        user_id=submission.submitted_by,
+    notify_spoc(
+        submission_id=submission_id,
         event_type="CHANGES_REQUESTED",
-        entity_type="submission",
-        entity_id=submission_id,
         message=f"Changes requested on your submission for {form.name if form else 'sheet'}. Reason: {comment}"
     )
 
@@ -496,12 +466,11 @@ def reject_submission(submission_id, user_id, comment):
 
     # Notify SPOC
     from app.modules.FORMBLD.model import Form
+    from app.modules.NOTIFY.service import notify_spoc
     form = Form.query.get(submission.form_id)
-    _create_notification(
-        user_id=submission.submitted_by,
+    notify_spoc(
+        submission_id=submission_id,
         event_type="REJECTED",
-        entity_type="submission",
-        entity_id=submission_id,
         message=f"Your submission for {form.name if form else 'sheet'} has been rejected. Reason: {comment}"
     )
 
@@ -550,6 +519,14 @@ def raise_issue(submission_id, field_id, title, description, user_id):
         metadata={"description": description}
     )
 
+    # Notify SPOC
+    from app.modules.NOTIFY.service import notify_spoc
+    notify_spoc(
+        submission_id=submission_id,
+        event_type="ISSUE_RAISED",
+        message=f"An issue has been raised on your submission: '{title}'"
+    )
+
     return issue
 
 def resolve_issue(issue_id, user_id):
@@ -582,6 +559,14 @@ def resolve_issue(issue_id, user_id):
         action="RESOLVE_ISSUE",
         old_values={"status": "Open"},
         new_values={"status": "Resolved"}
+    )
+
+    # Notify SPOC
+    from app.modules.NOTIFY.service import notify_spoc
+    notify_spoc(
+        submission_id=issue.submission_id,
+        event_type="ISSUE_RESOLVED",
+        message=f"The review issue '{issue.title}' on your submission has been resolved."
     )
 
     return issue

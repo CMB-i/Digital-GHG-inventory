@@ -532,37 +532,7 @@ def submit_submission(submission_id, user_id):
     )
     
     # Trigger NOTIFY event
-    from app.modules.NOTIFY.model import Notification
-    site = Site.query.get(submission.site_id)
-    form = Form.query.get(submission.form_id)
-    
-    # Notify Level 1 Approvers for this site's workflow
-    # Find users who have can_approve on submission entity for this site
-    from app.modules.ACCESS.model import AccessMatrix
-    approvers = (
-        db.session.query(AccessMatrix.user_id)
-        .filter(
-            AccessMatrix.entity_type == "submission",
-            AccessMatrix.can_approve == True,
-            AccessMatrix.is_deleted == False,
-            (
-                (AccessMatrix.scope_type == "global") |
-                ((AccessMatrix.scope_type == "site") & (AccessMatrix.scope_site_id == submission.site_id))
-            )
-        )
-        .distinct()
-        .all()
-    )
-    
-    for row in approvers:
-        db.session.add(
-            Notification(
-                user_id=row.user_id,
-                event_type="SUBMITTED",
-                entity_type="submission",
-                entity_id=submission.id,
-                message=f"New submission from {site.name} for {form.name} requires your review."
-            )
-        )
+    from app.modules.NOTIFY.service import notify_level_approvers
+    notify_level_approvers(submission.id)
         
     return submission
