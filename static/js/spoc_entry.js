@@ -78,7 +78,7 @@ document.addEventListener("DOMContentLoaded", function () {
         } else if (currentStatus === "Submitted" || currentStatus === "Resubmitted" || currentStatus === "Under Review") {
           sheetStatus.classList.add("bg-blue-100", "text-blue-800");
         } else if (currentStatus === "Changes Requested") {
-          sheetStatus.classList.add("bg-amber-100", "text-amber-800 animate-pulse");
+          sheetStatus.classList.add("bg-amber-100", "text-amber-800", "animate-pulse");
         } else {
           sheetStatus.classList.add("bg-slate-100", "text-slate-700");
         }
