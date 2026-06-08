@@ -1,13 +1,331 @@
 {% extends "base.html" %}
-{% block title %}Reports - Digital GHG Inventory{% endblock %}
+{% block title %}Environmental Reports - Digital GHG Inventory{% endblock %}
+
 {% block content %}
-<section class="space-y-6">
-  <div>
-    <h1 class="text-2xl font-semibold">Reports</h1>
-    <p class="mt-2 text-sm text-slate-600">View and export approved monthly GHG data.</p>
+<div class="space-y-6">
+  <!-- Page Header -->
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-slate-200 pb-5">
+    <div>
+      <h1 class="text-3xl font-bold tracking-tight text-slate-900">Environmental Reports</h1>
+      <p class="mt-1 text-sm text-slate-600">Configure report templates, aggregate approved GHG data across sites, and export formatted Excel sheets.</p>
+    </div>
+    <div>
+      <button id="open_create_drawer_btn" class="inline-flex items-center justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 transition duration-150">
+        <svg class="-ml-0.5 mr-1.5 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+        Create Template
+      </button>
+    </div>
   </div>
-  {% set empty_title = "No report data available yet." %}
-  {% set empty_body = "Approved submissions will become available for reporting and export." %}
-  {% include "partials/empty_state.html" %}
-</section>
+
+  <!-- Messages feedback -->
+  <div id="feedback_container" class="hidden rounded-md border px-4 py-3 text-sm"></div>
+
+  <!-- Main Grid Layout -->
+  <div class="grid gap-6 lg:grid-cols-3">
+    <!-- Templates List Card (left col) -->
+    <div class="lg:col-span-1 space-y-6">
+      <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 class="text-lg font-bold text-slate-900 mb-4">Saved Report Templates</h2>
+        
+        <div id="templates_list" class="space-y-4">
+          {% for t in templates %}
+          <div class="template-card border border-slate-100 rounded-lg p-4 bg-slate-50 hover:bg-white hover:border-indigo-200 transition duration-150 relative group shadow-sm" data-template-id="{{ t.id }}">
+            <div class="flex items-start justify-between">
+              <div>
+                <h3 class="font-bold text-slate-900 group-hover:text-indigo-600 transition">{{ t.name }}</h3>
+                <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 mt-1 uppercase">
+                  {{ t.code }}
+                </span>
+                {% if t.scope_type == 'site' %}
+                <span class="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 mt-1 uppercase">
+                  Site Scoped
+                </span>
+                {% else %}
+                <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 mt-1 uppercase">
+                  Global
+                </span>
+                {% endif %}
+              </div>
+              
+              <!-- Quick actions -->
+              <div class="flex items-center gap-1.5">
+                <button class="preview-template-btn text-slate-500 hover:text-indigo-600 p-1 rounded hover:bg-indigo-50 transition" title="Preview Report" data-template-id="{{ t.id }}">
+                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                </button>
+                <a href="/module/RPTBLD/api/templates/{{ t.id }}/export" class="export-template-btn text-slate-500 hover:text-emerald-600 p-1 rounded hover:bg-emerald-50 transition" title="Export Excel" data-template-id="{{ t.id }}">
+                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                </a>
+                <button class="delete-template-btn text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition" title="Delete Template" data-template-id="{{ t.id }}">
+                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            
+            <p class="text-xs text-slate-600 mt-2 line-clamp-2">{{ t.description or "No description provided." }}</p>
+            
+            <div class="mt-3 border-t border-slate-200/50 pt-2 flex flex-col gap-1 text-[11px] text-slate-500">
+              <div class="flex items-center gap-1">
+                <svg class="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>
+                  Date Range: 
+                  {% if t.config_json.start_month and t.config_json.start_year %}
+                    {{ months[t.config_json.start_month - 1][1][:3] }} {{ t.config_json.start_year }}
+                  {% else %}
+                    Any
+                  {% endif %}
+                  to 
+                  {% if t.config_json.end_month and t.config_json.end_year %}
+                    {{ months[t.config_json.end_month - 1][1][:3] }} {{ t.config_json.end_year }}
+                  {% else %}
+                    Any
+                  {% endif %}
+                </span>
+              </div>
+              <div class="flex items-center gap-1">
+                <svg class="h-3 w-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2m16 2v-2a4 4 0 00-4-4h-3a4 4 0 00-4 4v2M9 8a3 3 0 100-6 3 3 0 000 6zm-7 0a3 3 0 110-6 3 3 0 010 6zm17 0a3 3 0 110-6 3 3 0 010 6z" />
+                </svg>
+                <span>Forms: {{ t.config_json.form_ids | length if t.config_json.form_ids else "All" }} selected</span>
+              </div>
+            </div>
+          </div>
+          {% else %}
+          <div class="text-center py-8 border-2 border-dashed border-slate-100 rounded-lg">
+            <svg class="mx-auto h-8 w-8 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m-9 1V4a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+            </svg>
+            <p class="mt-2 text-xs font-semibold text-slate-700">No report templates yet</p>
+            <p class="mt-1 text-[10px] text-slate-500">Configure a template to aggregate environmental parameters.</p>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Preview Pane (right col) -->
+    <div class="lg:col-span-2 space-y-6">
+      <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm min-h-[400px] flex flex-col">
+        <!-- Preview Panel Header -->
+        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between border-b border-slate-100 pb-4 mb-4">
+          <div>
+            <h2 id="preview_title" class="text-lg font-bold text-slate-900">Report Preview</h2>
+            <p id="preview_subtitle" class="text-xs text-slate-500">Select a report template to preview aggregated data.</p>
+          </div>
+          <div id="preview_actions" class="hidden flex items-center gap-2">
+            <input type="text" id="preview_search" placeholder="Search preview..." class="rounded-md border border-slate-300 px-3 py-1.5 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" />
+            <a id="preview_export_btn" href="#" class="inline-flex items-center rounded-md bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition">
+              <svg class="mr-1 h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Export
+            </a>
+          </div>
+        </div>
+
+        <!-- Preview State Container -->
+        <div class="flex-1 flex flex-col justify-center" id="preview_data_container">
+          <!-- Default Empty State -->
+          <div class="text-center py-12" id="preview_empty_state">
+            <svg class="mx-auto h-12 w-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <h3 class="mt-2 text-sm font-semibold text-slate-900">No report preview active</h3>
+            <p class="mt-1 text-xs text-slate-500">Click the preview icon on a saved template to query locked, approved submissions.</p>
+          </div>
+
+          <!-- Loading State -->
+          <div class="hidden text-center py-12" id="preview_loading_state">
+            <svg class="animate-spin mx-auto h-8 w-8 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p class="mt-3 text-sm text-slate-600">Querying and aggregating approved data...</p>
+          </div>
+
+          <!-- Data Grid -->
+          <div class="hidden overflow-x-auto" id="preview_table_wrapper">
+            <table class="w-full text-left text-sm text-slate-600" id="preview_table">
+              <thead>
+                <tr class="border-b border-slate-200 text-xs font-bold uppercase text-slate-500">
+                  <th class="pb-3 pr-3">Period</th>
+                  <th class="pb-3 pr-3">Site Name</th>
+                  <th class="pb-3 pr-3">Form Name</th>
+                  <th class="pb-3 pr-3">Field Code</th>
+                  <th class="pb-3 pr-3">Field Name</th>
+                  <th class="pb-3 pr-3 text-right">Aggregated Value</th>
+                  <th class="pb-3 pl-3">Unit</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100" id="preview_tbody">
+                <!-- Rendered dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide-over Drawer for Create Template -->
+<div id="drawer_backdrop" class="fixed inset-0 z-40 bg-slate-900/30 hidden transition-opacity duration-300" aria-hidden="true"></div>
+<aside id="create_drawer" class="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-xl translate-x-full transition-transform duration-300">
+  <div class="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+    <div>
+      <h2 class="text-lg font-bold text-slate-900">Create Report Template</h2>
+      <p class="mt-1 text-xs text-slate-500">Establish reusable report logic based on sites, forms and periods.</p>
+    </div>
+    <button id="close_create_drawer_btn" class="rounded-md text-slate-400 hover:text-slate-500 focus:outline-none transition">
+      <span class="sr-only">Close panel</span>
+      <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+
+  <form id="create_template_form" class="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+    <!-- General Settings -->
+    <div class="space-y-4">
+      <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">General Information</h3>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="text-xs font-semibold text-slate-700" for="template_name">Report Name *</label>
+          <input class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                 id="template_name" name="name" type="text" required placeholder="e.g. Scope 1 Summary">
+        </div>
+        <div>
+          <label class="text-xs font-semibold text-slate-700" for="template_code">Unique Code *</label>
+          <input class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                 id="template_code" name="code" type="text" required placeholder="e.g. scope1_rpt">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs font-semibold text-slate-700" for="template_description">Description</label>
+        <textarea class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                  id="template_description" name="description" rows="2" placeholder="Briefly describe what data this template gathers..."></textarea>
+      </div>
+    </div>
+
+    <!-- Scoping Settings -->
+    <div class="space-y-4 border-t border-slate-100 pt-5">
+      <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Scoping</h3>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="text-xs font-semibold text-slate-700" for="template_scope_type">Scope Type</label>
+          <select class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                  id="template_scope_type" name="scope_type">
+            <option value="global">Global (All Allowed Sites)</option>
+            <option value="site">Site Specific</option>
+          </select>
+        </div>
+        <div id="scope_site_container" class="hidden">
+          <label class="text-xs font-semibold text-slate-700" for="template_scope_site_id">Scope Site *</label>
+          <select class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                  id="template_scope_site_id" name="scope_site_id">
+            <option value="">Select a site...</option>
+            {% for site in sites %}
+            <option value="{{ site.id }}">{{ site.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter Configuration -->
+    <div class="space-y-4 border-t border-slate-100 pt-5">
+      <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Applicable Entities</h3>
+      
+      <!-- Forms Multi-Select Checkboxes -->
+      <div>
+        <label class="text-xs font-semibold text-slate-700">Select Applicable Forms (Leave empty for All)</label>
+        <div class="mt-2 max-h-36 overflow-y-auto border border-slate-200 rounded-md p-3 space-y-2 bg-slate-50">
+          {% for form in forms %}
+          <label class="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer">
+            <input type="checkbox" name="form_ids" value="{{ form.id }}" class="rounded text-slate-900 focus:ring-slate-900">
+            <span>{{ form.name }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Sites Multi-Select Checkboxes -->
+      <div>
+        <label class="text-xs font-semibold text-slate-700">Select Applicable Sites (Leave empty for All)</label>
+        <div class="mt-2 max-h-36 overflow-y-auto border border-slate-200 rounded-md p-3 space-y-2 bg-slate-50">
+          {% for site in sites %}
+          <label class="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer">
+            <input type="checkbox" name="site_ids" value="{{ site.id }}" class="rounded text-slate-900 focus:ring-slate-900">
+            <span>{{ site.name }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Date Range Configuration -->
+    <div class="space-y-4 border-t border-slate-100 pt-5 pb-4">
+      <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Dynamic Date Range</h3>
+      
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="text-xs font-semibold text-slate-700">Start Month & Year</label>
+          <div class="grid grid-cols-2 gap-2 mt-1.5">
+            <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="start_month">
+              <option value="">Month...</option>
+              {% for m_num, m_name in months %}
+              <option value="{{ m_num }}">{{ m_name[:3] }}</option>
+              {% endfor %}
+            </select>
+            <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="start_year">
+              <option value="">Year...</option>
+              {% for y in years %}
+              <option value="{{ y }}">{{ y }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="text-xs font-semibold text-slate-700">End Month & Year</label>
+          <div class="grid grid-cols-2 gap-2 mt-1.5">
+            <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="end_month">
+              <option value="">Month...</option>
+              {% for m_num, m_name in months %}
+              <option value="{{ m_num }}">{{ m_name[:3] }}</option>
+              {% endfor %}
+            </select>
+            <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="end_year">
+              <option value="">Year...</option>
+              {% for y in years %}
+              <option value="{{ y }}">{{ y }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+      <p class="text-[10px] text-slate-500 italic mt-1">Leaves dates empty to include data across all reporting periods.</p>
+    </div>
+
+    <!-- Actions -->
+    <div class="flex justify-end gap-3 border-t border-slate-200 pt-5">
+      <button id="close_create_drawer_secondary" class="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition" type="button">Cancel</button>
+      <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 shadow transition" type="submit">Save Template</button>
+    </div>
+  </form>
+</aside>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/reports.js') }}"></script>
 {% endblock %}

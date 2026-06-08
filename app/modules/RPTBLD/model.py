@@ -16,7 +16,12 @@ class ReportTemplate(FullLifecycleMixin, db.Model):
     config_json = db.Column(JSONB, nullable=False, default=dict, server_default=db.text("'{}'::jsonb"))
 
     __table_args__ = (
-        db.UniqueConstraint("code", name="uq_report_template_code"),
+        db.Index(
+            "uq_report_template_code",
+            "code",
+            unique=True,
+            postgresql_where=db.text("is_deleted = false"),
+        ),
     )
 
 

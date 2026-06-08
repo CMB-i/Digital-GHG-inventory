@@ -102,10 +102,76 @@ def create_app(config_class=Config):
     @require_login
     def dashboard():
         user = current_user()
+        
+        from app.modules.RPTBLD.service import _get_user_allowed_sites, get_missing_submissions
+        from app.modules.SITEMST.model import Site
+        from app.modules.FORMBLD.model import Form
+        
+        allowed_site_ids, is_global = _get_user_allowed_sites(user.id, "submission")
+        
+        total_sheets = 0
+        approved_sheets = 0
+        awaiting_review = 0
+        
+        if allowed_site_ids:
+            total_sheets = Submission.query.filter(
+                Submission.site_id.in_(list(allowed_site_ids)),
+                Submission.is_deleted == False
+            ).count()
+            
+            approved_sheets = Submission.query.filter(
+                Submission.site_id.in_(list(allowed_site_ids)),
+                Submission.status == "Approved",
+                Submission.is_deleted == False
+            ).count()
+            
+            awaiting_review = Submission.query.filter(
+                Submission.site_id.in_(list(allowed_site_ids)),
+                Submission.status.in_(("Submitted", "Resubmitted", "Under Review")),
+                Submission.is_deleted == False
+            ).count()
+            
+        # Get missing submissions
+        missing_submissions = get_missing_submissions(user.id)
+        # Filter down to actual missing ones: "Not Started", "Draft", "Changes Requested"
+        actual_missing = [item for item in missing_submissions if item["status"] in ("Not Started", "Draft", "Changes Requested")]
+        missing_sheets_count = len(actual_missing)
+        
+        # Recent activities: Last 5 updated submissions in site scope
+        recent_submissions = []
+        if allowed_site_ids:
+            recent_submissions = Submission.query.filter(
+                Submission.site_id.in_(list(allowed_site_ids)),
+                Submission.is_deleted == False
+            ).order_by(Submission.updated_at.desc()).limit(5).all()
+            
+        sites_map = {s.id: s.name for s in Site.query.filter_by(is_deleted=False).all()}
+        forms_map = {f.id: f.name for f in Form.query.filter_by(is_deleted=False).all()}
+        
+        recent_activities = []
+        for sub in recent_submissions:
+            recent_activities.append({
+                "id": sub.id,
+                "site_name": sites_map.get(sub.site_id, "Unknown"),
+                "form_name": forms_map.get(sub.form_id, "Unknown"),
+                "updated_at": sub.updated_at,
+                "status": sub.status
+            })
+            
+        metrics = {
+            "total_sheets": total_sheets,
+            "approved_sheets": approved_sheets,
+            "awaiting_review": awaiting_review,
+            "missing_sheets": missing_sheets_count
+        }
+        
         return render_template(
             "dashboard.html",
             dashboard_cards=build_dashboard_cards(user),
             setup_checklist=build_setup_checklist(),
+            metrics=metrics,
+            recent_activities=recent_activities,
+            missing_submissions=actual_missing
         )
 
     @app.route("/health")
