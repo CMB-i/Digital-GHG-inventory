@@ -266,7 +266,7 @@ document.addEventListener("DOMContentLoaded", function () {
   if (btnRequestChanges) {
     btnRequestChanges.onclick = function () {
       const comment = commentInput.value;
-      if (!comment || !comment.strip || !comment.strip()) {
+      if (!comment || !comment.trim()) {
         alert("A review comment is required to request changes.");
         commentInput.focus();
         return;
@@ -294,7 +294,7 @@ document.addEventListener("DOMContentLoaded", function () {
   if (btnReject) {
     btnReject.onclick = function () {
       const comment = commentInput.value;
-      if (!comment || !comment.strip || !comment.strip()) {
+      if (!comment || !comment.trim()) {
         alert("A review comment is required to reject a submission.");
         commentInput.focus();
         return;
