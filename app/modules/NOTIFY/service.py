@@ -46,7 +46,8 @@ def notify_level_approvers(submission_id):
     who have the site-level can_approve permission. Prevents self-approval notifications.
     """
     from app.modules.SUBMIT.model import Submission
-    from app.modules.WFLWBLD.model import WorkflowLevel, WorkflowLevelApprover
+    from app.modules.WFLWBLD.model import WorkflowLevel
+    from app.modules.WFLWBLD.service import get_eligible_level_approvers
     from app.modules.SITEMST.model import Site
     from app.modules.FORMBLD.model import Form
     from app.common.permissions import has_permission
@@ -63,10 +64,7 @@ def notify_level_approvers(submission_id):
     if not lvl:
         return []
 
-    level_approvers = WorkflowLevelApprover.query.filter_by(
-        workflow_level_id=lvl.id,
-        is_deleted=False
-    ).all()
+    level_approvers = get_eligible_level_approvers(lvl, submission.site_id)
 
     site = Site.query.get(submission.site_id)
     form = Form.query.get(submission.form_id)

@@ -13,6 +13,10 @@ from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument
 from app.modules.FRMULA.model import FormulaVersion
 from app.modules.FRMULA.service import evaluate_formula
 from app.modules.WFLWBLD.model import Workflow
+from app.modules.WFLWBLD.service import (
+    find_next_applicable_level,
+    validate_workflow_path_for_site,
+)
 
 class DuplicateSubmissionError(Exception):
     def __init__(self, existing_id):
@@ -434,12 +438,24 @@ def submit_submission(submission_id, user_id):
         raise ValueError("Permission denied: You do not have permission to submit this sheet.")
 
     # Confirm form has workflow assigned
+    form = Form.query.get(submission.form_id)
     try:
-        parsed_desc = json.loads(submission.form_version.form.description or "{}")
+        parsed_desc = json.loads(form.description or "{}")
     except Exception:
         parsed_desc = {}
     if not parsed_desc.get("workflow_id"):
         raise ValueError("This form is not ready for submission because no approval workflow has been assigned.")
+    validate_workflow_path_for_site(submission.workflow_version_id, submission.site_id)
+    first_applicable_level = find_next_applicable_level(
+        submission.workflow_version_id,
+        submission.site_id,
+        0,
+    )
+    if not first_applicable_level:
+        raise ValueError(
+            "This workflow has no eligible approver path for this submission site. "
+            "Please contact your administrator."
+        )
         
     # Get form version fields
     fields = get_form_version_fields(submission.form_version_id)
@@ -526,9 +542,8 @@ def submit_submission(submission_id, user_id):
     # Transition status
     old_status = submission.status
     new_status = "Resubmitted" if old_status == "Changes Requested" else "Submitted"
-    
+
     if old_status == "Changes Requested":
-        submission.current_level = 1
         # Soft-delete all existing ApprovalAction records for this submission
         from app.modules.APPROV.model import ApprovalAction
         prior_approvals = ApprovalAction.query.filter_by(
@@ -543,6 +558,7 @@ def submit_submission(submission_id, user_id):
             app_act.delete_reason = "Workflow reset to Level 1 due to SPOC resubmission after Changes Requested"
 
     submission.status = new_status
+    submission.current_level = first_applicable_level.level_number
     submission.submitted_by = user_id
     submission.submitted_at = datetime.now(timezone.utc)
     submission.last_status_changed_at = datetime.now(timezone.utc)

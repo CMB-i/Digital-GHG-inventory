@@ -3,6 +3,12 @@ from app.database import db
 from app.modules.WFLWBLD.model import Workflow, WorkflowVersion, WorkflowLevel, WorkflowLevelApprover
 from app.modules.USRMGMT.model import User
 
+NO_ELIGIBLE_PATH_MESSAGE = (
+    "This workflow has no eligible approver path for this submission site. "
+    "Please contact your administrator."
+)
+
+
 def list_workflows():
     return Workflow.query.filter_by(is_deleted=False).all()
 
@@ -51,6 +57,74 @@ def get_workflow_version_levels(workflow_version_id):
         .all()
     )
 
+
+def get_eligible_level_approvers(level, site_id):
+    return (
+        WorkflowLevelApprover.query.filter(
+            WorkflowLevelApprover.workflow_level_id == level.id,
+            WorkflowLevelApprover.is_deleted == False,
+            (
+                (WorkflowLevelApprover.scope_site_id.is_(None))
+                | (WorkflowLevelApprover.scope_site_id == site_id)
+            ),
+        )
+        .order_by(
+            WorkflowLevelApprover.sequence_number.asc().nullslast(),
+            WorkflowLevelApprover.id.asc(),
+        )
+        .all()
+    )
+
+
+def level_has_eligible_approver(level, site_id):
+    return len(get_eligible_level_approvers(level, site_id)) > 0
+
+
+def is_user_eligible_level_approver(level, user_id, site_id):
+    return any(app.user_id == user_id for app in get_eligible_level_approvers(level, site_id))
+
+
+def find_next_applicable_level(workflow_version, site_id, after_level_number):
+    workflow_version_id = workflow_version.id if hasattr(workflow_version, "id") else workflow_version
+    levels = (
+        WorkflowLevel.query.filter(
+            WorkflowLevel.workflow_version_id == workflow_version_id,
+            WorkflowLevel.level_number > after_level_number,
+            WorkflowLevel.is_deleted == False,
+        )
+        .order_by(WorkflowLevel.level_number.asc())
+        .all()
+    )
+
+    for level in levels:
+        if level_has_eligible_approver(level, site_id):
+            return level
+        if level.skip_if_empty:
+            continue
+        raise ValueError(
+            f"Workflow level '{level.level_name}' has no eligible approver for this submission site."
+        )
+
+    return None
+
+
+def validate_workflow_path_for_site(workflow_version, site_id):
+    workflow_version_id = workflow_version.id if hasattr(workflow_version, "id") else workflow_version
+    levels = get_workflow_version_levels(workflow_version_id)
+    has_applicable_level = False
+
+    for level in levels:
+        if level_has_eligible_approver(level, site_id):
+            has_applicable_level = True
+            continue
+        if not level.skip_if_empty:
+            raise ValueError(NO_ELIGIBLE_PATH_MESSAGE)
+
+    if not has_applicable_level:
+        raise ValueError(NO_ELIGIBLE_PATH_MESSAGE)
+
+    return True
+
 def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
     version = WorkflowVersion.query.get(workflow_version_id)
     if not version:
@@ -78,6 +152,7 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
         level_number = l_data.get("level_number", idx + 1)
         level_name = l_data.get("level_name")
         approval_mode = l_data.get("approval_mode")
+        skip_if_empty = bool(l_data.get("skip_if_empty", False))
         approvers = l_data.get("approvers", [])
         
         if not level_name or not level_name.strip():
@@ -92,6 +167,7 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
             level_number=level_number,
             level_name=level_name.strip(),
             approval_mode=approval_mode,
+            skip_if_empty=skip_if_empty,
             created_by=user_id,
             updated_by=user_id
         )
@@ -102,9 +178,11 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
             if isinstance(app_data, dict):
                 u_id = app_data.get("user_id")
                 s_num = app_data.get("sequence_number")
+                scope_site_id = app_data.get("scope_site_id")
             else:
                 u_id = app_data
                 s_num = None
+                scope_site_id = None
                 
             if not u_id:
                 raise ValueError(f"User ID is required for approver in level {level_number}.")
@@ -113,6 +191,18 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
             user = User.query.filter_by(id=u_id, is_deleted=False, is_active=True).first()
             if not user:
                 raise ValueError(f"Approver user with ID {u_id} does not exist or is inactive.")
+
+            if scope_site_id in ("", "null"):
+                scope_site_id = None
+            if scope_site_id is not None:
+                try:
+                    scope_site_id = int(scope_site_id)
+                except (TypeError, ValueError):
+                    raise ValueError(f"Invalid site scope for approver in level {level_number}.")
+                from app.modules.SITEMST.model import Site
+                site = Site.query.filter_by(id=scope_site_id, is_deleted=False).first()
+                if not site:
+                    raise ValueError(f"Site with ID {scope_site_id} does not exist or is inactive.")
                 
             if approval_mode == "SEQUENTIAL":
                 if s_num is None:
@@ -123,6 +213,7 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
             approver = WorkflowLevelApprover(
                 workflow_level_id=lvl.id,
                 user_id=u_id,
+                scope_site_id=scope_site_id,
                 sequence_number=s_num,
                 created_by=user_id,
                 updated_by=user_id
@@ -209,6 +300,7 @@ def create_new_workflow_version_draft(workflow_id, user_id):
                 level_number=pl.level_number,
                 level_name=pl.level_name,
                 approval_mode=pl.approval_mode,
+                skip_if_empty=pl.skip_if_empty,
                 created_by=user_id,
                 updated_by=user_id
             )
@@ -220,6 +312,7 @@ def create_new_workflow_version_draft(workflow_id, user_id):
                 new_app = WorkflowLevelApprover(
                     workflow_level_id=new_level.id,
                     user_id=pa.user_id,
+                    scope_site_id=pa.scope_site_id,
                     sequence_number=pa.sequence_number,
                     created_by=user_id,
                     updated_by=user_id

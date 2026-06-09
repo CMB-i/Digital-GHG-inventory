@@ -42,6 +42,7 @@ class WorkflowLevel(FullLifecycleMixin, db.Model):
     level_number = db.Column(db.Integer, nullable=False)
     level_name = db.Column(db.String(100), nullable=False)
     approval_mode = db.Column(db.String(30), nullable=False)
+    skip_if_empty = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
 
     __table_args__ = (
         db.UniqueConstraint("workflow_version_id", "level_number", name="uq_wf_level_order"),
@@ -54,4 +55,5 @@ class WorkflowLevelApprover(FullLifecycleMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     workflow_level_id = db.Column(db.Integer, db.ForeignKey("workflow_levels.id"), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    scope_site_id = db.Column(db.Integer, db.ForeignKey("sites.id"), nullable=True)
     sequence_number = db.Column(db.Integer, nullable=True)

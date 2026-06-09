@@ -13,10 +13,13 @@ from app.modules.WFLWBLD.service import (
     save_workflow_draft_levels,
     publish_workflow_version,
     create_new_workflow_version_draft,
-    delete_workflow
+    delete_workflow,
+    get_eligible_level_approvers,
+    validate_workflow_path_for_site,
 )
 from app.modules.WFLWBLD.model import WorkflowVersion, WorkflowLevelApprover
 from app.modules.USRMGMT.model import User
+from app.modules.SITEMST.model import Site
 
 MODULE_CODE = "WFLWBLD"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
@@ -122,6 +125,13 @@ def get_version_details(version_id):
         "full_name": u.full_name,
         "email": u.email
     } for u in active_users]
+
+    sites = Site.query.filter_by(is_deleted=False).order_by(Site.name.asc()).all()
+    available_sites = [{
+        "id": site.id,
+        "name": site.name,
+        "code": site.code,
+    } for site in sites]
     
     # Construct levels data
     levels_data = []
@@ -132,9 +142,11 @@ def get_version_details(version_id):
             app_user = User.query.get(app.user_id)
             approvers_list.append({
                 "user_id": app.user_id,
+                "scope_site_id": app.scope_site_id,
                 "sequence_number": app.sequence_number,
                 "full_name": app_user.full_name if app_user else "Unknown User",
-                "email": app_user.email if app_user else ""
+                "email": app_user.email if app_user else "",
+                "site_name": next((site.name for site in sites if site.id == app.scope_site_id), None)
             })
             
         levels_data.append({
@@ -142,6 +154,7 @@ def get_version_details(version_id):
             "level_number": lvl.level_number,
             "level_name": lvl.level_name,
             "approval_mode": lvl.approval_mode,
+            "skip_if_empty": lvl.skip_if_empty,
             "approvers": approvers_list
         })
         
@@ -160,6 +173,7 @@ def get_version_details(version_id):
         "levels": levels_data,
         "all_versions": version_list,
         "available_users": available_users,
+        "available_sites": available_sites,
         "permissions": {
             "can_edit": can_edit and version.published_at is None,
             "can_publish": can_edit and version.published_at is None,
@@ -167,6 +181,69 @@ def get_version_details(version_id):
         }
     }
     return jsonify(data)
+
+
+@bp.route("/api/version/<int:version_id>/preview")
+@require_permission("workflow", "view")
+def preview_site_path(version_id):
+    site_id = request.args.get("site_id", type=int)
+    if not site_id:
+        return error_response("Site is required for workflow preview.", 400)
+
+    version = get_workflow_version(version_id)
+    if not version:
+        return error_response("Workflow version not found.", 404)
+
+    levels = get_workflow_version_levels(version.id)
+    preview_rows = []
+    has_warning = False
+
+    for level in levels:
+        approvers = get_eligible_level_approvers(level, site_id)
+        if approvers:
+            users = []
+            for assignment in approvers:
+                user = User.query.get(assignment.user_id)
+                users.append({
+                    "user_id": assignment.user_id,
+                    "name": user.full_name if user else f"User {assignment.user_id}",
+                    "scope": "All Sites" if assignment.scope_site_id is None else "This Site",
+                })
+            preview_rows.append({
+                "level_number": level.level_number,
+                "level_name": level.level_name,
+                "status": "active",
+                "approvers": users,
+            })
+        elif level.skip_if_empty:
+            preview_rows.append({
+                "level_number": level.level_number,
+                "level_name": level.level_name,
+                "status": "skipped",
+                "approvers": [],
+            })
+        else:
+            has_warning = True
+            preview_rows.append({
+                "level_number": level.level_number,
+                "level_name": level.level_name,
+                "status": "blocked",
+                "approvers": [],
+            })
+            break
+
+    try:
+        validate_workflow_path_for_site(version, site_id)
+        message = None
+    except ValueError as error:
+        has_warning = True
+        message = str(error)
+
+    return success_response(data={
+        "rows": preview_rows,
+        "has_warning": has_warning,
+        "message": message,
+    })
 
 
 @bp.route("/api/version/<int:version_id>/levels", methods=["POST"])

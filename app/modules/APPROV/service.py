@@ -2,7 +2,12 @@ from datetime import datetime, timezone
 from app.database import db
 from app.common.permissions import has_permission
 from app.modules.SUBMIT.model import Submission, ProofDocument
-from app.modules.WFLWBLD.model import WorkflowLevel, WorkflowLevelApprover
+from app.modules.WFLWBLD.model import WorkflowLevel
+from app.modules.WFLWBLD.service import (
+    find_next_applicable_level,
+    get_eligible_level_approvers,
+    is_user_eligible_level_approver,
+)
 from app.modules.APPROV.model import ApprovalAction, Issue
 from app.modules.USRMGMT.model import User
 from app.modules.SUBMIT.service import format_period_label
@@ -51,13 +56,7 @@ def get_approver_queue(user_id):
         if lvl.approval_mode not in SUPPORTED_APPROVAL_MODES:
             continue
 
-        # Check if the user is an approver at this level
-        approver_entry = WorkflowLevelApprover.query.filter_by(
-            workflow_level_id=lvl.id,
-            user_id=user_id,
-            is_deleted=False
-        ).first()
-        if not approver_entry:
+        if not is_user_eligible_level_approver(lvl, user_id, sub.site_id):
             continue
 
         # Evaluate if it is this user's turn (handles SEQUENTIAL logic)
@@ -73,10 +72,7 @@ def get_approver_queue(user_id):
             approved_user_ids = {a.actor_id for a in approved_actions}
 
             # Fetch all approvers ordered by sequence number
-            all_approvers = WorkflowLevelApprover.query.filter_by(
-                workflow_level_id=lvl.id,
-                is_deleted=False
-            ).order_by(WorkflowLevelApprover.sequence_number.asc()).all()
+            all_approvers = get_eligible_level_approvers(lvl, sub.site_id)
 
             next_approver = None
             for app in all_approvers:
@@ -192,12 +188,7 @@ def approve_submission(submission_id, user_id, comment=None):
     if lvl.approval_mode not in SUPPORTED_APPROVAL_MODES:
         raise ValueError(f"Approval mode {lvl.approval_mode} is not supported in MVP.")
 
-    approver_entry = WorkflowLevelApprover.query.filter_by(
-        workflow_level_id=lvl.id,
-        user_id=user_id,
-        is_deleted=False
-    ).first()
-    if not approver_entry:
+    if not is_user_eligible_level_approver(lvl, user_id, submission.site_id):
         raise ValueError("You are not an assigned approver for the current workflow level.")
 
     # If SEQUENTIAL, verify it is this user's turn
@@ -210,10 +201,7 @@ def approve_submission(submission_id, user_id, comment=None):
         ).all()
         approved_user_ids = {a.actor_id for a in approved_actions}
 
-        all_approvers = WorkflowLevelApprover.query.filter_by(
-            workflow_level_id=lvl.id,
-            is_deleted=False
-        ).order_by(WorkflowLevelApprover.sequence_number.asc()).all()
+        all_approvers = get_eligible_level_approvers(lvl, submission.site_id)
 
         next_approver = None
         for app in all_approvers:
@@ -268,22 +256,18 @@ def approve_submission(submission_id, user_id, comment=None):
         ).all()
         approved_user_ids = {a.actor_id for a in approved_actions}
 
-        all_approvers = WorkflowLevelApprover.query.filter_by(
-            workflow_level_id=lvl.id,
-            is_deleted=False
-        ).all()
+        all_approvers = get_eligible_level_approvers(lvl, submission.site_id)
 
         remaining = [app for app in all_approvers if app.user_id not in approved_user_ids]
         if len(remaining) == 0:
             is_level_completed = True
 
     if is_level_completed:
-        # Check for next level
-        next_lvl = WorkflowLevel.query.filter_by(
-            workflow_version_id=submission.workflow_version_id,
-            level_number=submission.current_level + 1,
-            is_deleted=False
-        ).first()
+        next_lvl = find_next_applicable_level(
+            submission.workflow_version_id,
+            submission.site_id,
+            submission.current_level,
+        )
 
         if next_lvl:
             # Notify SPOC
@@ -299,7 +283,7 @@ def approve_submission(submission_id, user_id, comment=None):
             )
 
             # Advance level
-            submission.current_level += 1
+            submission.current_level = next_lvl.level_number
             submission.last_status_changed_at = _utc_now()
             submission.updated_by = user_id
 
