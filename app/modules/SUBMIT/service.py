@@ -519,6 +519,21 @@ def submit_submission(submission_id, user_id):
     old_status = submission.status
     new_status = "Resubmitted" if old_status == "Changes Requested" else "Submitted"
     
+    if old_status == "Changes Requested":
+        submission.current_level = 1
+        # Soft-delete all existing ApprovalAction records for this submission
+        from app.modules.APPROV.model import ApprovalAction
+        prior_approvals = ApprovalAction.query.filter_by(
+            submission_id=submission.id,
+            action="Approve",
+            is_deleted=False
+        ).all()
+        for app_act in prior_approvals:
+            app_act.is_deleted = True
+            app_act.deleted_by = user_id
+            app_act.deleted_at = datetime.now(timezone.utc)
+            app_act.delete_reason = "Workflow reset to Level 1 due to SPOC resubmission after Changes Requested"
+
     submission.status = new_status
     submission.submitted_by = user_id
     submission.submitted_at = datetime.now(timezone.utc)
