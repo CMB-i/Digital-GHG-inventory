@@ -133,6 +133,10 @@ def get_spoc_sheets_buckets(user_id):
         
         period_label = format_period_label(period.year, period.month)
         
+        status_text = sub.status
+        if sub.status in ("Submitted", "Resubmitted", "Under Review") and sub.current_level is not None:
+            status_text = f"{sub.status} (Level {sub.current_level})"
+
         item = {
             "submission_id": sub.id,
             "form_name": form.name,
@@ -140,6 +144,7 @@ def get_spoc_sheets_buckets(user_id):
             "site_name": site.name,
             "period_label": period_label,
             "status": sub.status,
+            "status_text": status_text,
             "last_saved": sub.updated_at or sub.created_at,
             "submitted_at": sub.submitted_at,
             "submitted_by": get_username(sub.submitted_by)
@@ -514,6 +519,21 @@ def submit_submission(submission_id, user_id):
     old_status = submission.status
     new_status = "Resubmitted" if old_status == "Changes Requested" else "Submitted"
     
+    if old_status == "Changes Requested":
+        submission.current_level = 1
+        # Soft-delete all existing ApprovalAction records for this submission
+        from app.modules.APPROV.model import ApprovalAction
+        prior_approvals = ApprovalAction.query.filter_by(
+            submission_id=submission.id,
+            action="Approve",
+            is_deleted=False
+        ).all()
+        for app_act in prior_approvals:
+            app_act.is_deleted = True
+            app_act.deleted_by = user_id
+            app_act.deleted_at = datetime.now(timezone.utc)
+            app_act.delete_reason = "Workflow reset to Level 1 due to SPOC resubmission after Changes Requested"
+
     submission.status = new_status
     submission.submitted_by = user_id
     submission.submitted_at = datetime.now(timezone.utc)
