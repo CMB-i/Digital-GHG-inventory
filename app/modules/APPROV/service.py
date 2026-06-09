@@ -286,6 +286,18 @@ def approve_submission(submission_id, user_id, comment=None):
         ).first()
 
         if next_lvl:
+            # Notify SPOC
+            from app.modules.SITEMST.model import Site
+            from app.modules.FORMBLD.model import Form
+            from app.modules.NOTIFY.service import notify_spoc
+            site = Site.query.get(submission.site_id)
+            form = Form.query.get(submission.form_id)
+            notify_spoc(
+                submission_id=submission_id,
+                event_type="LEVEL_APPROVED",
+                message=f"Your submission for {form.name} ({site.name}) has been approved at Level {submission.current_level}."
+            )
+
             # Advance level
             submission.current_level += 1
             submission.last_status_changed_at = _utc_now()

@@ -192,7 +192,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <td class="px-6 py-4 font-medium text-slate-700">${row.period_label}</td>
         <td class="px-6 py-4">
           <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${badgeClass}">
-            ${row.status}
+            ${row.status_text || row.status}
           </span>
         </td>
         <td class="px-6 py-4 text-xs font-medium text-slate-600">${row.submitted_by}</td>
