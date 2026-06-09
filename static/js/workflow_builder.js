@@ -1,161 +1,956 @@
 document.addEventListener("DOMContentLoaded", () => {
-  // DOM Elements
   const listView = document.getElementById("list-view");
   const editorView = document.getElementById("editor-view");
   const workflowsListBody = document.getElementById("workflows-list-body");
 
-  // Editor Inputs
   const dfName = document.getElementById("df-name");
   const dfCode = document.getElementById("df-code");
+  const dfForm = document.getElementById("df-form");
   const editorTitle = document.getElementById("editor-title");
   const editorVersionBadge = document.getElementById("editor-version-badge");
-  
-  // Workspace Card and Level containers
+  const saveState = document.getElementById("save-state");
+  const headerFormName = document.getElementById("header-form-name");
+  const headerSitesCount = document.getElementById("header-sites-count");
+  const headerLevelsCount = document.getElementById("header-levels-count");
+  const readySitesCount = document.getElementById("ready-sites-count");
+  const readinessSummary = document.getElementById("readiness-summary");
+  const readinessSiteList = document.getElementById("readiness-site-list");
+  const siteSummaryList = document.getElementById("site-summary-list");
+  const coveredSitesCount = document.getElementById("covered-sites-count");
+  const coveredSitesList = document.getElementById("covered-sites-list");
   const levelsContainer = document.getElementById("levels-container");
   const btnAddLevel = document.getElementById("btn-add-level");
   const btnSaveDraft = document.getElementById("btn-save-draft");
-  const validationErrors = document.getElementById("validation-errors");
+  const btnScrollPreview = document.getElementById("btn-scroll-preview");
   const versionActions = document.getElementById("version-actions");
+  const previewSiteSelect = document.getElementById("preview-site-select");
+  const previewPathOutput = document.getElementById("preview-path-output");
 
-  // Create workflow modal
   const modalCreateWorkflow = document.getElementById("modal-create-workflow");
   const btnCloseWorkflowModal = document.getElementById("btn-close-workflow-modal");
   const btnCancelWorkflowModal = document.getElementById("btn-cancel-workflow-modal");
   const formCreateWorkflow = document.getElementById("form-create-workflow");
 
-  // State
+  const modalPublishReview = document.getElementById("modal-publish-review");
+  const btnClosePublishModal = document.getElementById("btn-close-publish-modal");
+  const btnCancelPublishModal = document.getElementById("btn-cancel-publish-modal");
+  const btnConfirmPublish = document.getElementById("btn-confirm-publish");
+  const publishReviewBody = document.getElementById("publish-review-body");
+
   let workflows = [];
   let currentWorkflowId = null;
   let currentVersionId = null;
   let currentVersion = null;
+  let currentWorkflow = null;
   let levelsList = [];
   let availableUsers = [];
   let availableSites = [];
-  let hasUnsavedChanges = false;
+  let availableForms = [];
+  let linkedForms = [];
+  let selectedFormId = null;
+  let selectedSiteIds = [];
   let permissions = {
     can_edit: false,
     can_publish: false,
     can_create_version: false
   };
+  let hasUnsavedChanges = false;
+  let lastValidation = null;
 
-  // Toast Helper
+  const approvalModes = [
+    { value: "ANY_ONE", label: "Any one approver can approve" },
+    { value: "SEQUENTIAL", label: "Approvers must approve in order" }
+  ];
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
   function showToast(message, type = "success") {
     const container = document.getElementById("toast-container");
     if (!container) return;
     const toast = document.createElement("div");
-    toast.className = `p-4 rounded-xl shadow-lg border text-xs font-bold transition-all duration-300 transform translate-y-2 opacity-0 flex items-center justify-between ${
-      type === "success" 
-        ? "bg-emerald-50 border-emerald-200 text-emerald-800" 
-        : "bg-rose-50 border-rose-200 text-rose-800"
+    toast.className = `pointer-events-auto flex translate-y-2 items-center justify-between rounded-xl border p-4 text-xs font-bold opacity-0 shadow-lg transition-all duration-300 ${
+      type === "success"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+        : "border-rose-200 bg-rose-50 text-rose-800"
     }`;
     toast.innerHTML = `
-      <span>${message}</span>
-      <button class="ml-4 font-normal text-slate-400 hover:text-slate-600">✕</button>
+      <span>${escapeHtml(message)}</span>
+      <button class="ml-4 font-normal text-slate-400 hover:text-slate-600" type="button">x</button>
     `;
     toast.querySelector("button").onclick = () => toast.remove();
     container.appendChild(toast);
-    
-    setTimeout(() => {
-      toast.classList.remove("translate-y-2", "opacity-0");
-    }, 10);
-    
+    setTimeout(() => toast.classList.remove("translate-y-2", "opacity-0"), 10);
     setTimeout(() => {
       toast.classList.add("translate-y-2", "opacity-0");
       setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    }, 3500);
   }
 
-  // --- View Switching ---
-  window.showList = function () {
-    if (hasUnsavedChanges && !confirm("You have unsaved changes. Discard and return to list?")) {
-      return;
-    }
-    editorView.classList.add("hidden");
-    listView.classList.remove("hidden");
-    loadWorkflows();
-  };
+  function setUnsaved(value) {
+    hasUnsavedChanges = value;
+    if (!saveState) return;
+    saveState.textContent = value ? "Unsaved changes" : "Saved";
+    saveState.className = value
+      ? "rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-semibold text-amber-700"
+      : "rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-500";
+  }
 
-  window.startNewWorkflow = function () {
-    modalCreateWorkflow.classList.remove("hidden");
-  };
+  function getSite(siteId) {
+    return availableSites.find(site => parseInt(site.id) === parseInt(siteId));
+  }
 
-  window.editWorkflow = function (workflowId, versionId) {
-    currentWorkflowId = workflowId;
-    currentVersionId = versionId;
-    
-    listView.classList.add("hidden");
-    editorView.classList.remove("hidden");
-    
-    loadVersionDetails(versionId);
-  };
+  function getSiteName(siteId) {
+    const site = getSite(siteId);
+    return site ? site.name : `Site ${siteId}`;
+  }
 
-  // --- Modal actions ---
-  const hideModal = () => {
-    modalCreateWorkflow.classList.add("hidden");
-    formCreateWorkflow.reset();
-  };
-  btnCloseWorkflowModal.onclick = hideModal;
-  btnCancelWorkflowModal.onclick = hideModal;
-
-  formCreateWorkflow.onsubmit = async (e) => {
-    e.preventDefault();
-    const name = document.getElementById("new-workflow-name").value.trim();
-    const code = document.getElementById("new-workflow-code").value.trim().toUpperCase().replace(/\s+/g, "_");
-
-    // Client-side check to prevent duplicate workflow creation
-    const existing = workflows.find(w => w.code === code);
-    if (existing) {
-      showToast(`Workflow with code '${code}' already exists.`, "error");
-      return;
-    }
-
-    const submitBtn = formCreateWorkflow.querySelector("button[type='submit']");
-    const originalText = submitBtn.textContent;
-    submitBtn.disabled = true;
-    submitBtn.textContent = "Creating...";
-
-    try {
-      const res = await fetch("/module/WFLWBLD/api", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, code })
+  function getLinkedSiteIds() {
+    const ids = new Set();
+    linkedForms.forEach(form => {
+      (form.site_ids || []).forEach(siteId => {
+        const parsed = parseInt(siteId);
+        if (getSite(parsed)) ids.add(parsed);
       });
-      const data = await res.json();
-      if (res.ok) {
-        showToast("Workflow created successfully!");
-        hideModal();
-        // Reload list, find new workflow, and open it
-        const resList = await fetch("/module/WFLWBLD/api");
-        const listData = await resList.json();
-        const found = listData.find(x => x.code === code);
-        if (found && found.latest_version_id) {
-          editWorkflow(found.id, found.latest_version_id);
-        } else {
-          showList();
-        }
-      } else {
-        showToast("Error: " + (data.error || "Unknown error occurred"), "error");
-      }
-    } catch (err) {
-      console.error(err);
-      showToast("Failed to create workflow.", "error");
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = originalText;
-    }
-  };
+    });
+    return Array.from(ids);
+  }
 
-  // --- Load Workflows ---
+  function getCoveredSites() {
+    const ids = selectedFormId ? selectedSiteIds : getLinkedSiteIds();
+    return ids
+      .map(siteId => getSite(siteId))
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function getRoutingSites() {
+    return getCoveredSites();
+  }
+
+  function getLinkedFormLabel() {
+    const selectedForm = availableForms.find(form => parseInt(form.id) === parseInt(selectedFormId));
+    if (selectedForm) return selectedForm.name;
+    if (!linkedForms.length) return "Not linked";
+    if (linkedForms.length === 1) return linkedForms[0].name;
+    return `${linkedForms[0].name} +${linkedForms.length - 1} more`;
+  }
+
+  function isFinalLevel(index) {
+    const level = levelsList[index];
+    return Boolean(level && level.level_type === "final");
+  }
+
+  function finalApprovalIndex() {
+    return levelsList.findIndex(level => level.level_type === "final");
+  }
+
+  function isGenericLevelName(value) {
+    return !value || /^Level \d+$/.test(value) || /^Approval Level \d+$/.test(value) || value === "Final Approval";
+  }
+
+  function normalizeLevelOrder() {
+    if (!levelsList.length) return;
+    const finalIndexes = levelsList
+      .map((level, index) => level.level_type === "final" ? index : -1)
+      .filter(index => index >= 0);
+    if (finalIndexes.length > 1) {
+      const keepIndex = finalIndexes[finalIndexes.length - 1];
+      levelsList.forEach((level, index) => {
+        if (level.level_type === "final" && index !== keepIndex) {
+          level.level_type = "regular";
+          if (level.level_name === "Final Approval") level.level_name = "";
+        }
+      });
+    }
+    const finalIndex = finalApprovalIndex();
+    if (finalIndex >= 0 && finalIndex !== levelsList.length - 1) {
+      const [finalLevel] = levelsList.splice(finalIndex, 1);
+      levelsList.push(finalLevel);
+    }
+  }
+
+  function ensureGenericLevelNames() {
+    normalizeLevelOrder();
+    let regularCount = 0;
+    levelsList.forEach((level, index) => {
+      if (!level.level_type) {
+        level.level_type = level.level_name === "Final Approval" ? "final" : "regular";
+      }
+      const currentName = level.level_name || "";
+      if (level.level_type === "final") {
+        level.level_name = "Final Approval";
+        level.skip_if_empty = false;
+      } else {
+        regularCount += 1;
+        if (isGenericLevelName(currentName)) {
+          level.level_name = `Approval Level ${regularCount}`;
+        }
+      }
+      level.level_number = index + 1;
+    });
+  }
+
+  function getAssignmentMode(level) {
+    if (level.assignment_mode) return level.assignment_mode;
+    return (level.approvers || []).some(app => app.scope_site_id) ? "site" : "same";
+  }
+
+  function approvalModeOptions(selectedValue) {
+    const modes = [...approvalModes];
+    if (selectedValue && !modes.some(mode => mode.value === selectedValue)) {
+      modes.push({ value: selectedValue, label: selectedValue.replaceAll("_", " ") });
+    }
+    return modes.map(mode => (
+      `<option value="${mode.value}" ${selectedValue === mode.value ? "selected" : ""}>${escapeHtml(mode.label)}</option>`
+    )).join("");
+  }
+
+  function getEligibleApprovers(level, siteId) {
+    return (level.approvers || []).filter(app => (
+      !app.scope_site_id || parseInt(app.scope_site_id) === parseInt(siteId)
+    ));
+  }
+
+  function buildSitePath(site) {
+    const rows = [];
+    let blocked = false;
+    let approvalsCount = 0;
+    let skippedCount = 0;
+    const issues = [];
+
+    if (!levelsList.length) {
+      blocked = true;
+      issues.push("Add at least one approval level.");
+    }
+
+    levelsList.forEach((level, index) => {
+      if (blocked) return;
+      const final = isFinalLevel(index);
+      const eligible = getEligibleApprovers(level, site.id);
+
+      if (eligible.length) {
+        approvalsCount += 1;
+        rows.push({
+          level,
+          status: "active",
+          approvers: eligible,
+          message: final ? "Final approval locks the submission." : "Submission waits here for approval."
+        });
+        return;
+      }
+
+      if (!final && level.skip_if_empty) {
+        skippedCount += 1;
+        rows.push({
+          level,
+          status: "skipped",
+          approvers: [],
+          message: "This level will be skipped - submission goes straight to the next level."
+        });
+        return;
+      }
+
+      blocked = true;
+      issues.push(final
+        ? `${level.level_name} needs an eligible approver for ${site.name}.`
+        : `${level.level_name} needs an eligible approver for ${site.name}, or must be marked skippable.`
+      );
+      rows.push({
+        level,
+        status: final ? "blocked" : "attention",
+        approvers: [],
+        message: final
+          ? "Final Approval is mandatory and cannot be skipped."
+          : "This site cannot use the workflow until this level is fixed."
+      });
+    });
+
+    const status = blocked ? "Blocked" : (issues.length ? "Needs attention" : "Ready");
+    return { site, rows, approvalsCount, skippedCount, issues, status, blocked };
+  }
+
+  function validateWorkflow() {
+    const coveredSites = getCoveredSites();
+    const paths = coveredSites.map(site => buildSitePath(site));
+    const issues = [];
+    let setupState = "ready";
+    const finalIndex = finalApprovalIndex();
+
+    if (!selectedFormId) {
+      setupState = "no_form";
+      issues.push("Link this workflow to a form before publishing.");
+    } else if (!coveredSites.length) {
+      setupState = "no_sites";
+      issues.push("The linked form must cover at least one site before this workflow can be published.");
+    }
+    if (!levelsList.length) {
+      issues.push("Add at least one approval level.");
+    }
+
+    if (levelsList.length && finalIndex === -1) {
+      issues.push("Final approval level is missing.");
+    }
+    if (finalIndex >= 0 && finalIndex !== levelsList.length - 1) {
+      issues.push("Final approval must be the last level.");
+    }
+
+    paths.forEach(path => {
+      path.issues.forEach(issue => issues.push(issue));
+      if (finalIndex >= 0) {
+        const finalLevel = levelsList[levelsList.length - 1];
+        if (!finalLevel || finalLevel.level_type !== "final") {
+          return;
+        }
+        const finalApprovers = getEligibleApprovers(finalLevel, path.site.id);
+        if (!finalApprovers.length) {
+          issues.push(`${path.site.name} — Final approval needs an approver.`);
+        }
+      }
+    });
+
+    return {
+      coveredSites,
+      paths,
+      issues: Array.from(new Set(issues)),
+      readyCount: paths.filter(path => path.status === "Ready").length,
+      blockedCount: paths.filter(path => path.status === "Blocked").length,
+      canPublish: issues.length === 0 && paths.length > 0,
+      setupState
+    };
+  }
+
+  function renderHeader() {
+    headerFormName.textContent = getLinkedFormLabel();
+    headerSitesCount.textContent = String(getCoveredSites().length);
+    headerLevelsCount.textContent = String(levelsList.length);
+  }
+
+  function renderSetupControls() {
+    dfForm.innerHTML = '<option value="">Choose form</option>';
+    availableForms.forEach(form => {
+      const option = document.createElement("option");
+      option.value = form.id;
+      option.textContent = `${form.name} (${form.code})`;
+      if (parseInt(form.id) === parseInt(selectedFormId)) {
+        option.selected = true;
+      }
+      dfForm.appendChild(option);
+    });
+    dfForm.disabled = !permissions.can_edit;
+
+    coveredSitesCount.textContent = `${selectedSiteIds.length} selected`;
+    coveredSitesList.innerHTML = "";
+    if (!selectedFormId) {
+      coveredSitesList.innerHTML = `
+        <div class="sm:col-span-2 rounded-lg border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
+          Choose a form before selecting covered sites.
+        </div>
+      `;
+      return;
+    }
+    if (!availableSites.length) {
+      coveredSitesList.innerHTML = `
+        <div class="sm:col-span-2 rounded-lg border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
+          No active sites are available.
+        </div>
+      `;
+      return;
+    }
+
+    availableSites.forEach(site => {
+      const label = document.createElement("label");
+      label.className = "flex items-start gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm hover:bg-slate-50";
+      label.innerHTML = `
+        <input type="checkbox" class="covered-site-checkbox mt-1 rounded border-slate-300 text-indigo-600" value="${site.id}" ${selectedSiteIds.includes(parseInt(site.id)) ? "checked" : ""} ${!permissions.can_edit ? "disabled" : ""}>
+        <span class="min-w-0">
+          <span class="block truncate font-semibold text-slate-800">${escapeHtml(site.name)}</span>
+          <span class="block truncate text-xs text-slate-400">${escapeHtml(site.code || "")}</span>
+        </span>
+      `;
+      coveredSitesList.appendChild(label);
+    });
+
+    coveredSitesList.querySelectorAll(".covered-site-checkbox").forEach(input => {
+      input.addEventListener("change", () => {
+        const siteId = parseInt(input.value);
+        if (input.checked && !selectedSiteIds.includes(siteId)) {
+          selectedSiteIds.push(siteId);
+        } else if (!input.checked) {
+          selectedSiteIds = selectedSiteIds.filter(id => id !== siteId);
+        }
+        selectedSiteIds.sort((a, b) => a - b);
+        setUnsaved(true);
+        renderWorkspace();
+      });
+    });
+  }
+
+  function renderVersionBadge() {
+    const published = currentVersion && currentVersion.status === "Published";
+    editorVersionBadge.textContent = published
+      ? `Live: V${currentVersion.version_number}`
+      : `Draft: V${currentVersion ? currentVersion.version_number : 1}`;
+    editorVersionBadge.className = published
+      ? "rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-800"
+      : "rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase text-amber-800";
+  }
+
+  function renderReadiness() {
+    lastValidation = validateWorkflow();
+    const total = lastValidation.paths.length;
+    readySitesCount.textContent = `${lastValidation.readyCount}/${total || 0} ready`;
+
+    if (lastValidation.setupState === "no_form") {
+      readinessSummary.innerHTML = `
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+          Choose the form this workflow will approve.
+        </div>
+      `;
+    } else if (lastValidation.setupState === "no_sites") {
+      readinessSummary.innerHTML = `
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+          Choose the sites this workflow should cover.
+        </div>
+      `;
+    } else if (lastValidation.canPublish) {
+      readinessSummary.innerHTML = `
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+          All covered sites have a valid approval path.
+        </div>
+      `;
+    } else {
+      readinessSummary.innerHTML = `
+        <div class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800">
+          ${lastValidation.issues.length} issue${lastValidation.issues.length === 1 ? "" : "s"} must be fixed before publish.
+        </div>
+      `;
+    }
+
+    readinessSiteList.innerHTML = "";
+    lastValidation.paths.forEach(path => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "grid w-full gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-left text-xs hover:bg-slate-50";
+      const dotClass = path.status === "Ready" ? "bg-emerald-500" : path.status === "Blocked" ? "bg-rose-500" : "bg-amber-500";
+      button.innerHTML = `
+        <span class="flex items-start justify-between gap-3">
+          <span class="flex min-w-0 items-center gap-2">
+            <span class="mt-0.5 h-2 w-2 shrink-0 rounded-full ${dotClass}"></span>
+            <span class="font-semibold text-slate-700">${escapeHtml(path.site.name)}</span>
+          </span>
+          <span class="shrink-0 text-[10px] font-bold uppercase text-slate-400">${path.status}</span>
+        </span>
+        ${path.issues[0] ? `<span class="block pl-4 text-[11px] leading-4 text-slate-500">${escapeHtml(path.issues[0])}</span>` : ""}
+      `;
+      button.onclick = () => {
+        previewSiteSelect.value = path.site.id;
+        renderPreviewPath();
+        document.getElementById("preview-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      };
+      readinessSiteList.appendChild(button);
+    });
+  }
+
+  function renderSiteSummary() {
+    const validation = lastValidation || validateWorkflow();
+    siteSummaryList.innerHTML = "";
+
+    if (!validation.paths.length) {
+      siteSummaryList.innerHTML = '<p class="text-xs italic text-slate-400">No covered sites to summarize.</p>';
+      return;
+    }
+
+    validation.paths.forEach(path => {
+      const statusClass = path.status === "Ready"
+        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+        : path.status === "Blocked"
+          ? "bg-rose-50 text-rose-700 border-rose-200"
+          : "bg-amber-50 text-amber-700 border-amber-200";
+      const item = document.createElement("div");
+      item.className = "rounded-lg border border-slate-200 px-3 py-2.5 text-xs";
+      item.innerHTML = `
+        <div class="flex items-center justify-between gap-2">
+          <span class="truncate font-semibold text-slate-800">${escapeHtml(path.site.name)}</span>
+          <span class="rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${statusClass}">${path.status}</span>
+        </div>
+        <div class="mt-1 text-[11px] leading-4 text-slate-500">
+          ${path.approvalsCount} approval${path.approvalsCount === 1 ? "" : "s"} · ${path.skippedCount} skipped
+        </div>
+      `;
+      siteSummaryList.appendChild(item);
+    });
+  }
+
+  function renderPreviewSelector() {
+    const previousValue = previewSiteSelect.value;
+    const sites = selectedFormId ? getCoveredSites() : [];
+
+    previewSiteSelect.innerHTML = '<option value="">Choose site</option>';
+    sites.forEach(site => {
+      const option = document.createElement("option");
+      option.value = site.id;
+      option.textContent = site.name;
+      previewSiteSelect.appendChild(option);
+    });
+
+    if (previousValue && sites.some(site => parseInt(site.id) === parseInt(previousValue))) {
+      previewSiteSelect.value = previousValue;
+    } else if (sites.length) {
+      previewSiteSelect.value = sites[0].id;
+    }
+  }
+
+  function renderPreviewPath() {
+    if (!selectedFormId) {
+      previewPathOutput.innerHTML = `
+        <div class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+          Choose a form and covered sites to preview the approval path.
+        </div>
+      `;
+      return;
+    }
+
+    if (!getCoveredSites().length) {
+      previewPathOutput.innerHTML = `
+        <div class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+          Choose covered sites to preview the approval path.
+        </div>
+      `;
+      return;
+    }
+
+    const siteId = parseInt(previewSiteSelect.value);
+    if (!siteId) {
+      previewPathOutput.innerHTML = '<p class="text-sm italic text-slate-400">Choose a site to preview the approval path.</p>';
+      return;
+    }
+
+    const site = getSite(siteId);
+    if (!site) {
+      previewPathOutput.innerHTML = '<p class="text-sm italic text-slate-400">Selected site is unavailable.</p>';
+      return;
+    }
+
+    const path = buildSitePath(site);
+    const rows = [];
+    rows.push(`
+      <li class="flex gap-3">
+        <span class="mt-1 h-2.5 w-2.5 rounded-full bg-slate-400"></span>
+        <div>
+          <div class="text-sm font-semibold text-slate-800">Submitted by SPOC</div>
+          <div class="text-xs text-slate-500">Monthly submission enters this workflow.</div>
+        </div>
+      </li>
+    `);
+
+    path.rows.forEach(row => {
+      const borderClass = row.status === "active"
+        ? "border-emerald-200 bg-emerald-50"
+        : row.status === "skipped"
+          ? "border-slate-200 bg-slate-50"
+          : "border-rose-200 bg-rose-50";
+      const dotClass = row.status === "active"
+        ? "bg-emerald-500"
+        : row.status === "skipped"
+          ? "bg-slate-300"
+          : "bg-rose-500";
+      const approverText = row.approvers.length
+        ? row.approvers.map(app => `${escapeHtml(app.full_name)} <span class="text-slate-400">(${app.scope_site_id ? `${escapeHtml(getSiteName(app.scope_site_id))} only` : "All sites"})</span>`).join("<br>")
+        : escapeHtml(row.message);
+
+      rows.push(`
+        <li class="flex gap-3">
+          <span class="mt-3 h-2.5 w-2.5 rounded-full ${dotClass}"></span>
+          <div class="min-w-0 flex-1 rounded-lg border px-3 py-2 ${borderClass}">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Level ${row.level.level_number}</div>
+            <div class="text-sm font-semibold text-slate-800">${escapeHtml(row.level.level_name)}</div>
+            <div class="mt-1 text-xs text-slate-600">${approverText}</div>
+          </div>
+        </li>
+      `);
+    });
+
+    if (!path.blocked && finalApprovalIndex() >= 0) {
+      rows.push(`
+        <li class="flex gap-3">
+          <span class="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
+          <div>
+            <div class="text-sm font-semibold text-slate-800">Outcome: Approved & locked</div>
+            <div class="text-xs text-slate-500">Final Approval locks the submission for this site.</div>
+          </div>
+        </li>
+      `);
+    }
+
+    previewPathOutput.innerHTML = `
+      <div class="mb-3 rounded-lg border ${path.blocked ? "border-rose-200 bg-rose-50 text-rose-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"} px-3 py-2 text-xs font-semibold">
+        ${path.blocked ? "Configuration error for this site." : "This site is ready."}
+      </div>
+      <ol class="space-y-3">${rows.join("")}</ol>
+    `;
+  }
+
+  function renderWorkspace() {
+    ensureGenericLevelNames();
+    const editable = permissions.can_edit;
+    renderSetupControls();
+    renderHeader();
+    renderVersionBadge();
+
+    levelsContainer.innerHTML = "";
+    if (!levelsList.length) {
+      levelsContainer.innerHTML = `
+        <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
+          <div class="text-sm font-semibold text-slate-700">No approval levels yet.</div>
+          <div class="mt-1 text-xs text-slate-500">Add Approval Level 1, then add a mandatory Final Approval before publishing.</div>
+        </div>
+      `;
+    } else {
+      levelsList.forEach((level, index) => {
+        levelsContainer.appendChild(renderLevelCard(level, index, editable));
+      });
+    }
+
+    btnAddLevel.disabled = !editable;
+    btnSaveDraft.disabled = !editable;
+    renderPreviewSelector();
+    renderReadiness();
+    renderSiteSummary();
+    renderVersionActions();
+    renderPreviewPath();
+  }
+
+  function renderVersionActions() {
+    versionActions.innerHTML = "";
+    if (permissions.can_publish) {
+      const publishButton = document.createElement("button");
+      publishButton.type = "button";
+      publishButton.className = "inline-flex h-9 items-center justify-center rounded-lg bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100";
+      publishButton.textContent = (lastValidation && ["no_form", "no_sites"].includes(lastValidation.setupState))
+        ? "Complete setup to publish"
+        : (lastValidation && !lastValidation.canPublish)
+          ? `Fix ${lastValidation.issues.length} issue${lastValidation.issues.length === 1 ? "" : "s"} to publish`
+        : "Publish workflow";
+      publishButton.onclick = openPublishReview;
+      versionActions.appendChild(publishButton);
+    }
+    if (permissions.can_create_version) {
+      const newVersionButton = document.createElement("button");
+      newVersionButton.type = "button";
+      newVersionButton.className = "inline-flex h-9 items-center justify-center rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white hover:bg-indigo-700";
+      newVersionButton.textContent = "Edit workflow";
+      newVersionButton.onclick = createNewVersionDraft;
+      versionActions.appendChild(newVersionButton);
+    }
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50";
+    deleteButton.title = "Delete workflow";
+    deleteButton.innerHTML = `
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+      </svg>
+    `;
+    deleteButton.onclick = deleteWorkflow;
+    versionActions.appendChild(deleteButton);
+  }
+
+  function renderLevelCard(level, index, editable) {
+    const final = isFinalLevel(index);
+    const mode = getAssignmentMode(level);
+    const card = document.createElement("article");
+    card.id = `workflow-level-${index}`;
+    card.className = "rounded-xl border border-slate-200 bg-white p-6 shadow-sm";
+
+    card.innerHTML = `
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${final ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100"} text-sm font-bold">${level.level_number}</span>
+
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div class="min-w-0 flex-1">
+              <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Level name</label>
+              <input type="text" value="${escapeHtml(level.level_name)}" ${!editable ? "disabled" : ""}
+                class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-indigo-500 focus:ring-indigo-500 disabled:bg-slate-50 disabled:text-slate-500">
+              <p class="mt-1 text-xs leading-5 text-slate-500">Shown in approval queues, notifications, and preview paths.</p>
+            </div>
+            <div class="flex shrink-0 items-center gap-2 pt-5">
+              <span class="rounded-full ${final ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"} px-2.5 py-1 text-[10px] font-bold uppercase">
+                ${final ? "Final approval" : "Approval level"}
+              </span>
+              ${editable ? `<button type="button" class="delete-level rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100">Remove</button>` : ""}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 rounded-xl border border-slate-200 bg-white p-5">
+        <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div>
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Approval rule</label>
+            <select class="approval-mode mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" ${!editable ? "disabled" : ""}>
+              ${approvalModeOptions(level.approval_mode || "ANY_ONE")}
+            </select>
+            <p class="mt-2 text-xs leading-5 text-slate-500">This controls how approvers at this level complete the step.</p>
+          </div>
+          <div>
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Level type</label>
+            <select class="level-type mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" ${!editable ? "disabled" : ""}>
+              <option value="regular" ${final ? "" : "selected"}>Regular approval</option>
+              <option value="final" ${final ? "selected" : ""}>Final approval</option>
+            </select>
+            <p class="mt-2 text-xs leading-5 text-slate-500">${final ? "This is the approval that locks and releases data to reports." : "Regular levels can be skipped when configured below."}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-5">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-800">Who approves at this level?</h3>
+            <p class="mt-1 text-xs text-slate-500">${mode === "same" ? "One approver assignment applies to every covered site." : "Each covered site can route to a different approver."}</p>
+          </div>
+          <div class="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+            <button type="button" data-mode="same" class="assignment-mode-button rounded-md px-3 py-1.5 text-xs font-semibold ${mode === "same" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:text-slate-800"}" ${!editable ? "disabled" : ""}>Same for every site</button>
+            <button type="button" data-mode="site" class="assignment-mode-button rounded-md px-3 py-1.5 text-xs font-semibold ${mode === "site" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:text-slate-800"}" ${!editable ? "disabled" : ""}>Different per site</button>
+          </div>
+        </div>
+        <div class="assignment-body mt-4"></div>
+      </div>
+
+      <div class="mt-4 rounded-lg border ${final ? "border-emerald-100 bg-emerald-50" : "border-indigo-100 bg-indigo-50"} px-4 py-3 text-xs leading-5">
+        ${final
+          ? '<span class="font-semibold text-emerald-800">Final approval is required for every covered site.</span> <span class="text-emerald-700">This is the step that approves, locks, and releases data to reports.</span>'
+          : `<label class="inline-flex items-center gap-2 font-semibold text-slate-700">
+              <input type="checkbox" class="skip-empty-checkbox rounded border-slate-300 text-indigo-600" ${level.skip_if_empty ? "checked" : ""} ${!editable ? "disabled" : ""}>
+              Skip this level when no approver matches the site
+            </label>
+            <p class="mt-1 text-slate-500">If no approver matches a site, skip this level and move to the next approval level.</p>`
+        }
+      </div>
+    `;
+
+    const nameInput = card.querySelector("input[type='text']");
+    nameInput.addEventListener("change", () => {
+      level.level_name = nameInput.value.trim() || (final ? "Final Approval" : `Approval Level ${level.level_number}`);
+      setUnsaved(true);
+      renderWorkspace();
+    });
+
+    const approvalModeSelect = card.querySelector(".approval-mode");
+    approvalModeSelect.addEventListener("change", () => {
+      level.approval_mode = approvalModeSelect.value;
+      if (level.approval_mode === "SEQUENTIAL") {
+        level.approvers.forEach((app, appIndex) => app.sequence_number = appIndex + 1);
+      } else {
+        level.approvers.forEach(app => app.sequence_number = null);
+      }
+      setUnsaved(true);
+      renderWorkspace();
+    });
+
+    const levelTypeSelect = card.querySelector(".level-type");
+    levelTypeSelect.addEventListener("change", () => {
+      if (levelTypeSelect.value === "final") {
+        levelsList.forEach(item => {
+          if (item !== level) item.level_type = "regular";
+        });
+        level.level_type = "final";
+        level.level_name = "Final Approval";
+        level.skip_if_empty = false;
+        normalizeLevelOrder();
+      } else {
+        level.level_type = "regular";
+        if (level.level_name === "Final Approval") {
+          level.level_name = "";
+        }
+      }
+      ensureGenericLevelNames();
+      setUnsaved(true);
+      renderWorkspace();
+    });
+
+    card.querySelectorAll(".assignment-mode-button").forEach(button => {
+      button.addEventListener("click", () => {
+        const nextMode = button.dataset.mode;
+        const currentMode = getAssignmentMode(level);
+        if (nextMode === currentMode) return;
+
+        if (button.dataset.mode === "same") {
+          level.assignment_mode = "same";
+          const existingGlobal = (level.approvers || []).find(app => !app.scope_site_id);
+          level.approvers = existingGlobal ? [{
+            ...existingGlobal,
+            scope_site_id: null,
+            sequence_number: null
+          }] : [];
+        }
+        if (button.dataset.mode === "site") {
+          level.assignment_mode = "site";
+          const existingScoped = (level.approvers || []).filter(app => app.scope_site_id);
+          const existingGlobal = (level.approvers || []).find(app => !app.scope_site_id);
+          if (existingScoped.length) {
+            level.approvers = existingScoped;
+          } else if (existingGlobal) {
+            level.approvers = getCoveredSites().map(site => ({
+              ...existingGlobal,
+              scope_site_id: site.id,
+              sequence_number: null
+            }));
+          } else {
+            level.approvers = [];
+          }
+        }
+        setUnsaved(true);
+        renderWorkspace();
+      });
+    });
+
+    const deleteButton = card.querySelector(".delete-level");
+    if (deleteButton) {
+      deleteButton.addEventListener("click", () => {
+        levelsList.splice(index, 1);
+        levelsList.forEach((item, idx) => item.level_number = idx + 1);
+        ensureGenericLevelNames();
+        setUnsaved(true);
+        renderWorkspace();
+      });
+    }
+
+    const skipInput = card.querySelector(".skip-empty-checkbox");
+    if (skipInput) {
+      skipInput.addEventListener("change", () => {
+        level.skip_if_empty = skipInput.checked;
+        setUnsaved(true);
+        renderWorkspace();
+      });
+    }
+
+    const body = card.querySelector(".assignment-body");
+    if (mode === "same") {
+      renderSameSiteAssignment(body, level, editable);
+    } else {
+      renderPerSiteAssignment(body, level, editable, final);
+    }
+
+    return card;
+  }
+
+  function renderSameSiteAssignment(container, level, editable) {
+    const allSiteApprover = (level.approvers || []).find(app => !app.scope_site_id);
+    container.innerHTML = `
+      <div class="rounded-xl border border-slate-200 bg-white p-5">
+        <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Approver</label>
+        <select class="all-site-approver mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" ${!editable ? "disabled" : ""}>
+          <option value="">Choose approver</option>
+          ${availableUsers.map(user => `<option value="${user.id}" ${allSiteApprover && parseInt(allSiteApprover.user_id) === parseInt(user.id) ? "selected" : ""}>${escapeHtml(user.full_name)} (${escapeHtml(user.email)})</option>`).join("")}
+        </select>
+        <div class="mt-3 inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">Applies to all covered sites</div>
+      </div>
+    `;
+
+    container.querySelector(".all-site-approver").addEventListener("change", (event) => {
+      const userId = parseInt(event.target.value);
+      level.assignment_mode = "same";
+      level.approvers = (level.approvers || []).filter(app => app.scope_site_id);
+      if (userId) {
+        const user = availableUsers.find(item => parseInt(item.id) === userId);
+        level.approvers.unshift({
+          user_id: user.id,
+          full_name: user.full_name,
+          email: user.email,
+          scope_site_id: null,
+          sequence_number: null
+        });
+      }
+      setUnsaved(true);
+      renderWorkspace();
+    });
+  }
+
+  function renderPerSiteAssignment(container, level, editable, final) {
+    const sites = getRoutingSites();
+    if (!sites.length) {
+      container.innerHTML = `
+        <div class="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+          No sites are available for routing yet.
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = '<div class="space-y-3"></div>';
+    const rowsContainer = container.querySelector("div");
+    sites.forEach(site => {
+      const assignment = (level.approvers || []).find(app => parseInt(app.scope_site_id) === parseInt(site.id));
+      const eligible = getEligibleApprovers(level, site.id);
+      const status = eligible.length
+        ? { label: "Set", className: "bg-emerald-50 text-emerald-700 border-emerald-200" }
+        : (!final && level.skip_if_empty)
+          ? { label: "Will skip", className: "bg-slate-50 text-slate-600 border-slate-200" }
+          : { label: "Needs approver", className: "bg-rose-50 text-rose-700 border-rose-200" };
+      const row = document.createElement("div");
+      row.className = "rounded-xl border border-slate-200 bg-white p-4";
+      row.innerHTML = `
+        <div class="grid gap-4 xl:grid-cols-[minmax(180px,1fr)_minmax(260px,420px)_132px] xl:items-center">
+          <div class="min-w-0">
+            <div class="truncate font-semibold text-slate-800">${escapeHtml(site.name)}</div>
+            <div class="mt-1 text-xs text-slate-400">${escapeHtml(site.code || "")}</div>
+          </div>
+          <div>
+            <select class="site-approver block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" data-site-id="${site.id}" ${!editable ? "disabled" : ""}>
+            <option value="">Choose approver</option>
+            ${availableUsers.map(user => `<option value="${user.id}" ${assignment && parseInt(assignment.user_id) === parseInt(user.id) ? "selected" : ""}>${escapeHtml(user.full_name)} (${escapeHtml(user.email)})</option>`).join("")}
+            </select>
+            ${!eligible.length && !final && level.skip_if_empty ? '<p class="mt-1 text-xs text-slate-500">If no approver matches, this site moves to the next approval level.</p>' : ""}
+          </div>
+          <div class="flex justify-start xl:justify-self-end">
+            <span class="inline-flex min-w-[112px] justify-center whitespace-nowrap rounded-full border px-3 py-1 text-xs font-semibold ${status.className}">${status.label}</span>
+          </div>
+        </div>
+      `;
+      rowsContainer.appendChild(row);
+    });
+
+    rowsContainer.querySelectorAll(".site-approver").forEach(select => {
+      select.addEventListener("change", (event) => {
+        const siteId = parseInt(event.target.dataset.siteId);
+        const userId = parseInt(event.target.value);
+        level.assignment_mode = "site";
+        level.approvers = (level.approvers || []).filter(app => parseInt(app.scope_site_id) !== siteId);
+        if (userId) {
+          const user = availableUsers.find(item => parseInt(item.id) === userId);
+          level.approvers.push({
+            user_id: user.id,
+            full_name: user.full_name,
+            email: user.email,
+            scope_site_id: siteId,
+            sequence_number: null
+          });
+        }
+        setUnsaved(true);
+        renderWorkspace();
+      });
+    });
+  }
+
   async function loadWorkflows() {
     workflowsListBody.innerHTML = '<tr><td colspan="5" class="px-6 py-12 text-center text-slate-400 italic">Loading workflows...</td></tr>';
-    
     try {
       const res = await fetch("/module/WFLWBLD/api");
       const data = await res.json();
       workflows = data;
       workflowsListBody.innerHTML = "";
 
-      if (data.length === 0) {
+      if (!data.length) {
         workflowsListBody.innerHTML = `
           <tr>
             <td colspan="5" class="px-6 py-12 text-center text-slate-400 italic">
@@ -169,26 +964,19 @@ document.addEventListener("DOMContentLoaded", () => {
       data.forEach(item => {
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-50/50 transition-colors";
-
-        let statusBadge = "";
         const status = item.latest_version_status || "Draft";
-        if (status === "Published") {
-          statusBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 uppercase">Published</span>';
-        } else {
-          statusBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 uppercase">Draft</span>';
-        }
-
-        let actions = [];
-        if (item.latest_version_id) {
-          actions.push(`<button onclick="editWorkflow(${item.id}, ${item.latest_version_id})" class="text-indigo-600 hover:text-indigo-900 font-bold hover:underline">Edit / Details</button>`);
-        }
-
+        const statusBadge = status === "Published"
+          ? '<span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">Published</span>'
+          : '<span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">Draft</span>';
+        const action = item.latest_version_id
+          ? `<button onclick="editWorkflow(${item.id}, ${item.latest_version_id})" class="font-bold text-indigo-600 hover:text-indigo-900 hover:underline">Edit / Details</button>`
+          : "";
         tr.innerHTML = `
-          <td class="px-6 py-4 font-bold text-slate-800">${item.name}</td>
-          <td class="px-6 py-4 font-mono text-slate-500">${item.code}</td>
-          <td class="px-6 py-4 text-slate-500 font-bold">${item.levels_count || 0} stages</td>
+          <td class="px-6 py-4 font-bold text-slate-800">${escapeHtml(item.name)}</td>
+          <td class="px-6 py-4 font-mono text-slate-500">${escapeHtml(item.code)}</td>
+          <td class="px-6 py-4 font-bold text-slate-500">${item.levels_count || 0} levels</td>
           <td class="px-6 py-4">${statusBadge}</td>
-          <td class="px-6 py-4 text-right whitespace-nowrap">${actions.join("")}</td>
+          <td class="px-6 py-4 text-right whitespace-nowrap">${action}</td>
         `;
         workflowsListBody.appendChild(tr);
       });
@@ -198,36 +986,32 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- Load Version Details ---
-  async function loadVersionDetails(verId) {
+  async function loadVersionDetails(versionId) {
     try {
-      const res = await fetch(`/module/WFLWBLD/api/version/${verId}`);
+      const res = await fetch(`/module/WFLWBLD/api/version/${versionId}`);
       if (!res.ok) throw new Error("Failed to load details");
       const data = await res.json();
 
-      currentVersionId = verId;
+      currentVersionId = versionId;
       currentVersion = data.version;
-      levelsList = data.levels || [];
+      currentWorkflow = data.workflow;
+      levelsList = (data.levels || []).map(level => ({
+        ...level,
+        level_type: level.level_name === "Final Approval" ? "final" : "regular",
+        assignment_mode: (level.approvers || []).some(app => app.scope_site_id) ? "site" : "same"
+      }));
       availableUsers = data.available_users || [];
       availableSites = data.available_sites || [];
+      availableForms = data.available_forms || [];
+      linkedForms = data.linked_forms || [];
       permissions = data.permissions || {};
-      hasUnsavedChanges = false;
+      selectedFormId = linkedForms.length ? linkedForms[0].id : null;
+      selectedSiteIds = linkedForms.length ? (linkedForms[0].site_ids || []).map(siteId => parseInt(siteId)).filter(Boolean) : [];
 
-      dfName.value = data.workflow.name;
-      dfCode.value = data.workflow.code;
-      dfCode.disabled = true;
-
-      editorTitle.textContent = `Edit Workflow · ${data.workflow.name}`;
-      
-      let badgeClass = "bg-amber-100 text-amber-800";
-      let statusLabel = "Draft";
-      if (currentVersion.status === "Published") {
-        badgeClass = "bg-emerald-100 text-emerald-800";
-        statusLabel = "Published";
-      }
-      editorVersionBadge.textContent = `v${currentVersion.version_number} (${statusLabel})`;
-      editorVersionBadge.className = `px-2 py-0.5 rounded-full font-bold uppercase text-[9px] ${badgeClass}`;
-
+      dfName.value = currentWorkflow.name;
+      dfCode.value = currentWorkflow.code;
+      editorTitle.textContent = currentWorkflow.name;
+      setUnsaved(false);
       renderWorkspace();
     } catch (err) {
       console.error(err);
@@ -235,463 +1019,173 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- Render workspace levels sequence ---
-  function renderWorkspace() {
-    // Render level node boxes
-    levelsContainer.innerHTML = "";
-    const isEditable = permissions.can_edit;
+  window.showList = function () {
+    if (hasUnsavedChanges && !confirm("You have unsaved changes. Discard and return to list?")) return;
+    editorView.classList.add("hidden");
+    listView.classList.remove("hidden");
+    loadWorkflows();
+  };
 
-    if (levelsList.length === 0) {
-      levelsContainer.innerHTML = `
-        <div class="text-center py-12 border border-dashed border-slate-200 rounded-xl text-slate-400 text-xs italic">
-          No approval stages configured yet. Click "+ Add Stage" to design your sequence.
-        </div>
-      `;
-    } else {
-      levelsList.forEach((lvl, levelIdx) => {
-        const node = renderLevelNode(lvl, levelIdx, isEditable);
-        levelsContainer.appendChild(node);
-      });
-    }
+  window.startNewWorkflow = function () {
+    modalCreateWorkflow.classList.remove("hidden");
+  };
 
-    // Render action buttons
-    versionActions.innerHTML = "";
-    if (permissions.can_publish) {
-      const btnPub = document.createElement("button");
-      btnPub.className = "inline-flex items-center justify-center px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition";
-      btnPub.textContent = "Publish Workflow";
-      btnPub.onclick = publishVersion;
-      versionActions.appendChild(btnPub);
-    }
-    if (permissions.can_create_version) {
-      const btnNew = document.createElement("button");
-      btnNew.className = "inline-flex items-center justify-center px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow transition";
-      btnNew.textContent = "Create Draft Version";
-      btnNew.onclick = createNewVersionDraft;
-      versionActions.appendChild(btnNew);
-    }
+  window.editWorkflow = function (workflowId, versionId) {
+    currentWorkflowId = workflowId;
+    currentVersionId = versionId;
+    listView.classList.add("hidden");
+    editorView.classList.remove("hidden");
+    loadVersionDetails(versionId);
+  };
 
-    // Add delete workflow button
-    const btnDel = document.createElement("button");
-    btnDel.className = "p-1.5 border border-rose-200 hover:bg-rose-50 text-rose-600 rounded-lg transition-colors";
-    btnDel.innerHTML = `
-      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-      </svg>
-    `;
-    btnDel.title = "Delete Workflow";
-    btnDel.onclick = deleteWorkflow;
-    versionActions.appendChild(btnDel);
-
-    if (isEditable) {
-      btnAddLevel.removeAttribute("disabled");
-      btnSaveDraft.removeAttribute("disabled");
-    } else {
-      btnAddLevel.setAttribute("disabled", "true");
-      btnSaveDraft.setAttribute("disabled", "true");
-    }
-
-    runValidation();
-    renderPreview();
+  function hideCreateWorkflowModal() {
+    modalCreateWorkflow.classList.add("hidden");
+    formCreateWorkflow.reset();
   }
 
-  function renderLevelNode(lvl, levelIdx, isEditable) {
-    const div = document.createElement("div");
-    div.className = "p-4 border border-slate-200 bg-white rounded-xl shadow-sm space-y-4 relative hover:border-slate-300 transition";
+  btnCloseWorkflowModal.onclick = hideCreateWorkflowModal;
+  btnCancelWorkflowModal.onclick = hideCreateWorkflowModal;
 
-    // Header row
-    const header = document.createElement("div");
-    header.className = "flex items-center justify-between pb-2.5 border-b border-slate-100 gap-4";
-    
-    const leftHeader = document.createElement("div");
-    leftHeader.className = "flex items-center space-x-3";
-    leftHeader.innerHTML = `
-      <span class="flex items-center justify-center h-6 w-6 rounded-full bg-indigo-50 text-indigo-600 text-xs font-bold">
-        ${lvl.level_number}
-      </span>
-      <input type="text" value="${lvl.level_name}" ${!isEditable ? "disabled" : ""} 
-        class="form-input text-xs font-bold text-slate-700 border-slate-200 focus:border-indigo-500 rounded-lg px-2 py-1 max-w-[200px]" />
-    `;
-
-    const rightHeader = document.createElement("div");
-    rightHeader.className = "flex items-center space-x-3";
-    rightHeader.innerHTML = `
-      <div class="flex items-center space-x-1.5">
-        <label class="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Mode:</label>
-        <select ${!isEditable ? "disabled" : ""} class="form-select text-[11px] rounded-lg border-slate-200 py-1 bg-white focus:border-indigo-500">
-          <option value="ANY_ONE" ${lvl.approval_mode === "ANY_ONE" ? "selected" : ""}>ANY_ONE</option>
-          <option value="SEQUENTIAL" ${lvl.approval_mode === "SEQUENTIAL" ? "selected" : ""}>SEQUENTIAL</option>
-        </select>
-      </div>
-    `;
-
-    if (isEditable) {
-      const btnDel = document.createElement("button");
-      btnDel.type = "button";
-      btnDel.className = "text-slate-400 hover:text-rose-500 transition";
-      btnDel.innerHTML = `
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-        </svg>
-      `;
-      btnDel.title = "Delete Level";
-      btnDel.onclick = () => {
-        levelsList.splice(levelIdx, 1);
-        levelsList.forEach((l, idx) => l.level_number = idx + 1);
-        hasUnsavedChanges = true;
-        renderWorkspace();
-      };
-      rightHeader.appendChild(btnDel);
-    } else {
-      // Show Final Badge if this is final level
-      if (levelIdx === levelsList.length - 1) {
-        const finalBadge = document.createElement("span");
-        finalBadge.className = "inline-flex items-center space-x-1 text-indigo-600 font-bold text-xs";
-        finalBadge.innerHTML = `
-          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5 9-11"/></svg>
-          <span>Final</span>
-        `;
-        rightHeader.appendChild(finalBadge);
-      }
+  formCreateWorkflow.onsubmit = async (event) => {
+    event.preventDefault();
+    const name = document.getElementById("new-workflow-name").value.trim();
+    const code = document.getElementById("new-workflow-code").value.trim().toUpperCase().replace(/\s+/g, "_");
+    if (workflows.find(workflow => workflow.code === code)) {
+      showToast(`Workflow with code '${code}' already exists.`, "error");
+      return;
     }
 
-    header.appendChild(leftHeader);
-    header.appendChild(rightHeader);
-    div.appendChild(header);
+    const submitButton = formCreateWorkflow.querySelector("button[type='submit']");
+    const originalText = submitButton.textContent;
+    submitButton.disabled = true;
+    submitButton.textContent = "Creating...";
 
-    const emptyBehavior = document.createElement("div");
-    emptyBehavior.className = "flex flex-col sm:flex-row sm:items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2";
-    emptyBehavior.innerHTML = `
-      <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">If no approver matches this site</label>
-      <select ${!isEditable ? "disabled" : ""} class="skip-empty-select form-select text-[11px] rounded-lg border-slate-200 py-1 bg-white focus:border-indigo-500">
-        <option value="false" ${lvl.skip_if_empty ? "" : "selected"}>Stop and show configuration error</option>
-        <option value="true" ${lvl.skip_if_empty ? "selected" : ""}>Skip this level</option>
-      </select>
-    `;
-    div.appendChild(emptyBehavior);
-    emptyBehavior.querySelector("select").addEventListener("change", (e) => {
-      lvl.skip_if_empty = e.target.value === "true";
-      hasUnsavedChanges = true;
-      renderWorkspace();
-    });
-
-    // Bind level name input change
-    leftHeader.querySelector("input").addEventListener("change", (e) => {
-      lvl.level_name = e.target.value.trim() || `Level ${lvl.level_number}`;
-      hasUnsavedChanges = true;
-      runValidation();
-    });
-
-    // Bind mode change
-    header.querySelector("select").addEventListener("change", (e) => {
-      lvl.approval_mode = e.target.value;
-      if (lvl.approval_mode === "SEQUENTIAL") {
-        lvl.approvers.forEach((app, idx) => app.sequence_number = idx + 1);
-      } else {
-        lvl.approvers.forEach(app => app.sequence_number = null);
-      }
-      hasUnsavedChanges = true;
-      renderWorkspace();
-    });
-
-    // Approvers lists
-    const approversArea = document.createElement("div");
-    approversArea.className = "space-y-2";
-    
-    const approverLabel = document.createElement("h4");
-    approverLabel.className = "text-[9px] font-bold text-slate-400 uppercase tracking-wider";
-    approverLabel.textContent = "All approver assignments for this level";
-    approversArea.appendChild(approverLabel);
-
-    const appGrid = document.createElement("div");
-    appGrid.className = "grid grid-cols-1 sm:grid-cols-2 gap-2";
-
-    if (lvl.approvers.length === 0) {
-      appGrid.innerHTML = `
-        <div class="sm:col-span-2 text-left py-2.5 px-3 border border-dashed border-slate-200 rounded-lg text-[10px] text-slate-400 italic">
-          No approvers assigned to this level yet.
-        </div>
-      `;
-    } else {
-      lvl.approvers.forEach((app, appIdx) => {
-        const row = document.createElement("div");
-        row.className = "flex items-center justify-between p-2 bg-slate-50 border border-slate-100 rounded-lg text-xs hover:border-slate-200 transition";
-
-        let seqLabel = "";
-        if (lvl.approval_mode === "SEQUENTIAL") {
-          seqLabel = `<span class="mr-1.5 flex items-center justify-center h-4 w-4 bg-slate-200 text-slate-700 text-[9px] font-bold rounded">${app.sequence_number}</span>`;
-        }
-
-        const info = document.createElement("div");
-        info.className = "flex items-center truncate mr-2";
-        info.innerHTML = `
-          ${seqLabel}
-          <div class="flex flex-col truncate">
-            <span class="font-semibold text-slate-700 truncate">${app.full_name}</span>
-            <span class="text-[10px] text-slate-400 truncate">${app.email}</span>
-            <span class="mt-1 inline-flex w-fit items-center rounded-full border px-1.5 py-0.5 text-[9px] font-bold ${
-              app.scope_site_id ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500"
-            }">${app.scope_site_id ? `${getSiteName(app.scope_site_id)} only` : "All Sites"}</span>
-          </div>
-        `;
-        row.appendChild(info);
-
-        const actions = document.createElement("div");
-        actions.className = "flex items-center space-x-1";
-
-        if (isEditable && lvl.approval_mode === "SEQUENTIAL") {
-          const btnUp = document.createElement("button");
-          btnUp.type = "button";
-          btnUp.className = "p-0.5 text-slate-400 hover:text-indigo-600 disabled:opacity-30";
-          btnUp.innerHTML = `<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 15l7-7 7 7"/></svg>`;
-          if (appIdx === 0) btnUp.disabled = true;
-          btnUp.onclick = () => {
-            const temp = lvl.approvers[appIdx - 1];
-            lvl.approvers[appIdx - 1] = app;
-            lvl.approvers[appIdx] = temp;
-            lvl.approvers.forEach((a, i) => a.sequence_number = i + 1);
-            hasUnsavedChanges = true;
-            renderWorkspace();
-          };
-          actions.appendChild(btnUp);
-
-          const btnDown = document.createElement("button");
-          btnDown.type = "button";
-          btnDown.className = "p-0.5 text-slate-400 hover:text-indigo-600 disabled:opacity-30";
-          btnDown.innerHTML = `<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 9l-7 7-7-7"/></svg>`;
-          if (appIdx === lvl.approvers.length - 1) btnDown.disabled = true;
-          btnDown.onclick = () => {
-            const temp = lvl.approvers[appIdx + 1];
-            lvl.approvers[appIdx + 1] = app;
-            lvl.approvers[appIdx] = temp;
-            lvl.approvers.forEach((a, i) => a.sequence_number = i + 1);
-            hasUnsavedChanges = true;
-            renderWorkspace();
-          };
-          actions.appendChild(btnDown);
-        }
-
-        if (isEditable) {
-          const btnDelete = document.createElement("button");
-          btnDelete.type = "button";
-          btnDelete.className = "p-0.5 text-slate-400 hover:text-rose-500";
-          btnDelete.innerHTML = `<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>`;
-          btnDelete.onclick = () => {
-            lvl.approvers.splice(appIdx, 1);
-            if (lvl.approval_mode === "SEQUENTIAL") {
-              lvl.approvers.forEach((a, i) => a.sequence_number = i + 1);
-            }
-            hasUnsavedChanges = true;
-            renderWorkspace();
-          };
-          actions.appendChild(btnDelete);
-        }
-
-        row.appendChild(actions);
-        appGrid.appendChild(row);
+    try {
+      const res = await fetch("/module/WFLWBLD/api", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, code })
       });
-    }
-    approversArea.appendChild(appGrid);
-
-    // Add Approver selection form
-    if (isEditable) {
-      const selectForm = document.createElement("div");
-      selectForm.className = "grid grid-cols-1 gap-2 pt-2 md:grid-cols-[minmax(0,1fr)_150px_minmax(0,180px)_auto]";
-      
-      const select = document.createElement("select");
-      select.className = "form-select text-[11px] rounded-lg border-slate-200 py-1 bg-white focus:border-indigo-500 flex-1";
-
-      const filtered = availableUsers;
-
-      if (filtered.length === 0) {
-        select.innerHTML = '<option value="">No active users available</option>';
-        select.disabled = true;
-      } else {
-        select.innerHTML = '<option value="">-- Assign Approver --</option>';
-        filtered.forEach(u => {
-          const opt = document.createElement("option");
-          opt.value = u.id;
-          opt.textContent = `${u.full_name} (${u.email})`;
-          select.appendChild(opt);
-        });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || "Failed to create workflow.", "error");
+        return;
       }
 
-      const btnAdd = document.createElement("button");
-      btnAdd.type = "button";
-      btnAdd.className = "px-3 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-600 text-[11px] font-bold rounded-lg transition disabled:opacity-50";
-      btnAdd.textContent = "Add";
-      if (filtered.length === 0) btnAdd.disabled = true;
-
-      const scopeSelect = document.createElement("select");
-      scopeSelect.className = "form-select text-[11px] rounded-lg border-slate-200 py-1 bg-white focus:border-indigo-500";
-      scopeSelect.innerHTML = `
-        <option value="all">Applies to all sites</option>
-        <option value="site">Applies only to this site</option>
-      `;
-
-      const siteSelect = document.createElement("select");
-      siteSelect.className = "form-select text-[11px] rounded-lg border-slate-200 py-1 bg-white focus:border-indigo-500 hidden";
-      siteSelect.innerHTML = '<option value="">Choose site</option>';
-      availableSites.forEach(site => {
-        const opt = document.createElement("option");
-        opt.value = site.id;
-        opt.textContent = site.name;
-        siteSelect.appendChild(opt);
-      });
-
-      scopeSelect.onchange = () => {
-        if (scopeSelect.value === "site") {
-          siteSelect.classList.remove("hidden");
-        } else {
-          siteSelect.classList.add("hidden");
-          siteSelect.value = "";
-        }
-      };
-
-      btnAdd.onclick = () => {
-        const uId = parseInt(select.value);
-        if (!uId) return;
-        const scopeSiteId = scopeSelect.value === "site" ? parseInt(siteSelect.value) : null;
-        if (scopeSelect.value === "site" && !scopeSiteId) {
-          showToast("Choose a site for this site-specific approver.", "error");
-          return;
-        }
-        const user = availableUsers.find(u => u.id === uId);
-        if (!user) return;
-
-        lvl.approvers.push({
-          user_id: user.id,
-          full_name: user.full_name,
-          email: user.email,
-          scope_site_id: scopeSiteId,
-          sequence_number: lvl.approval_mode === "SEQUENTIAL" ? lvl.approvers.length + 1 : null
-        });
-
-        hasUnsavedChanges = true;
-        renderWorkspace();
-      };
-
-      selectForm.appendChild(select);
-      selectForm.appendChild(scopeSelect);
-      selectForm.appendChild(siteSelect);
-      selectForm.appendChild(btnAdd);
-      approversArea.appendChild(selectForm);
+      showToast("Workflow created successfully.");
+      hideCreateWorkflowModal();
+      const listRes = await fetch("/module/WFLWBLD/api");
+      const listData = await listRes.json();
+      const found = listData.find(item => item.code === code);
+      if (found && found.latest_version_id) {
+        editWorkflow(found.id, found.latest_version_id);
+      } else {
+        showList();
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Failed to create workflow.", "error");
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = originalText;
     }
+  };
 
-    div.appendChild(approversArea);
-    return div;
-  }
-
-  // --- Add level button ---
   btnAddLevel.onclick = () => {
-    const nextNum = levelsList.length + 1;
-    levelsList.push({
-      level_number: nextNum,
-      level_name: `Level ${nextNum}`,
-      approval_mode: "ANY_ONE",
-      skip_if_empty: false,
-      approvers: []
-    });
-    hasUnsavedChanges = true;
+    if (levelsList.length === 0) {
+      levelsList.push({
+        level_number: 1,
+        level_name: "Approval Level 1",
+        level_type: "regular",
+        assignment_mode: "same",
+        approval_mode: "ANY_ONE",
+        skip_if_empty: false,
+        approvers: []
+      });
+    } else {
+      const insertIndex = finalApprovalIndex() >= 0 ? finalApprovalIndex() : levelsList.length;
+      levelsList.splice(insertIndex, 0, {
+        level_number: insertIndex + 1,
+        level_name: "",
+        level_type: "regular",
+        assignment_mode: "same",
+        approval_mode: "ANY_ONE",
+        skip_if_empty: false,
+        approvers: []
+      });
+    }
+    levelsList.forEach((level, index) => level.level_number = index + 1);
+    ensureGenericLevelNames();
+    setUnsaved(true);
     renderWorkspace();
   };
 
-  // --- Checklist validation checker ---
-  function runValidation() {
-    const checks = [];
-    
-    // Check 1: At least one stage
-    checks.push({
-      label: "At least one approval level",
-      status: levelsList.length > 0
-    });
+  previewSiteSelect.onchange = renderPreviewPath;
 
-    // Check 2: Every level has approver
-    let everyLevelHasApprover = levelsList.length > 0;
-    levelsList.forEach(l => {
-      if (l.approvers.length === 0) everyLevelHasApprover = false;
-    });
-    checks.push({
-      label: "Every level has an active approver",
-      status: everyLevelHasApprover
-    });
+  dfForm.addEventListener("change", () => {
+    selectedFormId = dfForm.value ? parseInt(dfForm.value) : null;
+    const selectedForm = availableForms.find(form => parseInt(form.id) === parseInt(selectedFormId));
+    selectedSiteIds = selectedForm ? (selectedForm.site_ids || []).map(siteId => parseInt(siteId)).filter(Boolean) : [];
+    setUnsaved(true);
+    renderWorkspace();
+  });
 
-    // Check 3: Final level has approvers
-    let finalLevelCheck = levelsList.length > 0 && levelsList[levelsList.length - 1].approvers.length > 0;
-    checks.push({
-      label: "Final approver explicitly configured",
-      status: finalLevelCheck
-    });
+  btnScrollPreview.onclick = () => {
+    document.getElementById("preview-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
-    // Render checklist
-    validationErrors.innerHTML = "";
-    checks.forEach(check => {
-      const item = document.createElement("div");
-      item.className = "flex items-center space-x-1.5 font-medium";
-      if (check.status) {
-        item.innerHTML = `<span class="text-emerald-600 font-bold text-xs">✓</span> <span class="text-slate-700">${check.label}</span>`;
-      } else {
-        item.innerHTML = `<span class="text-rose-500 font-bold text-xs">✕</span> <span class="text-slate-500">${check.label}</span>`;
-      }
-      validationErrors.appendChild(item);
-    });
+  dfName.addEventListener("change", () => {
+    setUnsaved(true);
+  });
 
-    // Toggle save button
-    const failedCheck = checks.some(c => !c.status);
-    if (permissions.can_edit && !failedCheck) {
-      btnSaveDraft.disabled = false;
-    } else {
-      btnSaveDraft.disabled = true;
-    }
-  }
-
-  // --- Save Draft Sequence ---
   async function saveDraft() {
     if (!permissions.can_edit) return;
-
-    // Check name
     const name = dfName.value.trim();
     if (!name) {
       showToast("Workflow name cannot be empty.", "error");
       return;
     }
 
+    ensureGenericLevelNames();
     const payload = {
-      levels: levelsList.map(lvl => ({
-        level_number: lvl.level_number,
-        level_name: lvl.level_name,
-        approval_mode: lvl.approval_mode,
-        approvers: lvl.approvers.map(a => ({
-          user_id: a.user_id,
-          sequence_number: a.sequence_number,
-          scope_site_id: a.scope_site_id || null
+      levels: levelsList.map((level, index) => ({
+        level_number: index + 1,
+        level_name: level.level_name,
+        approval_mode: level.approval_mode || "ANY_ONE",
+        skip_if_empty: isFinalLevel(index) ? false : Boolean(level.skip_if_empty),
+        approvers: (level.approvers || []).map(approver => ({
+          user_id: approver.user_id,
+          sequence_number: approver.sequence_number || null,
+          scope_site_id: approver.scope_site_id || null
         }))
       }))
     };
 
     try {
-      // First save name details via PUT
       await fetch(`/module/WFLWBLD/api/${currentWorkflowId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({
+          name,
+          form_id: selectedFormId || null,
+          site_ids: selectedSiteIds
+        })
       });
 
-      // Save levels sequence details via POST
       const res = await fetch(`/module/WFLWBLD/api/version/${currentVersionId}/levels`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
       const data = await res.json();
-      
-      if (res.ok) {
-        showToast("Workflow draft sequence saved successfully.");
-        hasUnsavedChanges = false;
-        loadVersionDetails(currentVersionId);
-      } else {
-        showToast("Save failed: " + (data.error || "Unknown error occurred"), "error");
+      if (!res.ok) {
+        showToast(data.error || "Failed to save workflow.", "error");
+        return;
       }
+
+      showToast("Workflow draft saved.");
+      setUnsaved(false);
+      loadVersionDetails(currentVersionId);
     } catch (err) {
       console.error(err);
       showToast("Failed to save draft.", "error");
@@ -700,10 +1194,59 @@ document.addEventListener("DOMContentLoaded", () => {
 
   btnSaveDraft.onclick = saveDraft;
 
-  // --- Publish version ---
+  function openPublishReview() {
+    lastValidation = validateWorkflow();
+    btnConfirmPublish.disabled = !lastValidation.canPublish || hasUnsavedChanges;
+
+    if (hasUnsavedChanges) {
+      publishReviewBody.innerHTML = `
+        <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Save your draft changes before publishing.
+        </div>
+      `;
+    } else if (lastValidation.canPublish) {
+      publishReviewBody.innerHTML = `
+        <div class="space-y-3">
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
+            This workflow is ready. Publishing will make it live for ${lastValidation.coveredSites.length} covered site${lastValidation.coveredSites.length === 1 ? "" : "s"} and lock the approval path for future submissions using this version.
+          </div>
+          <ul class="space-y-2 text-slate-600">
+            <li>✓ Every covered site has a valid path.</li>
+            <li>✓ Final Approval exists for every covered site.</li>
+            <li>✓ No partial publishing will be performed.</li>
+          </ul>
+        </div>
+      `;
+    } else {
+      publishReviewBody.innerHTML = `
+        <div class="space-y-3">
+          <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 font-semibold text-rose-800">
+            Publishing is blocked until these issues are fixed.
+          </div>
+          <ul class="list-disc space-y-1 pl-5 text-slate-700">
+            ${lastValidation.issues.map(issue => `<li>${escapeHtml(issue)}</li>`).join("")}
+          </ul>
+        </div>
+      `;
+    }
+    modalPublishReview.classList.remove("hidden");
+    modalPublishReview.classList.add("flex");
+  }
+
+  function closePublishReview() {
+    modalPublishReview.classList.add("hidden");
+    modalPublishReview.classList.remove("flex");
+  }
+
+  btnClosePublishModal.onclick = closePublishReview;
+  btnCancelPublishModal.onclick = closePublishReview;
+  btnConfirmPublish.onclick = publishVersion;
+
   async function publishVersion() {
     if (!permissions.can_publish) return;
-    if (!confirm("Are you sure you want to publish this workflow? It will become active immediately.")) {
+    lastValidation = validateWorkflow();
+    if (!lastValidation.canPublish || hasUnsavedChanges) {
+      openPublishReview();
       return;
     }
 
@@ -712,141 +1255,59 @@ document.addEventListener("DOMContentLoaded", () => {
         method: "POST"
       });
       const data = await res.json();
-      if (res.ok) {
-        showToast("Workflow version published successfully!");
-        showList();
-      } else {
-        showToast("Publish failed: " + (data.error || "Unknown error occurred"), "error");
+      if (!res.ok) {
+        showToast(data.error || "Publish failed.", "error");
+        return;
       }
+
+      closePublishReview();
+      showToast("Workflow version published.");
+      showList();
     } catch (err) {
       console.error(err);
       showToast("Failed to publish workflow.", "error");
     }
   }
 
-  // --- Create draft version ---
   async function createNewVersionDraft() {
     if (!permissions.can_create_version) return;
-    if (!confirm("Create a new draft version starting from this published version?")) return;
+    if (!confirm("Create a new draft version starting from this live workflow?")) return;
 
     try {
       const res = await fetch(`/module/WFLWBLD/api/${currentWorkflowId}/new-version`, {
         method: "POST"
       });
       const data = await res.json();
-      if (res.ok) {
-        showToast("New draft version created.");
-        editWorkflow(currentWorkflowId, data.data.version_id);
-      } else {
-        showToast(data.error || "Unknown error occurred", "error");
+      if (!res.ok) {
+        showToast(data.error || "Failed to create draft version.", "error");
+        return;
       }
+      showToast("New draft version created.");
+      editWorkflow(currentWorkflowId, data.data.version_id);
     } catch (err) {
       console.error(err);
       showToast("Failed to create new draft version.", "error");
     }
   }
 
-  // --- Delete workflow ---
   async function deleteWorkflow() {
-    if (!confirm("Are you sure you want to delete this entire workflow?")) return;
-
+    if (!confirm("Delete this workflow? This soft-deletes the workflow record.")) return;
     try {
       const res = await fetch(`/module/WFLWBLD/api/${currentWorkflowId}`, {
         method: "DELETE"
       });
       const data = await res.json();
-      if (res.ok) {
-        showToast("Workflow deleted successfully.");
-        showList();
-      } else {
-        showToast(data.error || "Unknown error occurred", "error");
+      if (!res.ok) {
+        showToast(data.error || "Failed to delete workflow.", "error");
+        return;
       }
+      showToast("Workflow deleted.");
+      showList();
     } catch (err) {
       console.error(err);
       showToast("Failed to delete workflow.", "error");
     }
   }
 
-  // Initial load
   loadWorkflows();
-
-  function getSiteName(siteId) {
-    const site = availableSites.find(s => s.id === parseInt(siteId));
-    return site ? site.name : `Site ${siteId}`;
-  }
-
-  function renderPreview() {
-    const select = document.getElementById("preview-site-select");
-    const output = document.getElementById("preview-path-output");
-    if (!select || !output) return;
-
-    select.innerHTML = '<option value="">Choose site</option>';
-    availableSites.forEach(site => {
-      const opt = document.createElement("option");
-      opt.value = site.id;
-      opt.textContent = site.name;
-      select.appendChild(opt);
-    });
-
-    if (!select.value && availableSites.length > 0) {
-      select.value = availableSites[0].id;
-    }
-
-    select.onchange = () => renderPreviewPath();
-    renderPreviewPath();
-  }
-
-  function renderPreviewPath() {
-    const select = document.getElementById("preview-site-select");
-    const output = document.getElementById("preview-path-output");
-    if (!select || !output) return;
-    const siteId = parseInt(select.value);
-
-    if (!siteId) {
-      output.innerHTML = '<p class="text-xs text-slate-400 italic">Choose a site to preview the approval path.</p>';
-      return;
-    }
-
-    if (levelsList.length === 0) {
-      output.innerHTML = '<p class="text-xs text-slate-400 italic">No approval levels configured yet.</p>';
-      return;
-    }
-
-    let blocked = false;
-    const rows = [];
-    levelsList.forEach((level) => {
-      if (blocked) return;
-      const eligible = (level.approvers || []).filter(app => !app.scope_site_id || parseInt(app.scope_site_id) === siteId);
-      if (eligible.length > 0) {
-        rows.push(`
-          <li class="rounded-lg border border-slate-200 bg-white px-3 py-2">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Level ${level.level_number}</div>
-            <div class="text-xs font-semibold text-slate-800">${level.level_name}</div>
-            <div class="mt-1 text-[11px] text-slate-500">${eligible.map(app => {
-              const scopeLabel = app.scope_site_id ? `${getSiteName(app.scope_site_id)} only` : "All Sites";
-              return `${app.full_name} (${scopeLabel})`;
-            }).join(", ")}</div>
-          </li>
-        `);
-      } else if (level.skip_if_empty) {
-        rows.push(`
-          <li class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Level ${level.level_number}</div>
-            <div class="text-xs font-semibold text-slate-500">${level.level_name} → Skipped</div>
-          </li>
-        `);
-      } else {
-        blocked = true;
-        rows.push(`
-          <li class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-rose-500">Level ${level.level_number}</div>
-            <div class="text-xs font-semibold text-rose-700">${level.level_name} → No approver configured</div>
-            <div class="mt-1 text-[11px] text-rose-600">This workflow cannot be used for this site because this level has no eligible approver.</div>
-          </li>
-        `);
-      }
-    });
-
-    output.innerHTML = `<ol class="space-y-2">${rows.join("")}</ol>`;
-  }
 });

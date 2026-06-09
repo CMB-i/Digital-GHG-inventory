@@ -1,3 +1,5 @@
+import json
+
 from flask import Blueprint, render_template, jsonify, request
 from app.common.decorators import require_permission
 from app.common.auth import current_user
@@ -18,11 +20,40 @@ from app.modules.WFLWBLD.service import (
     validate_workflow_path_for_site,
 )
 from app.modules.WFLWBLD.model import WorkflowVersion, WorkflowLevelApprover
+from app.modules.FORMBLD.model import Form
 from app.modules.USRMGMT.model import User
 from app.modules.SITEMST.model import Site
 
 MODULE_CODE = "WFLWBLD"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
+
+
+def _parse_form_metadata(form):
+    metadata = {
+        "display_name": form.name,
+        "gri_code": "",
+        "sites": [],
+        "frequency": "Monthly",
+        "workflow_id": None,
+        "description_text": form.description or "",
+    }
+    if form.description and form.description.startswith("{"):
+        try:
+            metadata.update(json.loads(form.description))
+        except Exception:
+            pass
+    return metadata
+
+
+def _write_form_metadata(form, metadata):
+    form.description = json.dumps({
+        "display_name": metadata.get("display_name") or form.name,
+        "gri_code": metadata.get("gri_code", ""),
+        "sites": metadata.get("sites") or [],
+        "frequency": metadata.get("frequency", "Monthly"),
+        "workflow_id": metadata.get("workflow_id"),
+        "description_text": metadata.get("description_text", ""),
+    })
 
 
 @bp.route("/")
@@ -79,6 +110,8 @@ def create():
 def update_details(workflow_id):
     data = request.get_json() or {}
     name = data.get("name")
+    form_id = data.get("form_id")
+    site_ids = data.get("site_ids")
     
     wf = get_workflow(workflow_id)
     if not wf:
@@ -87,7 +120,55 @@ def update_details(workflow_id):
     try:
         if name:
             wf.name = name.strip()
-        wf.updated_by = current_user().id
+        user_id = current_user().id
+        wf.updated_by = user_id
+
+        if "form_id" in data:
+            selected_form = None
+            if form_id not in (None, "", "null"):
+                try:
+                    form_id = int(form_id)
+                except (TypeError, ValueError):
+                    return error_response("Invalid form selection.", 400)
+                selected_form = Form.query.filter_by(id=form_id, is_deleted=False).first()
+                if not selected_form:
+                    return error_response("Selected form was not found.", 404)
+
+            selected_site_ids = []
+            if site_ids is not None:
+                if not isinstance(site_ids, list):
+                    return error_response("Covered sites must be a list.", 400)
+                valid_site_ids = {
+                    site.id for site in Site.query.filter_by(is_deleted=False).all()
+                }
+                for raw_site_id in site_ids:
+                    try:
+                        parsed_site_id = int(raw_site_id)
+                    except (TypeError, ValueError):
+                        return error_response("Invalid covered site selection.", 400)
+                    if parsed_site_id not in valid_site_ids:
+                        return error_response("Selected covered site was not found.", 404)
+                    selected_site_ids.append(parsed_site_id)
+
+            forms = Form.query.filter_by(is_deleted=False).all()
+            for form in forms:
+                metadata = _parse_form_metadata(form)
+                try:
+                    linked_workflow_id = int(metadata.get("workflow_id"))
+                except (TypeError, ValueError):
+                    linked_workflow_id = None
+                if linked_workflow_id == workflow_id and (not selected_form or form.id != selected_form.id):
+                    metadata["workflow_id"] = None
+                    _write_form_metadata(form, metadata)
+                    form.updated_by = user_id
+
+            if selected_form:
+                metadata = _parse_form_metadata(selected_form)
+                metadata["workflow_id"] = workflow_id
+                metadata["sites"] = selected_site_ids
+                _write_form_metadata(selected_form, metadata)
+                selected_form.updated_by = user_id
+
         db.session.commit()
         return success_response(message="Workflow details updated successfully.")
     except Exception as e:
@@ -132,6 +213,40 @@ def get_version_details(version_id):
         "name": site.name,
         "code": site.code,
     } for site in sites]
+
+    linked_forms = []
+    available_forms = []
+    forms = Form.query.filter_by(is_deleted=False).order_by(Form.name.asc()).all()
+    for form in forms:
+        metadata = _parse_form_metadata(form)
+        site_ids = []
+        for site_id in metadata.get("sites") or []:
+            try:
+                site_ids.append(int(site_id))
+            except (TypeError, ValueError):
+                continue
+
+        available_forms.append({
+            "id": form.id,
+            "name": metadata.get("display_name") or form.name,
+            "code": form.code,
+            "site_ids": site_ids,
+            "workflow_id": metadata.get("workflow_id"),
+        })
+
+        try:
+            linked_workflow_id = int(metadata.get("workflow_id"))
+        except (TypeError, ValueError):
+            linked_workflow_id = None
+        if linked_workflow_id != parent.id:
+            continue
+
+        linked_forms.append({
+            "id": form.id,
+            "name": metadata.get("display_name") or form.name,
+            "code": form.code,
+            "site_ids": site_ids,
+        })
     
     # Construct levels data
     levels_data = []
@@ -174,6 +289,8 @@ def get_version_details(version_id):
         "all_versions": version_list,
         "available_users": available_users,
         "available_sites": available_sites,
+        "available_forms": available_forms,
+        "linked_forms": linked_forms,
         "permissions": {
             "can_edit": can_edit and version.published_at is None,
             "can_publish": can_edit and version.published_at is None,
