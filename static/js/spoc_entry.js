@@ -84,6 +84,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
 
         const isEditable = ["Draft", "Changes Requested"].includes(currentStatus);
+        const hasWorkflow = data.submission.workflow_id;
         
         if (isEditable) {
           actionBar.classList.remove("hidden");
@@ -91,6 +92,18 @@ document.addEventListener("DOMContentLoaded", function () {
         } else {
           actionBar.classList.add("hidden");
           setSaveStatus("idle", "View Only / Locked");
+        }
+
+        // Display workflow missing warning block
+        if (isEditable && !hasWorkflow) {
+          validationSummaryList.innerHTML = "<li>This form is not ready for submission because no approval workflow has been assigned.</li>";
+          validationSummary.classList.remove("hidden");
+          btnSubmit.disabled = true;
+          btnSubmit.classList.add("cursor-not-allowed", "opacity-50");
+        } else if (isEditable) {
+          validationSummary.classList.add("hidden");
+          btnSubmit.disabled = false;
+          btnSubmit.classList.remove("cursor-not-allowed", "opacity-50");
         }
 
         // Render Form using shared renderer

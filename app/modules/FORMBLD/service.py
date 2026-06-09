@@ -220,9 +220,6 @@ def publish_form_version(form_version_id, user_id):
             
     if not parsed_desc.get("sites"):
         raise ValueError("Site applicability must be assigned before publishing.")
-        
-    if not parsed_desc.get("workflow_id"):
-        raise ValueError("An approval workflow must be assigned before publishing.")
 
     fields = get_form_version_fields(form_version_id)
     if not fields:

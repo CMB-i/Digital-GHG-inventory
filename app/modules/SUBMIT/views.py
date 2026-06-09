@@ -181,7 +181,8 @@ def get_submission_details(submission_id):
             "status": submission.status,
             "is_locked": submission.is_locked,
             "form_version_id": submission.form_version_id,
-            "workflow_version_id": submission.workflow_version_id
+            "workflow_version_id": submission.workflow_version_id,
+            "workflow_id": parsed_desc.get("workflow_id")
         },
         "fields": fields_data,
         "values": values_dict,
