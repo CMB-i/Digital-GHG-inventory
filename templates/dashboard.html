@@ -129,7 +129,7 @@
                   {% if act.status == "Approved" %}
                   <span class="status-badge status-badge-success">{{ act.status }}</span>
                   {% elif act.status in ("Submitted", "Resubmitted", "Under Review") %}
-                  <span class="status-badge status-badge-info">{{ act.status }}</span>
+                  <span class="status-badge status-badge-info">{{ act.status_text or act.status }}</span>
                   {% elif act.status == "Changes Requested" %}
                   <span class="status-badge status-badge-warning">{{ act.status }}</span>
                   {% else %}

@@ -133,6 +133,10 @@ def get_spoc_sheets_buckets(user_id):
         
         period_label = format_period_label(period.year, period.month)
         
+        status_text = sub.status
+        if sub.status in ("Submitted", "Resubmitted", "Under Review") and sub.current_level is not None:
+            status_text = f"{sub.status} (Level {sub.current_level})"
+
         item = {
             "submission_id": sub.id,
             "form_name": form.name,
@@ -140,6 +144,7 @@ def get_spoc_sheets_buckets(user_id):
             "site_name": site.name,
             "period_label": period_label,
             "status": sub.status,
+            "status_text": status_text,
             "last_saved": sub.updated_at or sub.created_at,
             "submitted_at": sub.submitted_at,
             "submitted_by": get_username(sub.submitted_by)

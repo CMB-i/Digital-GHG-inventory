@@ -150,12 +150,17 @@ def create_app(config_class=Config):
 
         recent_activities = []
         for sub in recent_submissions:
+            status_text = sub.status
+            if sub.status in ("Submitted", "Resubmitted", "Under Review") and sub.current_level is not None:
+                status_text = f"{sub.status} (Level {sub.current_level})"
+
             recent_activities.append({
                 "id": sub.id,
                 "site_name": sites_map.get(sub.site_id, "Unknown"),
                 "form_name": forms_map.get(sub.form_id, "Unknown"),
                 "updated_at": sub.updated_at,
-                "status": sub.status
+                "status": sub.status,
+                "status_text": status_text
             })
 
         metrics = {
