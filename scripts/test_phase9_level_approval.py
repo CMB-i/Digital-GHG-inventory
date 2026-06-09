@@ -310,7 +310,44 @@ def run_tests():
         assert status_text == "Under Review (Level 2)", f"Admin activity status text mismatch: {status_text}"
         print("Admin recent activity status text verified: Under Review (Level 2)")
 
-        # 4. Final approval (Level 2 approval)
+        # 4. Test Changes Requested and workflow reset
+        print("Requesting changes from Level 2...")
+        from app.modules.APPROV.service import request_changes_submission
+        request_changes_submission(sub.id, admin_user.id, comment="Need correction in data entries")
+        db.session.commit()
+
+        sub = Submission.query.get(sub.id)
+        assert sub.status == "Changes Requested", f"Expected 'Changes Requested', got {sub.status}"
+
+        # Resubmit as SPOC
+        print("Resubmitting as SPOC...")
+        submit_submission(sub.id, spoc_user.id)
+        db.session.commit()
+
+        # Verify level reset to 1 and Resubmitted status
+        sub = Submission.query.get(sub.id)
+        assert sub.status == "Resubmitted", f"Expected status 'Resubmitted', got {sub.status}"
+        assert sub.current_level == 1, f"Expected current level reset to 1, got {sub.current_level}"
+
+        # Verify prior approvals are soft deleted
+        from app.modules.APPROV.model import ApprovalAction
+        lvl1_action = ApprovalAction.query.filter_by(
+            submission_id=sub.id,
+            level_number=1,
+            action="Approve"
+        ).order_by(ApprovalAction.id.asc()).first()
+        assert lvl1_action.is_deleted is True, "Expected Level 1 approval to be soft-deleted on reset!"
+
+        # Approve Level 1 again
+        print("Approving Level 1 again...")
+        approve_submission(sub.id, approver_user.id, comment="Approved Level 1 again")
+        db.session.commit()
+
+        sub = Submission.query.get(sub.id)
+        assert sub.status == "Under Review", f"Expected 'Under Review', got {sub.status}"
+        assert sub.current_level == 2, f"Expected current level 2, got {sub.current_level}"
+
+        # 5. Final approval (Level 2 approval)
         print("Approving Level 2 (Final Approval)...")
         approve_submission(sub.id, admin_user.id, comment="Approved Level 2 (Final)")
         db.session.commit()
