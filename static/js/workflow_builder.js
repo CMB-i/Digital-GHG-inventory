@@ -30,6 +30,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentVersion = null;
   let levelsList = [];
   let availableUsers = [];
+  let availableSites = [];
   let hasUnsavedChanges = false;
   let permissions = {
     can_edit: false,
@@ -208,6 +209,7 @@ document.addEventListener("DOMContentLoaded", () => {
       currentVersion = data.version;
       levelsList = data.levels || [];
       availableUsers = data.available_users || [];
+      availableSites = data.available_sites || [];
       permissions = data.permissions || {};
       hasUnsavedChanges = false;
 
@@ -290,6 +292,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     runValidation();
+    renderPreview();
   }
 
   function renderLevelNode(lvl, levelIdx, isEditable) {
@@ -356,6 +359,22 @@ document.addEventListener("DOMContentLoaded", () => {
     header.appendChild(rightHeader);
     div.appendChild(header);
 
+    const emptyBehavior = document.createElement("div");
+    emptyBehavior.className = "flex flex-col sm:flex-row sm:items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2";
+    emptyBehavior.innerHTML = `
+      <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">If no approver matches this site</label>
+      <select ${!isEditable ? "disabled" : ""} class="skip-empty-select form-select text-[11px] rounded-lg border-slate-200 py-1 bg-white focus:border-indigo-500">
+        <option value="false" ${lvl.skip_if_empty ? "" : "selected"}>Stop and show configuration error</option>
+        <option value="true" ${lvl.skip_if_empty ? "selected" : ""}>Skip this level</option>
+      </select>
+    `;
+    div.appendChild(emptyBehavior);
+    emptyBehavior.querySelector("select").addEventListener("change", (e) => {
+      lvl.skip_if_empty = e.target.value === "true";
+      hasUnsavedChanges = true;
+      renderWorkspace();
+    });
+
     // Bind level name input change
     leftHeader.querySelector("input").addEventListener("change", (e) => {
       lvl.level_name = e.target.value.trim() || `Level ${lvl.level_number}`;
@@ -381,7 +400,7 @@ document.addEventListener("DOMContentLoaded", () => {
     
     const approverLabel = document.createElement("h4");
     approverLabel.className = "text-[9px] font-bold text-slate-400 uppercase tracking-wider";
-    approverLabel.textContent = "Approvers assigned:";
+    approverLabel.textContent = "All approver assignments for this level";
     approversArea.appendChild(approverLabel);
 
     const appGrid = document.createElement("div");
@@ -410,6 +429,9 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="flex flex-col truncate">
             <span class="font-semibold text-slate-700 truncate">${app.full_name}</span>
             <span class="text-[10px] text-slate-400 truncate">${app.email}</span>
+            <span class="mt-1 inline-flex w-fit items-center rounded-full border px-1.5 py-0.5 text-[9px] font-bold ${
+              app.scope_site_id ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500"
+            }">${app.scope_site_id ? `${getSiteName(app.scope_site_id)} only` : "All Sites"}</span>
           </div>
         `;
         row.appendChild(info);
@@ -474,16 +496,15 @@ document.addEventListener("DOMContentLoaded", () => {
     // Add Approver selection form
     if (isEditable) {
       const selectForm = document.createElement("div");
-      selectForm.className = "flex items-center space-x-2 pt-2 max-w-sm";
+      selectForm.className = "grid grid-cols-1 gap-2 pt-2 md:grid-cols-[minmax(0,1fr)_150px_minmax(0,180px)_auto]";
       
       const select = document.createElement("select");
       select.className = "form-select text-[11px] rounded-lg border-slate-200 py-1 bg-white focus:border-indigo-500 flex-1";
 
-      const currentIds = new Set(lvl.approvers.map(a => a.user_id));
-      const filtered = availableUsers.filter(u => !currentIds.has(u.id));
+      const filtered = availableUsers;
 
       if (filtered.length === 0) {
-        select.innerHTML = '<option value="">All active users assigned</option>';
+        select.innerHTML = '<option value="">No active users available</option>';
         select.disabled = true;
       } else {
         select.innerHTML = '<option value="">-- Assign Approver --</option>';
@@ -501,9 +522,40 @@ document.addEventListener("DOMContentLoaded", () => {
       btnAdd.textContent = "Add";
       if (filtered.length === 0) btnAdd.disabled = true;
 
+      const scopeSelect = document.createElement("select");
+      scopeSelect.className = "form-select text-[11px] rounded-lg border-slate-200 py-1 bg-white focus:border-indigo-500";
+      scopeSelect.innerHTML = `
+        <option value="all">Applies to all sites</option>
+        <option value="site">Applies only to this site</option>
+      `;
+
+      const siteSelect = document.createElement("select");
+      siteSelect.className = "form-select text-[11px] rounded-lg border-slate-200 py-1 bg-white focus:border-indigo-500 hidden";
+      siteSelect.innerHTML = '<option value="">Choose site</option>';
+      availableSites.forEach(site => {
+        const opt = document.createElement("option");
+        opt.value = site.id;
+        opt.textContent = site.name;
+        siteSelect.appendChild(opt);
+      });
+
+      scopeSelect.onchange = () => {
+        if (scopeSelect.value === "site") {
+          siteSelect.classList.remove("hidden");
+        } else {
+          siteSelect.classList.add("hidden");
+          siteSelect.value = "";
+        }
+      };
+
       btnAdd.onclick = () => {
         const uId = parseInt(select.value);
         if (!uId) return;
+        const scopeSiteId = scopeSelect.value === "site" ? parseInt(siteSelect.value) : null;
+        if (scopeSelect.value === "site" && !scopeSiteId) {
+          showToast("Choose a site for this site-specific approver.", "error");
+          return;
+        }
         const user = availableUsers.find(u => u.id === uId);
         if (!user) return;
 
@@ -511,6 +563,7 @@ document.addEventListener("DOMContentLoaded", () => {
           user_id: user.id,
           full_name: user.full_name,
           email: user.email,
+          scope_site_id: scopeSiteId,
           sequence_number: lvl.approval_mode === "SEQUENTIAL" ? lvl.approvers.length + 1 : null
         });
 
@@ -519,6 +572,8 @@ document.addEventListener("DOMContentLoaded", () => {
       };
 
       selectForm.appendChild(select);
+      selectForm.appendChild(scopeSelect);
+      selectForm.appendChild(siteSelect);
       selectForm.appendChild(btnAdd);
       approversArea.appendChild(selectForm);
     }
@@ -534,6 +589,7 @@ document.addEventListener("DOMContentLoaded", () => {
       level_number: nextNum,
       level_name: `Level ${nextNum}`,
       approval_mode: "ANY_ONE",
+      skip_if_empty: false,
       approvers: []
     });
     hasUnsavedChanges = true;
@@ -607,7 +663,8 @@ document.addEventListener("DOMContentLoaded", () => {
         approval_mode: lvl.approval_mode,
         approvers: lvl.approvers.map(a => ({
           user_id: a.user_id,
-          sequence_number: a.sequence_number
+          sequence_number: a.sequence_number,
+          scope_site_id: a.scope_site_id || null
         }))
       }))
     };
@@ -712,4 +769,84 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Initial load
   loadWorkflows();
+
+  function getSiteName(siteId) {
+    const site = availableSites.find(s => s.id === parseInt(siteId));
+    return site ? site.name : `Site ${siteId}`;
+  }
+
+  function renderPreview() {
+    const select = document.getElementById("preview-site-select");
+    const output = document.getElementById("preview-path-output");
+    if (!select || !output) return;
+
+    select.innerHTML = '<option value="">Choose site</option>';
+    availableSites.forEach(site => {
+      const opt = document.createElement("option");
+      opt.value = site.id;
+      opt.textContent = site.name;
+      select.appendChild(opt);
+    });
+
+    if (!select.value && availableSites.length > 0) {
+      select.value = availableSites[0].id;
+    }
+
+    select.onchange = () => renderPreviewPath();
+    renderPreviewPath();
+  }
+
+  function renderPreviewPath() {
+    const select = document.getElementById("preview-site-select");
+    const output = document.getElementById("preview-path-output");
+    if (!select || !output) return;
+    const siteId = parseInt(select.value);
+
+    if (!siteId) {
+      output.innerHTML = '<p class="text-xs text-slate-400 italic">Choose a site to preview the approval path.</p>';
+      return;
+    }
+
+    if (levelsList.length === 0) {
+      output.innerHTML = '<p class="text-xs text-slate-400 italic">No approval levels configured yet.</p>';
+      return;
+    }
+
+    let blocked = false;
+    const rows = [];
+    levelsList.forEach((level) => {
+      if (blocked) return;
+      const eligible = (level.approvers || []).filter(app => !app.scope_site_id || parseInt(app.scope_site_id) === siteId);
+      if (eligible.length > 0) {
+        rows.push(`
+          <li class="rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Level ${level.level_number}</div>
+            <div class="text-xs font-semibold text-slate-800">${level.level_name}</div>
+            <div class="mt-1 text-[11px] text-slate-500">${eligible.map(app => {
+              const scopeLabel = app.scope_site_id ? `${getSiteName(app.scope_site_id)} only` : "All Sites";
+              return `${app.full_name} (${scopeLabel})`;
+            }).join(", ")}</div>
+          </li>
+        `);
+      } else if (level.skip_if_empty) {
+        rows.push(`
+          <li class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Level ${level.level_number}</div>
+            <div class="text-xs font-semibold text-slate-500">${level.level_name} → Skipped</div>
+          </li>
+        `);
+      } else {
+        blocked = true;
+        rows.push(`
+          <li class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-rose-500">Level ${level.level_number}</div>
+            <div class="text-xs font-semibold text-rose-700">${level.level_name} → No approver configured</div>
+            <div class="mt-1 text-[11px] text-rose-600">This workflow cannot be used for this site because this level has no eligible approver.</div>
+          </li>
+        `);
+      }
+    });
+
+    output.innerHTML = `<ol class="space-y-2">${rows.join("")}</ol>`;
+  }
 });
