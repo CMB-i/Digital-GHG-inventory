@@ -1,3 +1,4 @@
+# NOTE: This test script requires a seeded development database to run successfully.
 import os
 from pathlib import Path
 import sys
@@ -31,18 +32,18 @@ def run_tests():
     app = create_app()
     with app.app_context():
         print("Starting Phase 9 Reports & Dashboard service tests...")
-        
+
         # 1. Fetch seed users
         admin_user = User.query.filter_by(email="admin@example.com").first()
         if not admin_user:
             print("FAILED: admin@example.com user not found. Please run seed script first.")
             sys.exit(1)
-            
+
         print(f"Using Admin User: {admin_user.full_name} (ID: {admin_user.id})")
         # Clean up any existing test templates from previous aborted runs
         ReportTemplate.query.filter(ReportTemplate.code.in_(["test_temp_code_unique_123", "agg_temp_code_123"])).delete(synchronize_session=False)
         db.session.commit()
-        
+
         # 2. Test CRUD operations for report templates
         print("\n--- Test 1: Report Template CRUD ---")
         name = "Test Report Temp"
@@ -57,7 +58,7 @@ def run_tests():
             "end_year": 2026,
             "end_month": 12
         }
-        
+
         # Create
         template = create_report_template(
             name=name,
@@ -72,12 +73,12 @@ def run_tests():
         print(f"Created template: {template.name} (ID: {template.id})")
         assert template.code == code
         assert template.config_json["start_year"] == 2026
-        
+
         # Read / Get
         fetched = get_report_template(template.id)
         assert fetched is not None
         assert fetched.name == name
-        
+
         # Update
         updated_name = "Updated Test Report Temp"
         config["end_month"] = 6
@@ -94,19 +95,19 @@ def run_tests():
         print(f"Updated template: {updated.name}")
         assert updated.name == updated_name
         assert updated.config_json["end_month"] == 6
-        
+
         # List
         all_templates = list_report_templates(admin_user.id)
         assert any(t.id == template.id for t in all_templates)
         print("List report templates verified successfully.")
-        
+
         # 3. Test data aggregation (generate_report_data)
         print("\n--- Test 2: Data Aggregation & Approved-Only Check ---")
         # Ensure we have a site, form, and period
         site = Site.query.filter_by(is_deleted=False).first()
         form = Form.query.filter_by(is_deleted=False).first()
         period = ReportingPeriod.query.filter_by(site_id=site.id, is_deleted=False).first()
-        
+
         if not site or not form or not period:
             print("WARNING: Insufficient seed data to fully execute aggregation tests. Seeding temporary data...")
             # If missing, we will seed dynamic test components
@@ -120,23 +121,23 @@ def run_tests():
                 period = ReportingPeriod(site_id=site.id, year=2026, month=5, status="OPEN", is_deleted=False, created_by=admin_user.id)
                 db.session.add(period)
             db.session.commit()
-            
+
         print(f"Using Site: {site.name} (ID: {site.id})")
         print(f"Using Form: {form.name} (ID: {form.id})")
         print(f"Using Period: {period.year}-{period.month} (ID: {period.id})")
-        
+
         # Query or create two new periods to avoid colliding with seed data's active submissions
         p2_month = period.month + 1 if period.month <= 10 else period.month - 1
         p3_month = period.month + 2 if period.month <= 10 else period.month - 2
         p2_year = period.year
         p3_year = period.year
-        
+
         period2 = ReportingPeriod.query.filter_by(site_id=site.id, year=p2_year, month=p2_month, is_deleted=False).first()
         if not period2:
             period2 = ReportingPeriod(site_id=site.id, year=p2_year, month=p2_month, status="OPEN", is_deleted=False, created_by=admin_user.id)
             db.session.add(period2)
             db.session.flush()
-            
+
         period3 = ReportingPeriod.query.filter_by(site_id=site.id, year=p3_year, month=p3_month, is_deleted=False).first()
         if not period3:
             period3 = ReportingPeriod(site_id=site.id, year=p3_year, month=p3_month, status="OPEN", is_deleted=False, created_by=admin_user.id)
@@ -147,7 +148,7 @@ def run_tests():
         print(f"Using Form: {form.name} (ID: {form.id})")
         print(f"Using Period 1 (Approved): {period3.year}-{period3.month} (ID: {period3.id})")
         print(f"Using Period 2 (Draft): {period2.year}-{period2.month} (ID: {period2.id})")
-        
+
         # Setup specific template config for test
         test_config = {
             "form_ids": [form.id],
@@ -157,7 +158,7 @@ def run_tests():
             "end_year": max(period2.year, period3.year),
             "end_month": max(period2.month, period3.month)
         }
-        
+
         agg_template = create_report_template(
             name="Aggregation Temp",
             code="agg_temp_code_123",
@@ -168,7 +169,7 @@ def run_tests():
             user_id=admin_user.id
         )
         db.session.commit()
-        
+
         # Create user access matrix row to make sure admin has access
         # Wait, admin typically has global access, let's verify if there is an access row
         access_row = AccessMatrix.query.filter_by(user_id=admin_user.id, entity_type="report", is_deleted=False).first()
@@ -183,7 +184,7 @@ def run_tests():
             )
             db.session.add(access_row)
             db.session.commit()
-            
+
         # Query or create a WorkflowVersion to avoid NotNull constraint violations on Submission
         from app.modules.WFLWBLD.model import Workflow, WorkflowVersion
         wf_ver = WorkflowVersion.query.first()
@@ -220,6 +221,7 @@ def run_tests():
             form_version_id=form.current_version_id or 1,
             workflow_version_id=wf_ver.id,
             status="Approved",
+            is_locked=True,
             is_deleted=False,
             submitted_by=admin_user.id,
             created_by=admin_user.id
@@ -227,7 +229,7 @@ def run_tests():
         db.session.add(draft_sub)
         db.session.add(approved_sub)
         db.session.commit()
-        
+
         # Add a value set entry to the approved submission
         from app.modules.FORMBLD.model import FieldVersion
         fv = FieldVersion.query.filter_by(is_deleted=False).first()
@@ -258,13 +260,13 @@ def run_tests():
         db.session.add(val1)
         db.session.add(val2)
         db.session.commit()
-        
+
         # Run aggregation
         data = generate_report_data(agg_template.id, admin_user.id)
         print(f"Aggregated records found: {len(data)}")
         # Check that it ONLY matches the Approved one (1500.50) and not the Draft one (999.99)
         assert len(data) > 0, "Approved submission value should have been aggregated."
-        
+
         found_approved = False
         found_draft = False
         for record in data:
@@ -272,17 +274,17 @@ def run_tests():
                 found_approved = True
             if record["value"] == 999.99:
                 found_draft = True
-                
+
         assert found_approved, "Approved submission value was not aggregated."
         assert not found_draft, "Draft submission value was incorrectly aggregated!"
         print("Aggregation approved-only check PASSED.")
-        
+
         # 4. Test Excel Export
         print("\n--- Test 3: Excel Export via openpyxl ---")
         xlsx_bytes = export_report_to_excel(agg_template.id, admin_user.id)
         assert len(xlsx_bytes) > 0, "Excel output is empty."
         print(f"Generated Excel file size: {len(xlsx_bytes)} bytes")
-        
+
         # Try importing openpyxl and loading the workbook from bytes
         import io
         import openpyxl
@@ -290,7 +292,7 @@ def run_tests():
         assert "Overview" in wb.sheetnames
         assert "Report Data" in wb.sheetnames
         print("Excel workbook parsed successfully and sheet names verified.")
-        
+
         # 5. Test Missing Submission Tracker
         print("\n--- Test 4: Missing Submission Checker ---")
         # Ensure we have site permissions for submission module
@@ -306,23 +308,23 @@ def run_tests():
             )
             db.session.add(sub_access)
             db.session.commit()
-            
+
         # Ensure that the form lists the site as applicable in its description
         # Form description needs to hold {"sites": [site.id]}
         import json
         form.description = json.dumps({"sites": [site.id]})
         db.session.commit()
-        
+
         # Get missing submissions
         missing = get_missing_submissions(admin_user.id)
         print(f"Total missing submission entries tracked: {len(missing)}")
-        
+
         # Clean up database records in correct order to avoid ForeignKeyViolations
         # Delete submission values (children) first
         db.session.delete(val1)
         db.session.delete(val2)
         db.session.commit()
-        
+
         # Delete templates and submissions (parents)
         db.session.delete(template)
         db.session.delete(agg_template)

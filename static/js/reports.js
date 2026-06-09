@@ -85,7 +85,7 @@
       // Gather multi-select checklist values
       const formIds = Array.from(createForm.querySelectorAll("input[name='form_ids']:checked")).map(el => parseInt(el.value, 10));
       const siteIds = Array.from(createForm.querySelectorAll("input[name='site_ids']:checked")).map(el => parseInt(el.value, 10));
-      
+
       const startMonthVal = createForm.querySelector("select[name='start_month']").value;
       const startYearVal = createForm.querySelector("select[name='start_year']").value;
       const endMonthVal = createForm.querySelector("select[name='end_month']").value;
@@ -184,7 +184,7 @@
       const templateId = this.dataset.templateId;
       const card = document.querySelector(`.template-card[data-template-id="${templateId}"]`);
       const templateName = card ? card.querySelector("h3").textContent : "Report";
-      
+
       // Update preview state to loading
       previewEmptyState.classList.add("hidden");
       previewTableWrapper.classList.add("hidden");
@@ -200,7 +200,7 @@
         if (resData.status === "success") {
           activePreviewData = resData.data;
           renderPreviewTable(activePreviewData);
-          
+
           previewSubtitle.textContent = `Aggregated metrics from ${activePreviewData.length} records.`;
           previewActions.classList.remove("hidden");
           previewExportBtn.setAttribute("href", `/module/RPTBLD/api/templates/${templateId}/export`);
@@ -238,7 +238,7 @@
     records.forEach(r => {
       const tr = document.createElement("tr");
       tr.className = "hover:bg-slate-50 transition-colors border-b border-slate-100";
-      
+
       let displayValue = r.value;
       let alignClass = "text-left";
       if (typeof displayValue === "number") {

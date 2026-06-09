@@ -26,22 +26,22 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 @require_permission("report", ("export", "view"))
 def index():
     user = current_user()
-    
+
     # List templates for the user
     templates = list_report_templates(user.id)
-    
+
     # Get allowed sites for the user
     allowed_site_ids, is_global = _get_user_allowed_sites(user.id, "report")
     sites = Site.query.filter(Site.id.in_(list(allowed_site_ids)), Site.is_deleted == False).order_by(Site.name.asc()).all()
-    
+
     # Active forms
     forms = Form.query.filter_by(is_deleted=False).order_by(Form.name.asc()).all()
-    
+
     # Year & Month options for dynamic date range selection
     today = datetime.date.today()
     years = list(range(today.year - 5, today.year + 2))
     months = [(i, datetime.date(2000, i, 1).strftime('%B')) for i in range(1, 13)]
-    
+
     return render_template(
         "modules/RPTBLD/reports.html",
         module_code=MODULE_CODE,
