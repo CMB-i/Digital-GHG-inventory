@@ -82,8 +82,8 @@
           </select>
         </div>
         <div>
-          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Approval Workflow</label>
-          <select id="df-workflow" required class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
+          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Approval Workflow (Optional)</label>
+          <select id="df-workflow" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
             <option value="">Select workflow...</option>
             <!-- Loaded dynamically -->
           </select>
@@ -111,6 +111,7 @@
         <span class="text-slate-300">|</span>
         <h1 id="builder-form-title" class="text-xl font-bold text-slate-800">Electricity Consumed</h1>
         <span id="builder-version-badge" class="px-2 py-0.5 rounded-full font-bold uppercase text-[9px] bg-amber-100 text-amber-800">Draft</span>
+        <span id="builder-workflow-status" class="px-2 py-0.5 rounded-full font-bold uppercase text-[9px]">Workflow: Loading...</span>
       </div>
       <div class="flex items-center space-x-2">
         <button id="btn-save-layout" class="inline-flex items-center justify-center px-3.5 py-1.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition">
@@ -129,6 +130,14 @@
     <div id="publish-errors" class="hidden p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
       <h4 class="text-xs font-bold text-rose-800">Resolve before publishing:</h4>
       <ul id="publish-errors-list" class="list-disc pl-5 text-xs text-rose-700 space-y-1"></ul>
+    </div>
+
+    <!-- Workflow Warning Banner -->
+    <div id="workflow-warning-banner" class="hidden p-4 bg-amber-50 border border-amber-200 rounded-xl mb-4 text-xs text-amber-800 font-semibold flex items-center space-x-2">
+      <svg class="h-5 w-5 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+      <span>This form is published but not submission-ready until an approval workflow is assigned.</span>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">

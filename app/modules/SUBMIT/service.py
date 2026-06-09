@@ -220,11 +220,11 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id):
     # 4. Workflow assignment
     wf_id = parsed_desc.get("workflow_id")
     if not wf_id:
-        raise ValueError("No workflow assigned to this form.")
+        raise ValueError("This form is not ready for submission because no approval workflow has been assigned.")
         
     workflow = Workflow.query.filter_by(id=wf_id, is_deleted=False).first()
     if not workflow or not workflow.current_version_id:
-        raise ValueError("Assigned workflow does not have a published version.")
+        raise ValueError("This form is not ready for submission because no approval workflow has been assigned.")
         
     # 5. Duplicate check
     existing = Submission.query.filter_by(
@@ -432,6 +432,14 @@ def submit_submission(submission_id, user_id):
         
     if not has_permission(user_id, "submission", "submit", scope_site_id=submission.site_id):
         raise ValueError("Permission denied: You do not have permission to submit this sheet.")
+
+    # Confirm form has workflow assigned
+    try:
+        parsed_desc = json.loads(submission.form_version.form.description or "{}")
+    except Exception:
+        parsed_desc = {}
+    if not parsed_desc.get("workflow_id"):
+        raise ValueError("This form is not ready for submission because no approval workflow has been assigned.")
         
     # Get form version fields
     fields = get_form_version_fields(submission.form_version_id)

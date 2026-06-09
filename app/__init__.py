@@ -228,14 +228,14 @@ def build_nav_items(user):
                     "visible": user_can(user, "submission", "approve", "reject"),
                 },
                 {
-                    "label": "Reports",
-                    "href": "/module/RPTBLD/",
-                    "visible": user_can(user, "report", "export", "view"),
+                    "label": "Notifications",
+                    "href": "/module/NOTIFY/",
+                    "visible": user_can(user, "notification", "view"),
                 },
             ],
         },
         {
-            "label": "Configuration",
+            "label": "System Setup / Configuration",
             "items": [
                 {
                     "label": "Sites",
@@ -248,9 +248,9 @@ def build_nav_items(user):
                     "visible": user_can(user, "period", "view"),
                 },
                 {
-                    "label": "Form Builder",
-                    "href": "/module/FORMBLD/",
-                    "visible": user_can(user, "form", "manage_forms"),
+                    "label": "Value Sets",
+                    "href": "/module/VALSET/",
+                    "visible": user_can(user, "value_set", "view"),
                 },
                 {
                     "label": "Formula Builder",
@@ -258,9 +258,9 @@ def build_nav_items(user):
                     "visible": user_can(user, "formula", "view"),
                 },
                 {
-                    "label": "Value Sets",
-                    "href": "/module/VALSET/",
-                    "visible": user_can(user, "value_set", "view"),
+                    "label": "Form Builder",
+                    "href": "/module/FORMBLD/",
+                    "visible": user_can(user, "form", "manage_forms"),
                 },
                 {
                     "label": "Workflow Builder",
@@ -278,9 +278,9 @@ def build_nav_items(user):
                     "visible": user_can(user, "user", "view", "manage_users"),
                 },
                 {
-                    "label": "Notifications",
-                    "href": "/module/NOTIFY/",
-                    "visible": user_can(user, "notification", "view"),
+                    "label": "Reports",
+                    "href": "/module/RPTBLD/",
+                    "visible": user_can(user, "report", "export", "view"),
                 },
                 {
                     "label": "Audit Log",
@@ -350,27 +350,23 @@ def build_setup_checklist():
             ReportingPeriod.query.filter_by(is_deleted=False, status="OPEN").count() > 0,
         ),
         (
+            "Value Sets approved",
+            ValueSetVersion.query.filter_by(status="Approved").count() > 0,
+        ),
+        (
+            "Formulas published",
+            FormulaVersion.query.filter(FormulaVersion.published_at.is_not(None)).count() > 0,
+        ),
+        (
             "Forms published",
             FormVersion.query.filter(FormVersion.published_at.is_not(None)).count() > 0,
         ),
         (
-            "Workflows assigned",
+            "Workflows published/assigned",
             WorkflowLevelApprover.query.filter_by(is_deleted=False).count() > 0,
         ),
         (
-            "Value Sets seeded & approved",
-            ValueSetVersion.query.filter_by(status="Approved").count() > 0,
-        ),
-        (
-            "Formulas configured",
-            FormulaVersion.query.count() > 0,
-        ),
-        (
-            "Phase 5 testing verified",
-            True,
-        ),
-        (
-            "Test submission completed",
+            "Test submission approved",
             Submission.query.filter_by(is_deleted=False, status="Approved").count() > 0,
         ),
     ]

@@ -263,6 +263,13 @@ document.addEventListener("DOMContentLoaded", function () {
             statusBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 uppercase">Draft</span>';
           }
 
+          let workflowBadge = "";
+          if (form.workflow_id) {
+            workflowBadge = '<span class="inline-flex items-center ml-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-150 uppercase">Workflow: Assigned</span>';
+          } else {
+            workflowBadge = '<span class="inline-flex items-center ml-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-150 uppercase">Workflow: Not assigned</span>';
+          }
+
           // Actions
           let actions = [];
           if (status === "Draft" && form.latest_version_id) {
@@ -281,7 +288,7 @@ document.addEventListener("DOMContentLoaded", function () {
             <td class="px-6 py-4 font-mono text-slate-500">${form.gri_code || "—"}</td>
             <td class="px-6 py-4 text-slate-500 truncate max-w-xs" title="${sitesText}">${sitesText}</td>
             <td class="px-6 py-4 text-slate-500">${form.frequency || "Monthly"}</td>
-            <td class="px-6 py-4">${statusBadge}</td>
+            <td class="px-6 py-4 flex flex-wrap items-center gap-1">${statusBadge} ${workflowBadge}</td>
             <td class="px-6 py-4 text-slate-500 font-semibold">v${form.latest_version_num || 1}</td>
             <td class="px-6 py-4 text-right whitespace-nowrap">${actions.join("")}</td>
           `;
@@ -313,11 +320,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (sites.length === 0) {
       showToast("Please select at least one site applicability.", "error");
-      return;
-    }
-
-    if (!workflow_id) {
-      showToast("Please select an approval workflow.", "error");
       return;
     }
 
@@ -412,6 +414,19 @@ document.addEventListener("DOMContentLoaded", function () {
         if (data.version.status === "Published") badgeClass = "bg-emerald-100 text-emerald-800";
         else if (data.version.status === "Archived") badgeClass = "bg-slate-100 text-slate-800";
         builderVersionBadge.className = `px-2 py-0.5 rounded-full font-bold uppercase text-[9px] ${badgeClass}`;
+
+        // Update workflow status badge and banner
+        const workflowStatusBadge = document.getElementById("builder-workflow-status");
+        const workflowWarningBanner = document.getElementById("workflow-warning-banner");
+        if (data.form.workflow_id) {
+          workflowStatusBadge.textContent = "Workflow: Assigned";
+          workflowStatusBadge.className = "px-2 py-0.5 rounded-full font-bold uppercase text-[9px] bg-emerald-100 text-emerald-800";
+          workflowWarningBanner.classList.add("hidden");
+        } else {
+          workflowStatusBadge.textContent = "Workflow: Not assigned";
+          workflowStatusBadge.className = "px-2 py-0.5 rounded-full font-bold uppercase text-[9px] bg-slate-100 text-slate-700 border border-slate-200";
+          workflowWarningBanner.classList.remove("hidden");
+        }
 
         // Populate dropdown options inside inspectors
         populateInspectorDropdowns();
@@ -783,9 +798,6 @@ document.addEventListener("DOMContentLoaded", function () {
       }
     });
 
-    if (!formObj || !formObj.workflow_id) {
-      errors.push("An approval workflow must be assigned to the form.");
-    }
     if (!formObj || !formObj.sites || formObj.sites.length === 0) {
       errors.push("Form must be applicable to at least one site.");
     }
