@@ -37,7 +37,7 @@ document.addEventListener("DOMContentLoaded", function () {
         statPending.textContent = pendingCount;
         statHistory.textContent = historyCount;
 
-        badgePending.textContent = `${pendingCount} sheets`;
+        badgePending.textContent = `${pendingCount} items`;
         badgeHistory.textContent = `${historyCount} sheets`;
 
         // Render queues
@@ -80,9 +80,13 @@ document.addEventListener("DOMContentLoaded", function () {
       // Actionable column button
       let actionBtn = "";
       if (row.is_my_turn) {
+        const href = row.item_type === "package"
+          ? `/module/APPROV/packages/${row.package_id}`
+          : `/module/APPROV/submissions/${row.submission_id}`;
+        const label = row.item_type === "package" ? "Review Package" : "Review Submission";
         actionBtn = `
-          <a href="/module/APPROV/submissions/${row.submission_id}" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm hover:shadow transition-all">
-            Review Submission
+          <a href="${href}" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm hover:shadow transition-all">
+            ${label}
           </a>
         `;
       } else {
@@ -93,8 +97,19 @@ document.addEventListener("DOMContentLoaded", function () {
         `;
       }
 
+      const itemLabel = row.item_type === "package"
+        ? (row.label || "Monthly Workbook Package")
+        : (row.form_name || "Unknown Form");
+      const includedForms = Array.isArray(row.forms_included) ? row.forms_included : [];
+      const itemMeta = row.item_type === "package"
+        ? `${row.included_submission_count || 0} sheets · ${includedForms.join(", ") || "Forms unavailable"}`
+        : "Single sheet";
+
       tr.innerHTML = `
-        <td class="px-6 py-4 font-bold text-slate-900">${row.form_name}</td>
+        <td class="px-6 py-4">
+          <div class="font-bold text-slate-900">${itemLabel}</div>
+          <div class="mt-0.5 text-xs font-medium text-slate-500">${itemMeta}</div>
+        </td>
         <td class="px-6 py-4 font-semibold text-slate-600">${row.site_name}</td>
         <td class="px-6 py-4 font-medium text-slate-700">${row.period_label}</td>
         <td class="px-6 py-4">

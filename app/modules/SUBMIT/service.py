@@ -225,6 +225,60 @@ def _submission_values_payload(submission, fields):
     return values
 
 
+def submission_proofs_payload(submission):
+    if not submission:
+        return {}
+    proofs = ProofDocument.query.filter_by(
+        submission_id=submission.id,
+        is_deleted=False,
+    ).all()
+    return {
+        proof.field_id: {
+            "original_name": proof.original_name,
+            "storage_key": proof.storage_key,
+        }
+        for proof in proofs
+        if proof.field_id is not None
+    }
+
+
+def submission_values_review_payload(submission, fields):
+    if not submission:
+        return {}
+
+    db_values_by_field = {
+        value.field_id: value
+        for value in SubmissionValue.query.filter_by(submission_id=submission.id).all()
+    }
+    values = {}
+    for field in fields:
+        code = field["field_code"]
+        db_value = db_values_by_field.get(field["field_id"])
+        if db_value:
+            values[code] = {
+                "submission_value_id": db_value.id,
+                "raw_value": db_value.raw_value,
+                "calculated_value": (
+                    float(db_value.calculated_value)
+                    if db_value.calculated_value is not None
+                    else None
+                ),
+                "cell_state": db_value.cell_state,
+                "is_locked": db_value.is_locked,
+                "remark": db_value.remark,
+            }
+        else:
+            values[code] = {
+                "submission_value_id": None,
+                "raw_value": None,
+                "calculated_value": None,
+                "cell_state": CELL_STATE_BLANK_EDITABLE,
+                "is_locked": False,
+                "remark": None,
+            }
+    return values
+
+
 def _row_editability(period, submission):
     if not period:
         return {

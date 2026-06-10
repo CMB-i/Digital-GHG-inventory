@@ -7,7 +7,7 @@
   <div class="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-200 pb-5">
     <div>
       <h1 class="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Review Queue</h1>
-      <p class="mt-2 text-sm text-slate-500">Review submitted data sheets and record approval/rejection decisions.</p>
+      <p class="mt-2 text-sm text-slate-500">Review submitted workbook packages and legacy data sheets.</p>
     </div>
   </div>
 
@@ -27,7 +27,7 @@
               <dt class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Awaiting Review</dt>
               <dd class="flex items-baseline">
                 <div id="stat-pending" class="text-2xl font-bold text-slate-900">0</div>
-                <div class="ml-2 text-xs font-medium text-indigo-600">sheets assigned</div>
+                <div class="ml-2 text-xs font-medium text-indigo-600">items assigned</div>
               </dd>
             </dl>
           </div>
@@ -66,15 +66,15 @@
           <span class="h-2 w-2 rounded-full bg-indigo-500 mr-2.5"></span>
           Pending Review
         </h2>
-        <p class="text-xs text-slate-500 mt-0.5">Submissions awaiting your level authorization.</p>
+        <p class="text-xs text-slate-500 mt-0.5">Workbook packages and legacy submissions awaiting your level authorization.</p>
       </div>
-      <span id="badge-pending" class="bg-indigo-100 text-indigo-800 text-[10px] px-2 py-0.5 rounded-full font-bold">0 sheets</span>
+      <span id="badge-pending" class="bg-indigo-100 text-indigo-800 text-[10px] px-2 py-0.5 rounded-full font-bold">0 items</span>
     </div>
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-slate-200">
         <thead class="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           <tr>
-            <th class="px-6 py-3 text-left">Form Name</th>
+            <th class="px-6 py-3 text-left">Review Item</th>
             <th class="px-6 py-3 text-left">Site</th>
             <th class="px-6 py-3 text-left">Reporting Period</th>
             <th class="px-6 py-3 text-left">Current Level</th>
