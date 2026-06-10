@@ -50,9 +50,12 @@ def get_formula_compatible_fields(form_version_id):
 
 from datetime import datetime, timezone
 from app.database import db
-from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion
+from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion, FormSection
 from app.modules.VALSET.model import ValueSetVersion
 from app.modules.FRMULA.model import FormulaVersion
+
+ALLOWED_SECTION_LAYOUT_TYPES = {"monthly_table", "annual_table", "reference_table"}
+ALLOWED_FIELD_FREQUENCIES = {"monthly", "annual", "static"}
 
 def list_forms():
     return Form.query.filter_by(is_deleted=False).all()
@@ -97,6 +100,13 @@ def create_form(name, code, description, user_id):
 def get_form_version(version_id):
     return FormVersion.query.get(version_id)
 
+def get_form_sections(form_id):
+    return (
+        FormSection.query.filter_by(form_id=form_id, is_deleted=False)
+        .order_by(FormSection.display_order.asc(), FormSection.id.asc())
+        .all()
+    )
+
 def get_form_version_fields(form_version_id):
     rows = (
         FieldVersion.query.with_entities(FieldVersion, Field)
@@ -111,12 +121,90 @@ def get_form_version_fields(form_version_id):
     )
     return rows
 
-def save_form_draft_fields(form_version_id, fields_list, user_id):
+def save_form_sections(form_id, sections_list, user_id):
+    if sections_list is None:
+        return {}
+
+    seen_codes = set()
+    active_sections_by_code = {
+        section.code: section
+        for section in FormSection.query.filter_by(form_id=form_id, is_deleted=False).all()
+    }
+    saved_sections = {}
+
+    for idx, section_data in enumerate(sections_list):
+        section_id = section_data.get("id")
+        name = (section_data.get("name") or "").strip()
+        code = (section_data.get("code") or "").strip().lower().replace(" ", "_")
+        layout_type = (section_data.get("layout_type") or "monthly_table").strip()
+        description = (section_data.get("description") or "").strip() or None
+        display_order = section_data.get("display_order") or idx + 1
+
+        if not name:
+            raise ValueError("Section name is required.")
+        if not code:
+            raise ValueError("Section code is required.")
+        if code in seen_codes:
+            raise ValueError(f"Duplicate section code '{code}' found in form sections.")
+        if layout_type not in ALLOWED_SECTION_LAYOUT_TYPES:
+            raise ValueError(f"Unsupported section layout type '{layout_type}'.")
+
+        seen_codes.add(code)
+        section = None
+        if section_id:
+            section = FormSection.query.filter_by(
+                id=section_id,
+                form_id=form_id,
+                is_deleted=False,
+            ).one_or_none()
+        if not section:
+            section = active_sections_by_code.get(code)
+        if not section:
+            section = FormSection(
+                form_id=form_id,
+                name=name,
+                code=code,
+                layout_type=layout_type,
+                display_order=display_order,
+                description=description,
+                created_by=user_id,
+                updated_by=user_id,
+            )
+            db.session.add(section)
+            db.session.flush()
+        else:
+            section.name = name
+            section.layout_type = layout_type
+            section.display_order = display_order
+            section.description = description
+            section.updated_by = user_id
+
+        saved_sections[code] = section
+
+    saved_ids = {section.id for section in saved_sections.values()}
+    for section in active_sections_by_code.values():
+        if section.id not in saved_ids:
+            section.is_deleted = True
+            section.deleted_by = user_id
+            section.deleted_at = datetime.now(timezone.utc)
+            section.delete_reason = "Removed from form draft"
+
+    db.session.flush()
+    return saved_sections
+
+def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=None):
     form_version = FormVersion.query.get(form_version_id)
     if not form_version:
         raise ValueError("Form version not found.")
     if form_version.status != "Draft":
         raise ValueError("Only Draft versions can be modified.")
+
+    section_map = save_form_sections(form_version.form_id, sections_list, user_id)
+    if sections_list is None:
+        section_map = {
+            section.code: section
+            for section in FormSection.query.filter_by(form_id=form_version.form_id, is_deleted=False).all()
+        }
         
     # Check for duplicate field codes in the input list
     seen_codes = set()
@@ -155,6 +243,9 @@ def save_form_draft_fields(form_version_id, fields_list, user_id):
         field_type = f_data.get("field_type")
         field_config = f_data.get("field_config", {})
         display_order = f_data.get("display_order", idx + 1)
+        frequency = (f_data.get("frequency") or "monthly").strip()
+        section_id = f_data.get("section_id")
+        section_code = (f_data.get("section_code") or "").strip()
         
         if not field_code or not field_code.strip():
             raise ValueError("Field code is required.")
@@ -162,6 +253,22 @@ def save_form_draft_fields(form_version_id, fields_list, user_id):
             raise ValueError("Field name is required.")
         if not field_type or not field_type.strip():
             raise ValueError("Field type is required.")
+        if frequency not in ALLOWED_FIELD_FREQUENCIES:
+            raise ValueError(f"Unsupported field frequency '{frequency}'.")
+
+        section = None
+        if section_code:
+            section = section_map.get(section_code)
+            if not section:
+                raise ValueError(f"Field '{field_code}' references unknown section '{section_code}'.")
+        elif section_id:
+            section = FormSection.query.filter_by(
+                id=section_id,
+                form_id=form_version.form_id,
+                is_deleted=False,
+            ).one_or_none()
+            if not section:
+                raise ValueError(f"Field '{field_code}' references an invalid section.")
             
         # Find or create Field row
         field = Field.query.filter_by(form_id=form_version.form_id, field_code=field_code, is_deleted=False).first()
@@ -191,6 +298,8 @@ def save_form_draft_fields(form_version_id, fields_list, user_id):
             field_type=field_type.strip(),
             field_config=field_config,
             form_version_id=form_version_id,
+            section_id=section.id if section else None,
+            frequency=frequency,
             created_by=user_id
         )
         db.session.add(fv)
@@ -313,6 +422,8 @@ def create_new_form_version_draft(form_id, user_id):
                 field_type=prev_fv.field_type,
                 field_config=prev_fv.field_config or {},
                 form_version_id=new_version.id,
+                section_id=prev_fv.section_id,
+                frequency=prev_fv.frequency or "monthly",
                 created_by=user_id
             )
             db.session.add(new_fv)

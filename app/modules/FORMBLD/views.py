@@ -23,6 +23,7 @@ from app.modules.FORMBLD.service import (
     get_form,
     get_form_by_code,
     create_form,
+    get_form_sections,
     get_form_version,
     get_form_version_fields,
     save_form_draft_fields,
@@ -156,6 +157,7 @@ def get_version_details(version_id):
         
     parent = get_form(version.form_id)
     fields = get_form_version_fields(version_id)
+    sections = get_form_sections(version.form_id)
     
     # Check permissions
     user = current_user()
@@ -252,7 +254,18 @@ def get_version_details(version_id):
             "field_name": fv.field_name,
             "field_type": fv.field_type,
             "field_config": fv.field_config or {},
+            "section_id": fv.section_id,
+            "section_code": fv.section.code if fv.section else "",
+            "frequency": fv.frequency or "monthly",
         } for fv, f in fields],
+        "sections": [{
+            "id": section.id,
+            "name": section.name,
+            "code": section.code,
+            "layout_type": section.layout_type,
+            "display_order": section.display_order,
+            "description": section.description or "",
+        } for section in sections],
         "all_versions": version_list,
         "available_value_sets": valsets_data,
         "available_formulas": formulas_data,
@@ -271,12 +284,15 @@ def get_version_details(version_id):
 def save_fields(version_id):
     data = request.get_json() or {}
     fields_list = data.get("fields")
+    sections_list = data.get("sections")
     if not isinstance(fields_list, list):
         return error_response("Fields must be a list.", 400)
+    if sections_list is not None and not isinstance(sections_list, list):
+        return error_response("Sections must be a list.", 400)
         
     user = current_user()
     try:
-        save_form_draft_fields(version_id, fields_list, user.id)
+        save_form_draft_fields(version_id, fields_list, user.id, sections_list)
         db.session.commit()
         return success_response(message="Form fields saved successfully.")
     except ValueError as e:
