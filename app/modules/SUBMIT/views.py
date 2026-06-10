@@ -17,10 +17,12 @@ from app.modules.SUBMIT.service import (
     create_draft_submission,
     autosave_submission_values,
     submit_submission,
+    submit_monthly_workbook_package,
     set_submission_value_state,
     CELL_STATE_DRAFT_FILLED,
     DuplicateSubmissionError,
-    SubmissionValidationError
+    SubmissionValidationError,
+    PackageSubmissionError
 )
 
 MODULE_CODE = "SUBMIT"
@@ -112,6 +114,42 @@ def annual_workbook_data():
         )
         return jsonify(data)
     except ValueError as e:
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/annual-workbook/package/submit", methods=["POST"])
+@require_login
+def submit_annual_workbook_package():
+    """
+    Submit the selected month as a workbook package foundation.
+    Existing monthly submission validation/routing remains authoritative.
+    """
+    data = request.get_json() or {}
+    user = current_user()
+    try:
+        result = submit_monthly_workbook_package(
+            site_id=data.get("site_id"),
+            period_id=data.get("period_id"),
+            year=data.get("year"),
+            month=data.get("month"),
+            user_id=user.id,
+            selected_form_id=data.get("selected_form_id"),
+            values=data.get("values") or {},
+        )
+        db.session.commit()
+        return success_response(
+            data=result,
+            message="Workbook package submitted successfully."
+        )
+    except PackageSubmissionError as e:
+        db.session.rollback()
+        return jsonify({
+            "error": str(e),
+            "errors": e.errors,
+            "warnings": e.warnings,
+        }), 422 if e.errors else 400
+    except (ValueError, DuplicateSubmissionError) as e:
+        db.session.rollback()
         return error_response(str(e), 400)
 
 

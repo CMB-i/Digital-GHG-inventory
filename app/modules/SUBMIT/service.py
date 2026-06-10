@@ -11,7 +11,7 @@ from app.modules.SITEMST.model import Site
 from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion
 from app.modules.FORMBLD.service import get_form_version_fields
 from app.modules.PERIOD.model import ReportingPeriod
-from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument
+from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument, SubmissionPackage
 from app.modules.FRMULA.model import FormulaVersion
 from app.modules.FRMULA.service import evaluate_formula
 from app.modules.WFLWBLD.model import Workflow
@@ -29,6 +29,12 @@ class SubmissionValidationError(ValueError):
     def __init__(self, message, errors):
         super().__init__(message)
         self.errors = errors  # Dict of {field_code: error_message}
+
+class PackageSubmissionError(ValueError):
+    def __init__(self, message, errors=None, warnings=None):
+        super().__init__(message)
+        self.errors = errors or []
+        self.warnings = warnings or []
 
 FY_MONTH_ORDER = (4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3)
 EDITABLE_PERIOD_STATUSES = ("OPEN", "REOPENED")
@@ -232,17 +238,25 @@ def _row_editability(period, submission):
             "editable": False,
             "reason": "Approved or locked monthly sheet.",
         }
-    if period.status in EDITABLE_PERIOD_STATUSES:
+    if submission and submission.status in ("Submitted", "Resubmitted", "Under Review"):
         return {
-            "state": "editable",
-            "editable": True,
-            "reason": "Reporting period is open for entry.",
+            "state": "read_only",
+            "editable": False,
+            "reason": f"Monthly sheet is {submission.status}.",
         }
-    if submission and submission.status in EDITABLE_SUBMISSION_STATUSES:
+    if submission and submission.status == "Changes Requested":
         return {
             "state": "editable",
             "editable": True,
             "reason": "Monthly sheet was sent back for changes.",
+        }
+    if period.status in EDITABLE_PERIOD_STATUSES and (
+        not submission or submission.status == "Draft"
+    ):
+        return {
+            "state": "editable",
+            "editable": True,
+            "reason": "Reporting period is open for entry.",
         }
     return {
         "state": "disabled",
@@ -627,6 +641,208 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id):
     )
 
     return sub
+
+def _values_have_content(values):
+    if not isinstance(values, dict):
+        return False
+    for value in values.values():
+        if value is None or value == "":
+            continue
+        if isinstance(value, dict):
+            if any(v not in (None, "") for v in value.values()):
+                return True
+            continue
+        return True
+    return False
+
+def get_or_create_submission_package(site_id, period_id, user_id, package_type="monthly_workbook"):
+    package = SubmissionPackage.query.filter_by(
+        site_id=site_id,
+        period_id=period_id,
+        package_type=package_type,
+        is_deleted=False,
+    ).first()
+    if package:
+        package.updated_by = user_id
+        return package
+
+    package = SubmissionPackage(
+        site_id=site_id,
+        period_id=period_id,
+        package_type=package_type,
+        status="Draft",
+        created_by=user_id,
+        updated_by=user_id,
+    )
+    db.session.add(package)
+    db.session.flush()
+    return package
+
+def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=None, user_id=None, selected_form_id=None, values=None):
+    """
+    Foundation package submit: groups assigned monthly form submissions for one site and period.
+    Existing monthly submit logic remains the source of validation/routing/notifications.
+    """
+    try:
+        site_id = int(site_id)
+    except (TypeError, ValueError):
+        raise ValueError("A valid site is required.")
+
+    if not user_id:
+        raise ValueError("A valid user is required.")
+
+    if not has_permission(user_id, "submission", "submit", scope_site_id=site_id):
+        raise ValueError("Permission denied: You do not have permission to submit this workbook package.")
+
+    period = None
+    if period_id:
+        period = ReportingPeriod.query.filter_by(id=period_id, site_id=site_id, is_deleted=False).first()
+    elif year and month:
+        period = ReportingPeriod.query.filter_by(
+            site_id=site_id,
+            year=int(year),
+            month=int(month),
+            is_deleted=False,
+        ).first()
+    if not period:
+        raise ValueError("Reporting period not found for this site and month.")
+    if period.status not in EDITABLE_PERIOD_STATUSES:
+        raise ValueError(f"Cannot submit a workbook package for a reporting period that is {period.status}.")
+
+    assigned_forms = [form for form, _metadata in _published_forms_for_site(site_id)]
+    if not assigned_forms:
+        raise ValueError("No published forms are assigned to this site.")
+
+    assigned_form_ids = {form.id for form in assigned_forms}
+    selected_form_id = int(selected_form_id) if selected_form_id else None
+    if selected_form_id and selected_form_id not in assigned_form_ids:
+        raise ValueError("Selected form is not assigned to this site.")
+
+    package = get_or_create_submission_package(site_id, period.id, user_id)
+    included = []
+    skipped = []
+    errors = []
+    submitted_count = 0
+
+    existing_submissions = {
+        submission.form_id: submission
+        for submission in Submission.query.filter(
+            Submission.site_id == site_id,
+            Submission.reporting_period_id == period.id,
+            Submission.form_id.in_(assigned_form_ids),
+            Submission.is_deleted == False,
+        ).all()
+    }
+
+    for form in assigned_forms:
+        submission = existing_submissions.get(form.id)
+        created_from_payload = False
+
+        if not submission and selected_form_id == form.id and _values_have_content(values):
+            try:
+                submission = create_draft_submission(site_id, form.id, period.id, user_id)
+                created_from_payload = True
+            except DuplicateSubmissionError as exc:
+                submission = Submission.query.get(exc.existing_id)
+
+        if not submission:
+            skipped.append({
+                "form_id": form.id,
+                "form_name": form.name,
+                "reason": "No draft or filled values to submit.",
+            })
+            continue
+
+        if submission.is_locked or submission.status == "Approved":
+            skipped.append({
+                "form_id": form.id,
+                "form_name": form.name,
+                "submission_id": submission.id,
+                "reason": "Already approved or locked.",
+            })
+            continue
+
+        if selected_form_id == form.id and values is not None and submission.status in EDITABLE_SUBMISSION_STATUSES:
+            autosave_submission_values(submission.id, values or {}, user_id)
+
+        submission.package_id = package.id
+        submission.updated_by = user_id
+
+        if submission.status in EDITABLE_SUBMISSION_STATUSES:
+            try:
+                submit_submission(submission.id, user_id)
+                submitted_count += 1
+            except SubmissionValidationError as exc:
+                errors.append({
+                    "form_id": form.id,
+                    "form_name": form.name,
+                    "submission_id": submission.id,
+                    "error": str(exc),
+                    "validation_errors": exc.errors,
+                })
+                continue
+            except ValueError as exc:
+                errors.append({
+                    "form_id": form.id,
+                    "form_name": form.name,
+                    "submission_id": submission.id,
+                    "error": str(exc),
+                })
+                continue
+
+        included.append({
+            "form_id": form.id,
+            "form_name": form.name,
+            "submission_id": submission.id,
+            "status": submission.status,
+            "created": created_from_payload,
+        })
+
+    if errors:
+        raise PackageSubmissionError("Workbook package submission failed validation.", errors=errors, warnings=skipped)
+    if submitted_count == 0:
+        raise PackageSubmissionError(
+            "No editable or submit-ready forms were found for this workbook package.",
+            warnings=skipped,
+        )
+
+    package.status = "Submitted"
+    package.submitted_by = user_id
+    package.submitted_at = datetime.now(timezone.utc)
+    included_levels = [
+        submission.current_level
+        for submission in Submission.query.filter(
+            Submission.id.in_([item["submission_id"] for item in included])
+        ).all()
+        if submission.current_level is not None
+    ]
+    package.current_level = min(included_levels) if included_levels else None
+    package.updated_by = user_id
+
+    from app.modules.AUDITL.service import log_audit
+    log_audit(
+        actor_user_id=user_id,
+        entity_type="submission_package",
+        entity_id=package.id,
+        action="SUBMIT_PACKAGE",
+        old_values=None,
+        new_values={
+            "status": package.status,
+            "site_id": site_id,
+            "period_id": period.id,
+            "submission_ids": [item["submission_id"] for item in included],
+        },
+    )
+
+    return {
+        "package_id": package.id,
+        "status": package.status,
+        "site_id": site_id,
+        "period_id": period.id,
+        "period_label": format_period_label(period.year, period.month),
+        "included_submissions": included,
+        "skipped_forms": skipped,
+    }
 
 def autosave_submission_values(submission_id, values_dict, user_id):
     """

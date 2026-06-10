@@ -196,7 +196,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     lastSavedEl.textContent = row.last_saved ? `Last saved ${formatDateTime(row.last_saved)}` : row.editability.reason;
     btnSave.disabled = !(row.editability && row.editability.editable);
-    btnSubmit.disabled = !(row.submission_id && row.editability && row.editability.editable);
+    btnSubmit.disabled = !(row.editability && row.editability.editable);
   }
 
   function renderTable() {
@@ -454,35 +454,50 @@ document.addEventListener("DOMContentLoaded", function () {
 
   async function submitSelectedRow() {
     const row = selectedRow();
-    if (!row || !row.submission_id) {
-      showAlert("Save this month as a draft before submitting.", "error");
+    if (!row) {
+      showAlert("Select a month before submitting.", "error");
       return;
     }
     if (!(row.editability && row.editability.editable)) return;
-    if (!window.confirm(`Submit ${row.period_label} for approval? This uses the existing monthly sheet approval flow.`)) {
+    if (!window.confirm(`Submit the ${row.period_label} workbook package for approval?`)) {
       return;
     }
 
     try {
       btnSubmit.disabled = true;
       btnSubmit.textContent = "Submitting...";
-      const response = await fetch(`/module/SUBMIT/api/submissions/${row.submission_id}/submit`, {
-        method: "POST"
+      const response = await fetch("/module/SUBMIT/api/annual-workbook/package/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          site_id: state.workbook.site.id,
+          period_id: row.period_id,
+          year: row.year,
+          month: row.month,
+          selected_form_id: state.workbook.selected_form.id,
+          values: row.values || {}
+        })
       });
       const data = await response.json();
       if (!response.ok) {
-        if (response.status === 422 && data.validation_errors) {
-          const details = Object.values(data.validation_errors).join(" ");
+        if (response.status === 422 && data.errors) {
+          const details = data.errors.map(item => {
+            if (item.validation_errors) {
+              return Object.values(item.validation_errors).join(" ");
+            }
+            return item.error || "";
+          }).filter(Boolean).join(" ");
           throw new Error(`${data.error || "Validation failed."} ${details}`);
         }
-        throw new Error(data.error || "Could not submit monthly sheet.");
+        throw new Error(data.error || "Could not submit workbook package.");
       }
-      showAlert("Monthly sheet submitted for approval.", "success");
+      const included = data.data && data.data.included_submissions ? data.data.included_submissions.length : 0;
+      showAlert(`Workbook package submitted for approval. ${included} sheet${included === 1 ? "" : "s"} included.`, "success");
       await loadWorkbook();
     } catch (error) {
       showAlert(error.message, "error");
     } finally {
-      btnSubmit.textContent = "Submit selected monthly sheet";
+      btnSubmit.textContent = "Submit selected month package";
       renderHeader();
     }
   }
