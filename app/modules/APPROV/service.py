@@ -284,6 +284,10 @@ def compose_package_review_data(package_id, user_id):
     for sheet in sheets:
         sheet.pop("_sort_name", None)
 
+    can_reject = has_permission(user_id, "submission", "reject", scope_site_id=package.site_id)
+    can_review = has_permission(user_id, "submission", "approve", scope_site_id=package.site_id) or can_reject
+    is_my_turn = bool(queue_summary.get("is_my_turn"))
+
     return {
         "package": {
             "package_id": package.id,
@@ -300,9 +304,175 @@ def compose_package_review_data(package_id, user_id):
             "submitted_by": submitter.full_name if submitter else "System",
             "submitted_at": package.submitted_at,
             "included_submission_count": len(sheets),
+            "is_my_turn": is_my_turn,
+            "actions": {
+                "can_approve": is_my_turn and can_review,
+                "can_request_changes": can_review,
+                "can_reject": can_reject,
+            },
         },
         "sheets": sheets,
     }
+
+
+def _get_package_for_action(package_id, user_id):
+    queue_summary = get_package_summary_for_reviewer(package_id, user_id)
+    if not queue_summary:
+        raise ValueError("Permission denied.")
+
+    package = SubmissionPackage.query.get(package_id)
+    if not package or package.is_deleted:
+        raise ValueError("Package not found.")
+
+    return package, queue_summary
+
+
+def _reviewable_package_submissions(package_id):
+    return [
+        submission
+        for submission in Submission.query.filter_by(package_id=package_id, is_deleted=False).all()
+        if submission.status in REVIEWABLE_STATUSES and not submission.is_locked
+    ]
+
+
+def _sync_package_status_from_submissions(package, user_id):
+    submissions = Submission.query.filter_by(package_id=package.id, is_deleted=False).all()
+    if not submissions:
+        return package
+
+    statuses = {submission.status for submission in submissions}
+    if statuses == {"Approved"}:
+        package.status = "Approved"
+        package.final_approved_at = _utc_now()
+        package.final_approved_by = user_id
+    elif "Rejected" in statuses:
+        package.status = "Rejected"
+    elif "Changes Requested" in statuses:
+        package.status = "Changes Requested"
+    elif statuses & set(REVIEWABLE_STATUSES):
+        package.status = "Under Review" if "Under Review" in statuses else "Submitted"
+        levels = [
+            submission.current_level
+            for submission in submissions
+            if submission.current_level is not None
+        ]
+        if levels:
+            package.current_level = min(levels)
+    package.updated_by = user_id
+    return package
+
+
+def approve_package(package_id, user_id, comment=None):
+    package, queue_summary = _get_package_for_action(package_id, user_id)
+    if not queue_summary.get("is_my_turn"):
+        raise ValueError("It is not your turn to approve this package.")
+
+    submissions = _reviewable_package_submissions(package.id)
+    if not submissions:
+        raise ValueError("No reviewable submissions found in this package.")
+
+    results = []
+    for submission in submissions:
+        approve_submission(submission.id, user_id, comment)
+        results.append({
+            "submission_id": submission.id,
+            "status": submission.status,
+        })
+
+    _sync_package_status_from_submissions(package, user_id)
+
+    from app.modules.AUDITL.service import log_audit
+    log_audit(
+        actor_user_id=user_id,
+        entity_type="submission_package",
+        entity_id=package.id,
+        action="APPROVE_PACKAGE",
+        old_values=None,
+        new_values={
+            "status": package.status,
+            "submission_ids": [item["submission_id"] for item in results],
+        },
+        metadata={"comment": comment},
+    )
+
+    return package, results
+
+
+def request_changes_package(package_id, user_id, comment):
+    if not comment or not comment.strip():
+        raise ValueError("A comment is required to request changes.")
+
+    package, _queue_summary = _get_package_for_action(package_id, user_id)
+    submissions = _reviewable_package_submissions(package.id)
+    if not submissions:
+        raise ValueError("No reviewable submissions found in this package.")
+
+    results = []
+    for submission in submissions:
+        request_changes_submission(submission.id, user_id, comment)
+        results.append({
+            "submission_id": submission.id,
+            "status": submission.status,
+        })
+
+    package.status = "Changes Requested"
+    package.updated_by = user_id
+
+    from app.modules.AUDITL.service import log_audit
+    log_audit(
+        actor_user_id=user_id,
+        entity_type="submission_package",
+        entity_id=package.id,
+        action="REQUEST_CHANGES_PACKAGE",
+        old_values=None,
+        new_values={
+            "status": package.status,
+            "submission_ids": [item["submission_id"] for item in results],
+        },
+        metadata={"comment": comment.strip()},
+    )
+
+    return package, results
+
+
+def reject_package(package_id, user_id, comment):
+    if not comment or not comment.strip():
+        raise ValueError("A comment is required to reject a package.")
+
+    package, _queue_summary = _get_package_for_action(package_id, user_id)
+    if not has_permission(user_id, "submission", "reject", scope_site_id=package.site_id):
+        raise ValueError("Permission denied: You do not have permission to reject submissions.")
+
+    submissions = _reviewable_package_submissions(package.id)
+    if not submissions:
+        raise ValueError("No reviewable submissions found in this package.")
+
+    results = []
+    for submission in submissions:
+        reject_submission(submission.id, user_id, comment)
+        results.append({
+            "submission_id": submission.id,
+            "status": submission.status,
+        })
+
+    package.status = "Rejected"
+    package.updated_by = user_id
+
+    from app.modules.AUDITL.service import log_audit
+    log_audit(
+        actor_user_id=user_id,
+        entity_type="submission_package",
+        entity_id=package.id,
+        action="REJECT_PACKAGE",
+        old_values=None,
+        new_values={
+            "status": package.status,
+            "submission_ids": [item["submission_id"] for item in results],
+        },
+        metadata={"comment": comment.strip()},
+    )
+
+    return package, results
 
 
 def get_approver_queue(user_id):

@@ -17,6 +17,9 @@ from app.modules.APPROV.service import (
     resolve_issue,
     get_package_summary_for_reviewer,
     compose_package_review_data,
+    approve_package,
+    request_changes_package,
+    reject_package,
 )
 from app.modules.SUBMIT.service import format_period_label
 
@@ -107,6 +110,63 @@ def get_package_review(package_id):
         return error_response("Permission denied.", 403)
 
     return success_response(data=review_data)
+
+@bp.route("/api/packages/<int:package_id>/approve", methods=["POST"])
+@require_login
+def approve_package_endpoint(package_id):
+    user = current_user()
+    comment = request.json.get("comment") if request.json else None
+    try:
+        package, results = approve_package(package_id, user.id, comment)
+        db.session.commit()
+        return success_response(
+            message="Package approved successfully.",
+            data={"status": package.status, "results": results},
+        )
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 500)
+
+@bp.route("/api/packages/<int:package_id>/request-changes", methods=["POST"])
+@require_login
+def request_changes_package_endpoint(package_id):
+    user = current_user()
+    comment = request.json.get("comment") if request.json else None
+    try:
+        package, results = request_changes_package(package_id, user.id, comment)
+        db.session.commit()
+        return success_response(
+            message="Package returned for changes successfully.",
+            data={"status": package.status, "results": results},
+        )
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 500)
+
+@bp.route("/api/packages/<int:package_id>/reject", methods=["POST"])
+@require_login
+def reject_package_endpoint(package_id):
+    user = current_user()
+    comment = request.json.get("comment") if request.json else None
+    try:
+        package, results = reject_package(package_id, user.id, comment)
+        db.session.commit()
+        return success_response(
+            message="Package rejected successfully.",
+            data={"status": package.status, "results": results},
+        )
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 500)
 
 @bp.route("/api/packages/<int:package_id>")
 @require_login

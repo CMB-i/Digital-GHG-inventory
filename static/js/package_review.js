@@ -5,7 +5,6 @@ document.addEventListener("DOMContentLoaded", function () {
   const reviewTitle = document.getElementById("review-title");
   const reviewSubtitle = document.getElementById("review-subtitle");
   const badgeStatus = document.getElementById("badge-status");
-  const reviewAlert = document.getElementById("review-alert");
   const cellStateLegend = document.getElementById("cell-state-legend");
   const legendItems = document.getElementById("legend-items");
   const reviewLoading = document.getElementById("review-loading");
@@ -20,6 +19,12 @@ document.addEventListener("DOMContentLoaded", function () {
   const sheetStatus = document.getElementById("sheet-status");
   const sheetFallbackLink = document.getElementById("sheet-fallback-link");
   const sheetValues = document.getElementById("sheet-values");
+  const actionsPanel = document.getElementById("actions-panel");
+  const actionsLocked = document.getElementById("actions-locked");
+  const commentInput = document.getElementById("review-comment");
+  const btnApprovePackage = document.getElementById("btn-approve-package");
+  const btnRequestChangesPackage = document.getElementById("btn-request-changes-package");
+  const btnRejectPackage = document.getElementById("btn-reject-package");
 
   let reviewData = null;
   let activeSheetIndex = 0;
@@ -216,11 +221,99 @@ document.addEventListener("DOMContentLoaded", function () {
     metaPackageId.textContent = String(pkg.package_id);
 
     reviewLoading.classList.add("hidden");
-    reviewAlert.classList.remove("hidden");
     renderLegend();
     renderTabs();
     renderSheet(data.sheets[activeSheetIndex] || data.sheets[0]);
+    renderActions(pkg);
     reviewContent.classList.remove("hidden");
+  }
+
+  function renderActions(pkg) {
+    const actions = pkg.actions || {};
+    const reviewableStatuses = new Set(["Submitted", "Resubmitted", "Under Review"]);
+    const canAct = reviewableStatuses.has(pkg.status);
+
+    if (!canAct) {
+      actionsPanel.classList.add("hidden");
+      actionsLocked.classList.remove("hidden");
+      actionsLocked.textContent = `Package is ${pkg.status}. No review actions are available.`;
+      return;
+    }
+
+    if (!actions.can_approve && !actions.can_request_changes && !actions.can_reject) {
+      actionsPanel.classList.add("hidden");
+      actionsLocked.classList.remove("hidden");
+      actionsLocked.textContent = "You do not have permission to action this package.";
+      return;
+    }
+
+    actionsPanel.classList.remove("hidden");
+    actionsLocked.classList.add("hidden");
+    if (btnApprovePackage) {
+      btnApprovePackage.disabled = !actions.can_approve;
+      btnApprovePackage.title = actions.can_approve ? "" : "It is not your turn to approve this package.";
+    }
+    if (btnRequestChangesPackage) btnRequestChangesPackage.disabled = !actions.can_request_changes;
+    if (btnRejectPackage) btnRejectPackage.disabled = !actions.can_reject;
+  }
+
+  function postPackageAction(path, options) {
+    const { requireComment = false, confirmMessage, successMessage } = options;
+    const comment = commentInput ? commentInput.value : "";
+    if (requireComment && (!comment || !comment.trim())) {
+      alert("A review comment is required for this action.");
+      if (commentInput) commentInput.focus();
+      return;
+    }
+    if (!confirm(confirmMessage)) return;
+
+    fetch(`/module/APPROV/api/packages/${packageId}/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment: comment }),
+    })
+      .then((res) => {
+        if (!res.ok) {
+          return res.json().then((data) => {
+            throw new Error(data.error || "Package action failed.");
+          });
+        }
+        return res.json();
+      })
+      .then(() => {
+        alert(successMessage);
+        window.location.href = "/module/APPROV/";
+      })
+      .catch((err) => alert(err.message));
+  }
+
+  if (btnApprovePackage) {
+    btnApprovePackage.addEventListener("click", function () {
+      postPackageAction("approve", {
+        confirmMessage: "Approve the entire workbook package?",
+        successMessage: "Package approved successfully.",
+      });
+    });
+  }
+
+  if (btnRequestChangesPackage) {
+    btnRequestChangesPackage.addEventListener("click", function () {
+      postPackageAction("request-changes", {
+        requireComment: true,
+        confirmMessage: "Return the entire workbook package to the submitter for changes?",
+        successMessage: "Package returned for changes.",
+      });
+    });
+  }
+
+  if (btnRejectPackage) {
+    btnRejectPackage.addEventListener("click", function () {
+      postPackageAction("reject", {
+        requireComment: true,
+        confirmMessage: "Reject the entire workbook package? This is terminal.",
+        successMessage: "Package rejected.",
+      });
+    });
   }
 
   function showError(message) {
