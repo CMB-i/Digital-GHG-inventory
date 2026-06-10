@@ -2,6 +2,8 @@ import json
 import calendar
 from datetime import datetime, timezone
 
+from sqlalchemy import tuple_
+
 from app.database import db
 from app.common.permissions import has_permission
 from app.modules.ACCESS.model import AccessMatrix
@@ -28,10 +30,319 @@ class SubmissionValidationError(ValueError):
         super().__init__(message)
         self.errors = errors  # Dict of {field_code: error_message}
 
+FY_MONTH_ORDER = (4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3)
+EDITABLE_PERIOD_STATUSES = ("OPEN", "REOPENED")
+EDITABLE_SUBMISSION_STATUSES = ("Draft", "Changes Requested")
+
+
 def format_period_label(year, month):
     if 1 <= month <= 12:
         return f"{calendar.month_name[month]} {year}"
     return f"Month {month} {year}"
+
+
+def financial_year_label(start_year):
+    return f"FY {start_year}-{str(start_year + 1)[-2:]}"
+
+
+def _parse_form_metadata(form):
+    metadata = {
+        "sites": [],
+        "workflow_id": None,
+        "description_text": form.description or "",
+    }
+    if form.description and form.description.startswith("{"):
+        try:
+            parsed = json.loads(form.description)
+            if isinstance(parsed, dict):
+                metadata.update(parsed)
+        except Exception:
+            pass
+    return metadata
+
+
+def _fy_months(start_year):
+    months = []
+    for month in FY_MONTH_ORDER:
+        year = start_year if month >= 4 else start_year + 1
+        months.append({
+            "month": month,
+            "year": year,
+            "label": calendar.month_abbr[month],
+            "period_label": format_period_label(year, month),
+        })
+    return months
+
+
+def _is_future_month(year, month):
+    today = datetime.now(timezone.utc).date()
+    return (year, month) > (today.year, today.month)
+
+
+def _user_submission_site_ids(user_id):
+    rows = AccessMatrix.query.filter_by(
+        user_id=user_id,
+        entity_type="submission",
+        is_deleted=False,
+    ).all()
+
+    is_global = False
+    allowed_site_ids = set()
+    for row in rows:
+        if not (row.can_view or row.can_submit or row.can_create or row.can_edit):
+            continue
+        if row.scope_type == "global":
+            is_global = True
+            break
+        if row.scope_type == "site" and row.scope_site_id:
+            allowed_site_ids.add(row.scope_site_id)
+
+    if is_global:
+        return {
+            site.id
+            for site in Site.query.filter_by(is_deleted=False).all()
+        }
+    return allowed_site_ids
+
+
+def _published_forms_for_site(site_id):
+    forms = Form.query.filter(
+        Form.is_deleted == False,
+        Form.current_version_id.is_not(None),
+    ).order_by(Form.name.asc(), Form.id.asc()).all()
+
+    assigned = []
+    for form in forms:
+        metadata = _parse_form_metadata(form)
+        site_ids = metadata.get("sites") or []
+        if site_id in site_ids:
+            assigned.append((form, metadata))
+    return assigned
+
+
+def _field_payload(form_version_id):
+    fields = []
+    for field_version, field in get_form_version_fields(form_version_id):
+        fields.append({
+            "id": field.id,
+            "field_id": field.id,
+            "field_version_id": field_version.id,
+            "field_code": field.field_code,
+            "field_name": field_version.field_name,
+            "field_type": field_version.field_type,
+            "field_config": field_version.field_config or {},
+            "display_order": field.display_order,
+        })
+    return fields
+
+
+def _submission_values_payload(submission, fields):
+    if not submission:
+        return {}
+
+    field_id_to_code = {field["field_id"]: field["field_code"] for field in fields}
+    field_id_to_type = {field["field_id"]: field["field_type"] for field in fields}
+    values = {}
+    db_values = SubmissionValue.query.filter_by(submission_id=submission.id).all()
+
+    proofs = {
+        proof.field_id: proof
+        for proof in ProofDocument.query.filter_by(
+            submission_id=submission.id,
+            is_deleted=False,
+        ).all()
+    }
+
+    for value in db_values:
+        code = field_id_to_code.get(value.field_id)
+        if not code:
+            continue
+        if field_id_to_type.get(value.field_id) == "file":
+            proof = proofs.get(value.field_id)
+            values[code] = {
+                "storage_key": proof.storage_key,
+                "original_name": proof.original_name,
+            } if proof else ""
+        elif value.calculated_value is not None:
+            values[code] = float(value.calculated_value)
+        else:
+            values[code] = value.raw_value or ""
+    return values
+
+
+def _row_editability(period, submission):
+    if not period:
+        return {
+            "state": "disabled",
+            "editable": False,
+            "reason": "Reporting period is not open for this month.",
+        }
+    if _is_future_month(period.year, period.month):
+        return {
+            "state": "disabled",
+            "editable": False,
+            "reason": "Future months are not open for entry.",
+        }
+    if period.status not in EDITABLE_PERIOD_STATUSES:
+        return {
+            "state": "disabled",
+            "editable": False,
+            "reason": f"Reporting period is {period.status}.",
+        }
+    if not submission:
+        return {
+            "state": "editable",
+            "editable": True,
+            "reason": "Ready for draft entry.",
+        }
+    if submission.is_locked or submission.status == "Approved":
+        return {
+            "state": "read_only",
+            "editable": False,
+            "reason": "Approved or locked monthly sheet.",
+        }
+    if submission.status in EDITABLE_SUBMISSION_STATUSES:
+        return {
+            "state": "editable",
+            "editable": True,
+            "reason": "Monthly sheet is editable.",
+        }
+    return {
+        "state": "read_only",
+        "editable": False,
+        "reason": f"Monthly sheet is {submission.status}.",
+    }
+
+
+def get_annual_workbook_options(user_id):
+    site_ids = _user_submission_site_ids(user_id)
+    if not site_ids:
+        return {"sites": [], "forms_by_site": {}}
+
+    sites = Site.query.filter(
+        Site.id.in_(site_ids),
+        Site.is_deleted == False,
+    ).order_by(Site.name.asc(), Site.id.asc()).all()
+
+    forms_by_site = {}
+    for site in sites:
+        forms_by_site[str(site.id)] = [
+            {
+                "id": form.id,
+                "name": form.name,
+                "code": form.code,
+                "workflow_id": metadata.get("workflow_id"),
+            }
+            for form, metadata in _published_forms_for_site(site.id)
+        ]
+
+    return {
+        "sites": [
+            {
+                "id": site.id,
+                "name": site.name,
+                "code": site.code,
+            }
+            for site in sites
+        ],
+        "forms_by_site": forms_by_site,
+    }
+
+
+def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
+    try:
+        site_id = int(site_id)
+        form_id = int(form_id)
+        fy_start_year = int(fy_start_year)
+    except (TypeError, ValueError):
+        raise ValueError("A valid site, form, and financial year are required.")
+
+    if site_id not in _user_submission_site_ids(user_id):
+        raise ValueError("Permission denied: You cannot view submissions for this site.")
+
+    if not (
+        has_permission(user_id, "submission", "view", scope_site_id=site_id)
+        or has_permission(user_id, "submission", "submit", scope_site_id=site_id)
+    ):
+        raise ValueError("Permission denied: You cannot view submissions for this site.")
+
+    site = Site.query.filter_by(id=site_id, is_deleted=False).first()
+    if not site:
+        raise ValueError("Site not found.")
+
+    form = Form.query.filter_by(id=form_id, is_deleted=False).first()
+    if not form or not form.current_version_id:
+        raise ValueError("Published form not found.")
+
+    metadata = _parse_form_metadata(form)
+    if site_id not in (metadata.get("sites") or []):
+        raise ValueError("This form is not assigned to the selected site.")
+
+    fields = _field_payload(form.current_version_id)
+    months = _fy_months(fy_start_year)
+
+    periods = ReportingPeriod.query.filter(
+        ReportingPeriod.site_id == site_id,
+        ReportingPeriod.is_deleted == False,
+        tuple_(ReportingPeriod.year, ReportingPeriod.month).in_(
+            [(item["year"], item["month"]) for item in months]
+        ),
+    ).all()
+    period_by_key = {(period.year, period.month): period for period in periods}
+
+    submissions = Submission.query.filter(
+        Submission.site_id == site_id,
+        Submission.form_id == form_id,
+        Submission.is_deleted == False,
+        Submission.reporting_period_id.in_([period.id for period in periods] or [0]),
+    ).all()
+    submission_by_period = {
+        submission.reporting_period_id: submission
+        for submission in submissions
+    }
+
+    rows = []
+    for item in months:
+        period = period_by_key.get((item["year"], item["month"]))
+        submission = submission_by_period.get(period.id) if period else None
+        editability = _row_editability(period, submission)
+        rows.append({
+            **item,
+            "period_id": period.id if period else None,
+            "period_status": period.status if period else None,
+            "deadline": period.deadline.isoformat() if period and period.deadline else None,
+            "submission_id": submission.id if submission else None,
+            "submission_status": submission.status if submission else "Not Started",
+            "is_locked": bool(submission.is_locked) if submission else False,
+            "last_saved": (
+                (submission.updated_at or submission.created_at).isoformat()
+                if submission and (submission.updated_at or submission.created_at)
+                else None
+            ),
+            "editability": editability,
+            "values": _submission_values_payload(submission, fields),
+        })
+
+    return {
+        "financial_year": {
+            "start_year": fy_start_year,
+            "label": financial_year_label(fy_start_year),
+            "months": months,
+        },
+        "site": {
+            "id": site.id,
+            "name": site.name,
+            "code": site.code,
+        },
+        "selected_form": {
+            "id": form.id,
+            "name": form.name,
+            "code": form.code,
+            "workflow_id": metadata.get("workflow_id"),
+        },
+        "fields": fields,
+        "rows": rows,
+    }
 
 def get_approved_valsets_snapshot():
     """
@@ -143,10 +454,15 @@ def get_spoc_sheets_buckets(user_id):
 
         item = {
             "submission_id": sub.id,
+            "site_id": sub.site_id,
             "form_name": form.name,
+            "form_id": sub.form_id,
             "form_code": form.code,
             "site_name": site.name,
+            "reporting_period_id": sub.reporting_period_id,
             "period_label": period_label,
+            "year": period.year,
+            "month": period.month,
             "status": sub.status,
             "status_text": status_text,
             "last_saved": sub.updated_at or sub.created_at,
@@ -183,6 +499,8 @@ def get_spoc_sheets_buckets(user_id):
                         "site_name": site.name,
                         "reporting_period_id": period.id,
                         "period_label": period_label,
+                        "year": period.year,
+                        "month": period.month,
                         "deadline": period.deadline.isoformat() if period.deadline else None
                     })
                     

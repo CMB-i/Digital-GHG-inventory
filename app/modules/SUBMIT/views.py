@@ -1,6 +1,8 @@
+import json
+
 from flask import Blueprint, render_template, request, jsonify, send_file
 from app.common.decorators import require_permission
-from app.common.auth import current_user
+from app.common.auth import current_user, require_login
 from app.common.responses import success_response, error_response
 from app.database import db
 from app.common.file_storage import save_file, get_file_path
@@ -10,6 +12,8 @@ from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.FORMBLD.service import get_form_version_fields
 from app.modules.SUBMIT.service import (
     get_spoc_sheets_buckets,
+    get_annual_workbook_options,
+    compose_annual_workbook_data,
     create_draft_submission,
     autosave_submission_values,
     submit_submission,
@@ -28,6 +32,15 @@ def index():
     My Sheets landing dashboard page.
     """
     return render_template("modules/SUBMIT/my_sheets.html", module_code=MODULE_CODE)
+
+
+@bp.route("/annual")
+@require_login
+def annual_workbook():
+    """
+    Annual workbook shell for SPOC entry. Underlying data remains monthly.
+    """
+    return render_template("modules/SUBMIT/annual_workbook.html", module_code=MODULE_CODE)
 
 
 @bp.route("/submissions/<int:submission_id>")
@@ -71,8 +84,37 @@ def get_sheets():
     return jsonify(buckets)
 
 
+@bp.route("/api/annual-workbook/options", methods=["GET"])
+@require_login
+def annual_workbook_options():
+    """
+    Return sites and site-assigned forms available to the current SPOC.
+    """
+    user = current_user()
+    return jsonify(get_annual_workbook_options(user.id))
+
+
+@bp.route("/api/annual-workbook", methods=["GET"])
+@require_login
+def annual_workbook_data():
+    """
+    Compose a read-only annual workbook view over monthly submissions.
+    """
+    user = current_user()
+    try:
+        data = compose_annual_workbook_data(
+            user_id=user.id,
+            site_id=request.args.get("site_id"),
+            form_id=request.args.get("form_id"),
+            fy_start_year=request.args.get("fy"),
+        )
+        return jsonify(data)
+    except ValueError as e:
+        return error_response(str(e), 400)
+
+
 @bp.route("/api/submissions", methods=["POST"])
-@require_permission("submission", "create")
+@require_login
 def create_submission_endpoint():
     """
     Creates a new Draft submission.
@@ -165,6 +207,10 @@ def get_submission_details(submission_id):
     from app.modules.SITEMST.model import Site
     site = Site.query.get(submission.site_id)
     form = Form.query.get(submission.form_id)
+    try:
+        parsed_desc = json.loads(form.description or "{}") if form else {}
+    except Exception:
+        parsed_desc = {}
     from app.modules.SUBMIT.service import format_period_label
     period = ReportingPeriod.query.get(submission.reporting_period_id)
     period_label = format_period_label(period.year, period.month) if period else ""
@@ -191,7 +237,7 @@ def get_submission_details(submission_id):
 
 
 @bp.route("/api/submissions/<int:submission_id>/autosave", methods=["PUT"])
-@require_permission("submission", "edit")
+@require_login
 def autosave_endpoint(submission_id):
     """
     Saves form draft entries and computes calculated fields.
@@ -333,7 +379,7 @@ def upload_proof_endpoint(submission_id, field_code):
 
 
 @bp.route("/api/submissions/<int:submission_id>/submit", methods=["POST"])
-@require_permission("submission", "submit")
+@require_login
 def submit_endpoint(submission_id):
     """
     Submits a sheet for review.
