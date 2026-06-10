@@ -279,11 +279,12 @@
         <label class="text-xs font-semibold text-amber-900" for="permission_template">Permission template — starting point only</label>
         <select class="mt-2 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm" id="permission_template">
           <option value="">No template</option>
-          <option value="data_entry">Data Entry starter</option>
-          <option value="reviewer">Reviewer starter</option>
-          <option value="site_configuration">Site Configuration starter</option>
-          <option value="global_admin">Global Admin starter</option>
-          <option value="viewer_auditor">Viewer/Auditor starter</option>
+          <option value="spoc_data_entry">SPOC / Data Entry</option>
+          <option value="approver">Approver</option>
+          <option value="site_admin">Site Admin</option>
+          <option value="reports_viewer">Reports Viewer</option>
+          <option value="auditor_read_only">Auditor / Read Only</option>
+          <option value="system_admin">System Admin</option>
         </select>
         <p class="mt-2 text-xs text-amber-900">Template name grants nothing. These checkboxes are the actual source of truth.</p>
         <p class="mt-1 text-xs text-amber-900">Templates only prefill checkboxes. Access Matrix is the actual source of truth.</p>
@@ -338,20 +339,68 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/access_users.js') }}"></script>
 <script>
-  const templateFlags = {
-    data_entry: ["can_view", "can_create", "can_edit", "can_submit"],
-    reviewer: ["can_view", "can_approve", "can_reject", "can_reopen"],
-    site_configuration: ["can_view", "can_create", "can_edit", "can_delete"],
-    global_admin: ["can_view", "can_create", "can_edit", "can_delete", "can_submit", "can_approve", "can_reject", "can_reopen", "can_export", "can_manage_forms", "can_manage_users"],
-    viewer_auditor: ["can_view", "can_export"],
+  const allPermissionFlags = [
+    "can_view",
+    "can_create",
+    "can_edit",
+    "can_delete",
+    "can_submit",
+    "can_approve",
+    "can_reject",
+    "can_reopen",
+    "can_export",
+    "can_manage_forms",
+    "can_manage_users"
+  ];
+
+  const templateMatrix = {
+    spoc_data_entry: {
+      submission: ["can_view", "can_create", "can_edit", "can_submit"],
+      notification: ["can_view"]
+    },
+    approver: {
+      submission: ["can_view", "can_approve", "can_reject"],
+      notification: ["can_view"]
+    },
+    site_admin: {
+      user: ["can_view"],
+      site: ["can_view"],
+      form: ["can_view"],
+      workflow: ["can_view"],
+      period: ["can_view"],
+      submission: ["can_view"],
+      notification: ["can_view"]
+    },
+    reports_viewer: {
+      report: ["can_view"]
+    },
+    auditor_read_only: {
+      audit: ["can_view"],
+      report: ["can_view"],
+      submission: ["can_view"]
+    },
+    system_admin: {
+      user: ["can_view", "can_create", "can_edit", "can_delete", "can_manage_users"],
+      site: ["can_view", "can_create", "can_edit", "can_delete", "can_export"],
+      form: ["can_view", "can_create", "can_edit", "can_delete", "can_export", "can_manage_forms"],
+      workflow: ["can_view", "can_create", "can_edit", "can_delete", "can_manage_forms"],
+      submission: ["can_view", "can_create", "can_edit", "can_delete", "can_submit", "can_approve", "can_reject", "can_reopen", "can_export"],
+      report: ["can_view", "can_create", "can_edit", "can_delete", "can_export"],
+      period: ["can_view", "can_create", "can_edit", "can_delete", "can_reopen"],
+      value_set: ["can_view", "can_create", "can_edit", "can_delete", "can_approve", "can_reject", "can_manage_forms"],
+      formula: ["can_view", "can_create", "can_edit", "can_delete", "can_manage_forms"],
+      notification: ["can_view"],
+      audit: ["can_view", "can_export"]
+    }
   };
 
   const templateSelect = document.getElementById("permission_template");
   if (templateSelect) {
     templateSelect.addEventListener("change", () => {
-      const flags = templateFlags[templateSelect.value] || [];
+      const matrix = templateMatrix[templateSelect.value] || {};
       document.querySelectorAll("[data-permission-flag]").forEach((input) => {
-        input.checked = flags.includes(input.dataset.permissionFlag);
+        const entityPermissions = matrix[input.dataset.entityType] || [];
+        input.checked = entityPermissions.includes(input.dataset.permissionFlag);
       });
     });
   }

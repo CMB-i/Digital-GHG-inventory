@@ -8,9 +8,44 @@ document.addEventListener("DOMContentLoaded", function () {
   const badgeNotStarted = document.getElementById("badge-not-started");
   const badgeSubmitted = document.getElementById("badge-submitted");
 
+  const workbookCards = document.getElementById("annual-workbook-cards");
+  const workbookFyHelper = document.getElementById("workbook-fy-helper");
+
   const tableActionNeeded = document.getElementById("table-action-needed");
   const tableNotStarted = document.getElementById("table-not-started");
   const tableSubmitted = document.getElementById("table-submitted");
+
+  function defaultFyStartYear() {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    return month >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  }
+
+  function fyLabel(startYear) {
+    return `FY ${startYear}-${String(startYear + 1).slice(-2)}`;
+  }
+
+  function fyForMonth(year, month) {
+    return month >= 4 ? year : year - 1;
+  }
+
+  function workbookUrl(rowOrSite, formId = null, month = null) {
+    const params = new URLSearchParams();
+    params.set("site_id", rowOrSite.site_id || rowOrSite.id);
+    const targetFormId = formId || rowOrSite.form_id;
+    if (targetFormId) {
+      params.set("form_id", targetFormId);
+    }
+    const startYear = rowOrSite.year && rowOrSite.month
+      ? fyForMonth(rowOrSite.year, rowOrSite.month)
+      : defaultFyStartYear();
+    params.set("fy", startYear);
+    const targetMonth = month || rowOrSite.month;
+    if (targetMonth) {
+      params.set("month", targetMonth);
+    }
+    return `/module/SUBMIT/annual?${params.toString()}`;
+  }
 
   // Format date string to local readable string
   function formatDate(dateStr) {
@@ -41,12 +76,17 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Fetch all sheets for the dashboard
   function loadDashboardData() {
-    fetch("/module/SUBMIT/api/sheets")
-      .then((res) => {
+    Promise.all([
+      fetch("/module/SUBMIT/api/sheets").then((res) => {
         if (!res.ok) throw new Error("Failed to load environmental sheets.");
         return res.json();
+      }),
+      fetch("/module/SUBMIT/api/annual-workbook/options").then((res) => {
+        if (!res.ok) throw new Error("Failed to load annual workbook options.");
+        return res.json();
       })
-      .then((data) => {
+    ])
+      .then(([data, workbookOptions]) => {
         // 1. Calculate stats counts
         const actionNeededCount = data.action_needed.length;
         const notStartedCount = data.not_started.length;
@@ -67,6 +107,8 @@ document.addEventListener("DOMContentLoaded", function () {
         badgeNotStarted.textContent = `${notStartedCount} sheets`;
         badgeSubmitted.textContent = `${data.submitted.length} sheets`;
 
+        renderAnnualWorkbookCards(data, workbookOptions);
+
         // 2. Render Action Needed Queue
         renderActionNeededTable(data.action_needed);
 
@@ -82,7 +124,104 @@ document.addEventListener("DOMContentLoaded", function () {
         tableActionNeeded.innerHTML = errRow;
         tableNotStarted.innerHTML = errRow;
         tableSubmitted.innerHTML = errRow;
+        if (workbookCards) {
+          workbookCards.innerHTML = `
+            <div class="rounded-xl border border-rose-200 bg-rose-50 px-5 py-6 text-center text-sm font-semibold text-rose-700 md:col-span-2 xl:col-span-3">
+              Error loading annual workbooks: ${err.message}
+            </div>
+          `;
+        }
       });
+  }
+
+  function renderAnnualWorkbookCards(data, options) {
+    if (!workbookCards) return;
+    const currentFy = defaultFyStartYear();
+    if (workbookFyHelper) {
+      workbookFyHelper.textContent = fyLabel(currentFy);
+    }
+
+    const sites = options.sites || [];
+    const formsBySite = options.forms_by_site || {};
+    const siteSummaries = new Map();
+
+    sites.forEach((site) => {
+      const forms = formsBySite[String(site.id)] || [];
+      siteSummaries.set(String(site.id), {
+        id: site.id,
+        site_id: site.id,
+        name: site.name,
+        code: site.code,
+        assignedForms: forms.length,
+        firstFormId: forms[0] ? forms[0].id : null,
+        actionNeeded: 0,
+        underReview: 0,
+        approved: 0
+      });
+    });
+
+    (data.action_needed || []).forEach((row) => {
+      if (fyForMonth(row.year, row.month) !== currentFy) return;
+      const summary = siteSummaries.get(String(row.site_id));
+      if (summary) summary.actionNeeded += 1;
+    });
+
+    (data.submitted || []).forEach((row) => {
+      if (fyForMonth(row.year, row.month) !== currentFy) return;
+      const summary = siteSummaries.get(String(row.site_id));
+      if (!summary) return;
+      if (row.status === "Approved") {
+        summary.approved += 1;
+      } else if (["Submitted", "Under Review", "Resubmitted"].includes(row.status)) {
+        summary.underReview += 1;
+      }
+    });
+
+    const summaries = Array.from(siteSummaries.values()).filter((summary) => summary.assignedForms > 0);
+    if (!summaries.length) {
+      workbookCards.innerHTML = `
+        <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center md:col-span-2 xl:col-span-3">
+          <p class="text-sm font-bold text-slate-700">No annual workbook is available.</p>
+          <p class="mt-1 text-sm text-slate-500">Ask an admin to assign forms and open reporting periods for your site.</p>
+        </div>
+      `;
+      return;
+    }
+
+    workbookCards.innerHTML = summaries.map((summary) => `
+      <article class="flex min-h-[220px] flex-col justify-between rounded-2xl border border-indigo-100 bg-gradient-to-br from-white to-indigo-50/50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+        <div>
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h3 class="text-lg font-bold text-slate-900">${summary.name}</h3>
+              <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">${summary.code || "Site"}</p>
+            </div>
+            <span class="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-bold text-indigo-700">${fyLabel(currentFy)}</span>
+          </div>
+          <dl class="mt-5 grid grid-cols-2 gap-3 text-sm">
+            <div class="rounded-xl border border-slate-200 bg-white/80 p-3">
+              <dt class="text-xs font-semibold text-slate-400">Assigned forms</dt>
+              <dd class="mt-1 text-xl font-bold text-slate-900">${summary.assignedForms}</dd>
+            </div>
+            <div class="rounded-xl border border-amber-100 bg-amber-50/70 p-3">
+              <dt class="text-xs font-semibold text-amber-600">Action needed</dt>
+              <dd class="mt-1 text-xl font-bold text-amber-800">${summary.actionNeeded}</dd>
+            </div>
+            <div class="rounded-xl border border-blue-100 bg-blue-50/70 p-3">
+              <dt class="text-xs font-semibold text-blue-600">Under review</dt>
+              <dd class="mt-1 text-xl font-bold text-blue-800">${summary.underReview}</dd>
+            </div>
+            <div class="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
+              <dt class="text-xs font-semibold text-emerald-600">Completed</dt>
+              <dd class="mt-1 text-xl font-bold text-emerald-800">${summary.approved}</dd>
+            </div>
+          </dl>
+        </div>
+        <a href="${workbookUrl(summary, summary.firstFormId)}" class="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-bold text-white shadow-sm hover:bg-slate-800">
+          Open Workbook
+        </a>
+      </article>
+    `).join("");
   }
 
   function renderActionNeededTable(rows) {
@@ -118,8 +257,8 @@ document.addEventListener("DOMContentLoaded", function () {
         </td>
         <td class="px-6 py-4 text-xs text-slate-500">${formatDate(row.last_saved)}</td>
         <td class="px-6 py-4 text-right">
-          <a href="/module/SUBMIT/submissions/${row.submission_id}" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm hover:shadow transition-all">
-            Resume Entry
+          <a href="${workbookUrl(row)}" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm hover:shadow transition-all">
+            Open in Workbook
           </a>
         </td>
       `;
@@ -144,21 +283,18 @@ document.addEventListener("DOMContentLoaded", function () {
       const tr = document.createElement("tr");
       tr.className = "hover:bg-slate-50/50 transition-colors";
 
-      const btnStart = document.createElement("button");
-      btnStart.type = "button";
-      btnStart.className = "inline-flex items-center px-3 py-1.5 bg-white border border-slate-300 hover:border-indigo-500 hover:text-indigo-600 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition-all";
-      btnStart.textContent = "Start Entry";
-      btnStart.onclick = () => startSubmission(row.site_id, row.form_id, row.reporting_period_id, btnStart);
-
       tr.innerHTML = `
         <td class="px-6 py-4 font-bold text-slate-900">${row.form_name}</td>
         <td class="px-6 py-4 font-semibold text-slate-600">${row.site_name}</td>
         <td class="px-6 py-4 font-medium text-slate-700">${row.period_label}</td>
         <td class="px-6 py-4 text-xs font-medium text-slate-500">${formatShortDate(row.deadline)}</td>
-        <td class="px-6 py-4 text-right action-td"></td>
+        <td class="px-6 py-4 text-right">
+          <a href="${workbookUrl(row)}" class="inline-flex items-center px-3 py-1.5 bg-white border border-slate-300 hover:border-indigo-500 hover:text-indigo-600 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition-all">
+            Open in Workbook
+          </a>
+        </td>
       `;
-      
-      tr.querySelector(".action-td").appendChild(btnStart);
+
       tableNotStarted.appendChild(tr);
     });
   }
@@ -205,40 +341,6 @@ document.addEventListener("DOMContentLoaded", function () {
       `;
       tableSubmitted.appendChild(tr);
     });
-  }
-
-  // Call POST API to create draft
-  function startSubmission(siteId, formId, periodId, btn) {
-    // Set loading
-    const origText = btn.textContent;
-    btn.textContent = "Creating...";
-    btn.disabled = true;
-
-    fetch("/module/SUBMIT/api/submissions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        site_id: siteId,
-        form_id: formId,
-        reporting_period_id: periodId
-      })
-    })
-      .then(async (res) => {
-        const data = await res.json();
-        if (res.status === 409) {
-          // Duplicate exists, redirect directly
-          window.location.href = `/module/SUBMIT/submissions/${data.existing_id}`;
-          return;
-        }
-        if (!res.ok) throw new Error(data.error || "Failed to create draft sheet.");
-        // Redirect to new draft sheet
-        window.location.href = `/module/SUBMIT/submissions/${data.data.submission_id}`;
-      })
-      .catch((err) => {
-        alert(err.message);
-        btn.textContent = origText;
-        btn.disabled = false;
-      });
   }
 
   // Load on start

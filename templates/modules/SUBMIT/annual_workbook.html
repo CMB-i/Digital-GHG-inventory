@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Annual Workbook - Digital GHG Inventory{% endblock %}
+
+{% block content %}
+<div class="space-y-6 animate-fade-in">
+  <div class="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <div class="flex items-center gap-3 text-xs font-semibold text-slate-500">
+        <a href="/module/SUBMIT/" class="hover:text-indigo-600">My Sheets</a>
+        <span>/</span>
+        <span class="text-slate-700">Annual Workbook</span>
+      </div>
+      <h1 class="mt-3 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Annual Workbook</h1>
+      <p class="mt-2 max-w-3xl text-sm text-slate-500">
+        Enter site data across the April-March financial year. Each month still saves as an existing monthly sheet.
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-3">
+      <label class="text-sm font-semibold text-slate-600" for="workbook-site">Site</label>
+      <select id="workbook-site" class="h-10 min-w-[220px] rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"></select>
+      <label class="text-sm font-semibold text-slate-600" for="workbook-fy">Financial year</label>
+      <select id="workbook-fy" class="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"></select>
+    </div>
+  </div>
+
+  <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="workbook-site-name" class="text-lg font-bold text-slate-900">Select a site</span>
+          <span id="workbook-fy-label" class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">FY</span>
+          <span id="workbook-selected-status" class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">No month selected</span>
+        </div>
+        <p id="workbook-last-saved" class="mt-1 text-sm text-slate-500">Choose a site and form to begin.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="btn-save-row" type="button" class="inline-flex h-10 items-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+          Save draft
+        </button>
+        <button id="btn-submit-row" type="button" class="inline-flex h-10 items-center rounded-lg bg-indigo-600 px-4 text-sm font-bold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">
+          Submit selected monthly sheet
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <div id="workbook-alert" class="hidden rounded-xl border p-4 text-sm font-semibold"></div>
+
+  <section class="rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 class="text-base font-bold text-slate-900">Forms assigned to this site</h2>
+          <p class="mt-1 text-sm text-slate-500">Tabs are driven by published form configuration and site assignment.</p>
+        </div>
+        <div id="form-tabs" class="flex flex-wrap gap-2"></div>
+      </div>
+    </div>
+
+    <div id="workbook-empty" class="hidden px-6 py-14 text-center">
+      <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      </div>
+      <h3 id="workbook-empty-title" class="mt-4 text-sm font-bold text-slate-900">No workbook data</h3>
+      <p id="workbook-empty-body" class="mt-2 text-sm text-slate-500">Choose a site with assigned published forms.</p>
+    </div>
+
+    <div id="workbook-table-wrap" class="hidden overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-200">
+        <thead id="workbook-head" class="bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500"></thead>
+        <tbody id="workbook-body" class="divide-y divide-slate-100 text-sm text-slate-700"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5">
+    <h2 class="text-sm font-bold text-slate-800">Calculation Results</h2>
+    <p class="mt-1 text-sm text-slate-500">
+      Calculation Results will be available after package/cell-state implementation.
+    </p>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/annual_workbook.js') }}"></script>
+{% endblock %}
