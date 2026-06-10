@@ -1,6 +1,7 @@
 document.addEventListener("DOMContentLoaded", function () {
   let formsList = [];
   let currentFields = [];
+  let currentSections = [];
   let availableValueSets = [];
   let availableFormulas = [];
   let availableWorkflows = [];
@@ -30,6 +31,8 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnPublishForm = document.getElementById("btn-publish-form");
   const publishErrors = document.getElementById("publish-errors");
   const publishErrorsList = document.getElementById("publish-errors-list");
+  const btnAddSection = document.getElementById("btn-add-section");
+  const sectionsList = document.getElementById("sections-list");
 
   // Inspector elements
   const inspectorPanel = document.getElementById("inspector-panel");
@@ -38,6 +41,8 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnDeleteField = document.getElementById("btn-delete-field");
   const btnMoveUp = document.getElementById("btn-move-up");
   const btnMoveDown = document.getElementById("btn-move-down");
+  const propSection = document.getElementById("prop-section");
+  const propFrequency = document.getElementById("prop-frequency");
 
   // Step 1 Details elements
   const formDetailsSubmit = document.getElementById("form-details-submit");
@@ -83,6 +88,10 @@ document.addEventListener("DOMContentLoaded", function () {
       toast.classList.add("translate-y-2", "opacity-0");
       setTimeout(() => toast.remove(), 300);
     }, 3000);
+  }
+
+  function normalizeCode(value) {
+    return (value || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   }
 
   // --- View Switching ---
@@ -402,6 +411,7 @@ document.addEventListener("DOMContentLoaded", function () {
       .then(data => {
         selectedVersionId = data.version.id;
         currentFields = data.fields || [];
+        currentSections = data.sections || [];
         availableValueSets = data.available_value_sets || [];
         availableFormulas = data.available_formulas || [];
         isUnsaved = false;
@@ -430,6 +440,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
         // Populate dropdown options inside inspectors
         populateInspectorDropdowns();
+        renderSections();
 
         // Render Canvas Preview
         renderWorkspace();
@@ -470,6 +481,98 @@ document.addEventListener("DOMContentLoaded", function () {
       opt.textContent = `${f.name} (${f.code})`;
       fSelect.appendChild(opt);
     });
+
+    populateSectionDropdown();
+  }
+
+  function populateSectionDropdown() {
+    if (!propSection) return;
+    const selected = propSection.value;
+    propSection.innerHTML = '<option value="">No section</option>';
+    currentSections
+      .slice()
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+      .forEach(section => {
+        const opt = document.createElement("option");
+        opt.value = section.code;
+        opt.textContent = `${section.name} (${section.layout_type || "monthly_table"})`;
+        propSection.appendChild(opt);
+      });
+    propSection.value = selected;
+  }
+
+  function renderSections() {
+    if (!sectionsList) return;
+    if (currentSections.length === 0) {
+      sectionsList.innerHTML = '<p class="text-[10px] text-slate-400 italic">No sections configured yet.</p>';
+      populateSectionDropdown();
+      return;
+    }
+
+    sectionsList.innerHTML = currentSections
+      .slice()
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+      .map(section => `
+        <div class="section-row rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2" data-section-code="${section.code}">
+          <div class="flex items-center justify-between gap-2">
+            <input
+              type="text"
+              class="section-name block w-full rounded-md border-slate-300 text-xs px-2 py-1.5 border font-semibold"
+              value="${section.name || ""}"
+              placeholder="Section name"
+            >
+            <button type="button" class="section-delete text-[10px] font-bold text-rose-600 hover:underline">Remove</button>
+          </div>
+          <input
+            type="text"
+            class="section-code block w-full rounded-md border-slate-300 text-[11px] px-2 py-1.5 border font-mono"
+            value="${section.code || ""}"
+            placeholder="section_code"
+          >
+          <select class="section-layout block w-full rounded-md border-slate-300 text-[11px] px-2 py-1.5 border bg-white">
+            <option value="monthly_table" ${section.layout_type === "monthly_table" ? "selected" : ""}>Monthly table</option>
+            <option value="annual_table" ${section.layout_type === "annual_table" ? "selected" : ""}>Annual table</option>
+            <option value="reference_table" ${section.layout_type === "reference_table" ? "selected" : ""}>Reference table</option>
+          </select>
+          <textarea
+            class="section-description block w-full rounded-md border-slate-300 text-[11px] px-2 py-1.5 border"
+            rows="2"
+            placeholder="Optional section description"
+          >${section.description || ""}</textarea>
+        </div>
+      `)
+      .join("");
+    populateSectionDropdown();
+  }
+
+  function syncSectionsFromDom() {
+    if (!sectionsList) return;
+    const previousCodeMap = new Map(currentSections.map(section => [section.code, section]));
+    const nextSections = [];
+    sectionsList.querySelectorAll(".section-row").forEach((row, idx) => {
+      const originalCode = row.dataset.sectionCode;
+      const codeInput = row.querySelector(".section-code");
+      const code = normalizeCode(codeInput.value || originalCode || `section_${idx + 1}`);
+      const previous = previousCodeMap.get(originalCode) || {};
+      nextSections.push({
+        id: previous.id || null,
+        name: row.querySelector(".section-name").value.trim() || `Section ${idx + 1}`,
+        code: code,
+        layout_type: row.querySelector(".section-layout").value || "monthly_table",
+        display_order: idx + 1,
+        description: row.querySelector(".section-description").value.trim()
+      });
+      codeInput.value = code;
+      row.dataset.sectionCode = code;
+      currentFields.forEach(field => {
+        if (field.section_code === originalCode) {
+          field.section_code = code;
+          field.section_id = previous.id || null;
+        }
+      });
+    });
+    currentSections = nextSections;
+    populateSectionDropdown();
   }
 
   function updateSaveStatusText() {
@@ -531,6 +634,8 @@ document.addEventListener("DOMContentLoaded", function () {
     // Common fields
     document.getElementById("prop-code").value = field.field_code;
     document.getElementById("prop-name").value = field.field_name;
+    propSection.value = field.section_code || "";
+    propFrequency.value = field.frequency || "monthly";
     document.getElementById("prop-required").checked = field.field_config.is_required || false;
     document.getElementById("prop-remarks-req").checked = field.field_config.remarks_required || false;
     document.getElementById("prop-proof-req").checked = field.field_config.proof_required || false;
@@ -598,6 +703,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     field.field_code = newCode;
     field.field_name = document.getElementById("prop-name").value.trim();
+    field.section_code = propSection.value || "";
+    const section = currentSections.find(item => item.code === field.section_code);
+    field.section_id = section && section.id ? section.id : null;
+    field.frequency = propFrequency.value || "monthly";
     field.field_config.is_required = document.getElementById("prop-required").checked;
     field.field_config.remarks_required = document.getElementById("prop-remarks-req").checked;
     field.field_config.proof_required = document.getElementById("prop-proof-req").checked;
@@ -679,6 +788,9 @@ document.addEventListener("DOMContentLoaded", function () {
         field_name: name,
         field_type: type,
         display_order: displayOrder,
+        section_id: null,
+        section_code: "",
+        frequency: "monthly",
         field_config: {
           is_required: false,
           help_text: ""
@@ -711,6 +823,58 @@ document.addEventListener("DOMContentLoaded", function () {
     renderWorkspace();
     showToast("Field deleted.");
   };
+
+  if (btnAddSection) {
+    btnAddSection.onclick = function () {
+      const displayOrder = currentSections.length + 1;
+      const code = `section_${displayOrder}`;
+      currentSections.push({
+        id: null,
+        name: `Section ${displayOrder}`,
+        code: code,
+        layout_type: "monthly_table",
+        display_order: displayOrder,
+        description: ""
+      });
+      isUnsaved = true;
+      updateSaveStatusText();
+      renderSections();
+    };
+  }
+
+  if (sectionsList) {
+    sectionsList.addEventListener("input", function (e) {
+      if (!e.target.closest(".section-row")) return;
+      syncSectionsFromDom();
+      isUnsaved = true;
+      updateSaveStatusText();
+    });
+    sectionsList.addEventListener("change", function (e) {
+      if (!e.target.closest(".section-row")) return;
+      syncSectionsFromDom();
+      isUnsaved = true;
+      updateSaveStatusText();
+    });
+    sectionsList.addEventListener("click", function (e) {
+      const button = e.target.closest(".section-delete");
+      if (!button) return;
+      const row = button.closest(".section-row");
+      const code = row.dataset.sectionCode;
+      currentSections = currentSections.filter(section => section.code !== code);
+      currentFields.forEach(field => {
+        if (field.section_code === code) {
+          field.section_code = "";
+          field.section_id = null;
+        }
+      });
+      isUnsaved = true;
+      updateSaveStatusText();
+      renderSections();
+      if (selectedFieldCode) {
+        openInspector(selectedFieldCode);
+      }
+    });
+  }
 
   // Move Field Up
   btnMoveUp.onclick = function () {
@@ -759,7 +923,7 @@ document.addEventListener("DOMContentLoaded", function () {
     fetch(`/module/FORMBLD/api/version/${selectedVersionId}/fields`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields: currentFields })
+      body: JSON.stringify({ fields: currentFields, sections: currentSections })
     })
       .then(res => res.json())
       .then(resData => {
