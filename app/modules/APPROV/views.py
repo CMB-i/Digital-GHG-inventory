@@ -4,7 +4,7 @@ from app.common.auth import current_user, require_login
 from app.common.permissions import has_permission
 from app.common.responses import success_response, error_response
 from app.modules.ACCESS.model import AccessMatrix
-from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument
+from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument, SubmissionPackage
 from app.modules.FORMBLD.service import get_form_version_fields
 from app.modules.APPROV.model import ApprovalAction, Issue
 from app.modules.APPROV.service import (
@@ -14,7 +14,8 @@ from app.modules.APPROV.service import (
     request_changes_submission,
     reject_submission,
     raise_issue,
-    resolve_issue
+    resolve_issue,
+    get_package_summary_for_reviewer
 )
 from app.modules.SUBMIT.service import format_period_label
 
@@ -78,6 +79,78 @@ def view_submission(submission_id):
         module_code=MODULE_CODE,
         submission_id=submission.id
     )
+
+@bp.route("/packages/<int:package_id>")
+@require_login
+def view_package(package_id):
+    package = SubmissionPackage.query.get_or_404(package_id)
+    user = current_user()
+    if not get_package_summary_for_reviewer(package.id, user.id):
+        return _page_no_access()
+    return render_template(
+        "modules/APPROV/package_summary.html",
+        module_code=MODULE_CODE,
+        package_id=package.id
+    )
+
+@bp.route("/api/packages/<int:package_id>")
+@require_login
+def get_package_summary(package_id):
+    package = SubmissionPackage.query.get(package_id)
+    if not package or package.is_deleted:
+        return error_response("Package not found.", 404)
+
+    user = current_user()
+    queue_summary = get_package_summary_for_reviewer(package.id, user.id)
+    if not queue_summary:
+        return error_response("Permission denied.", 403)
+
+    from app.modules.FORMBLD.model import Form
+    from app.modules.SITEMST.model import Site
+    from app.modules.PERIOD.model import ReportingPeriod
+    from app.modules.USRMGMT.model import User
+
+    site = Site.query.get(package.site_id)
+    period = ReportingPeriod.query.get(package.period_id)
+    submitter = User.query.get(package.submitted_by) if package.submitted_by else None
+    submissions = Submission.query.filter_by(package_id=package.id, is_deleted=False).all()
+    forms = {
+        form.id: form
+        for form in Form.query.filter(Form.id.in_([sub.form_id for sub in submissions] or [0])).all()
+    }
+
+    submissions_data = []
+    for sub in submissions:
+        submitter = User.query.get(sub.submitted_by) if sub.submitted_by else None
+        submissions_data.append({
+            "submission_id": sub.id,
+            "form_id": sub.form_id,
+            "form_name": forms[sub.form_id].name if sub.form_id in forms else "Unknown Form",
+            "status": sub.status,
+            "current_level": sub.current_level,
+            "submitted_by": submitter.full_name if submitter else "System",
+            "submitted_at": sub.submitted_at,
+        })
+
+    return success_response(data={
+        "package": {
+            "package_id": package.id,
+            "package_type": package.package_type,
+            "status": package.status,
+            "site_id": package.site_id,
+            "site_name": site.name if site else "Unknown Site",
+            "period_id": package.period_id,
+            "period_label": format_period_label(period.year, period.month) if period else "Unknown Period",
+            "month": period.month if period else None,
+            "year": period.year if period else None,
+            "current_level": package.current_level,
+            "submitted_by": submitter.full_name if submitter else "System",
+            "submitted_at": package.submitted_at,
+            "included_submission_count": len(submissions),
+            "queue_summary": queue_summary,
+        },
+        "submissions": submissions_data,
+    })
 
 @bp.route("/api/submissions/<int:submission_id>")
 @require_login

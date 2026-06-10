@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Workbook Package Summary - Digital GHG Inventory{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="flex items-center justify-between border-b border-slate-200 pb-5">
+    <div>
+      <a href="/module/APPROV/" class="text-xs font-bold text-slate-500 hover:text-indigo-600">← Back to review queue</a>
+      <h1 class="mt-2 text-2xl font-bold tracking-tight text-slate-900">Workbook Package Summary</h1>
+      <p class="mt-1 text-sm text-slate-500">Package-level review UI will be added in a later phase. This page confirms package grouping and included sheets.</p>
+    </div>
+  </div>
+
+  <div id="package-summary" class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+    <p class="text-sm text-slate-500">Loading package summary...</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.PACKAGE_ID = {{ package_id }};
+</script>
+<script src="{{ url_for('static', filename='js/approver_queue.js') }}"></script>
+{% endblock %}
