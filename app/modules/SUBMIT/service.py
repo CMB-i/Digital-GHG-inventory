@@ -33,6 +33,55 @@ class SubmissionValidationError(ValueError):
 FY_MONTH_ORDER = (4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3)
 EDITABLE_PERIOD_STATUSES = ("OPEN", "REOPENED")
 EDITABLE_SUBMISSION_STATUSES = ("Draft", "Changes Requested")
+CELL_STATE_BLANK_EDITABLE = "blank_editable"
+CELL_STATE_DRAFT_FILLED = "draft_filled"
+CELL_STATE_SUBMITTED = "submitted"
+CELL_STATE_APPROVED_LOCKED = "approved_locked"
+CELL_STATE_CHANGES_REQUESTED = "changes_requested"
+CELL_STATE_LATE_ENTRY = "late_entry"
+ALLOWED_CELL_STATES = {
+    CELL_STATE_BLANK_EDITABLE,
+    CELL_STATE_DRAFT_FILLED,
+    CELL_STATE_SUBMITTED,
+    CELL_STATE_APPROVED_LOCKED,
+    CELL_STATE_CHANGES_REQUESTED,
+    CELL_STATE_LATE_ENTRY,
+}
+
+
+def submission_value_has_content(value):
+    return bool(
+        value
+        and (
+            (value.raw_value is not None and value.raw_value != "")
+            or value.calculated_value is not None
+        )
+    )
+
+
+def set_submission_value_state(value, state):
+    if state not in ALLOWED_CELL_STATES:
+        raise ValueError(f"Unsupported cell state: {state}")
+    value.cell_state = state
+    value.is_locked = state == CELL_STATE_APPROVED_LOCKED
+
+
+def sync_submission_values_for_status(submission, user_id=None):
+    values = SubmissionValue.query.filter_by(submission_id=submission.id).all()
+    for value in values:
+        has_content = submission_value_has_content(value)
+        if submission.status == "Approved" and has_content:
+            set_submission_value_state(value, CELL_STATE_APPROVED_LOCKED)
+        elif submission.status in ("Submitted", "Resubmitted", "Under Review") and has_content:
+            set_submission_value_state(value, CELL_STATE_SUBMITTED)
+        elif submission.status == "Changes Requested" and has_content:
+            set_submission_value_state(value, CELL_STATE_CHANGES_REQUESTED)
+        elif has_content:
+            set_submission_value_state(value, CELL_STATE_DRAFT_FILLED)
+        else:
+            set_submission_value_state(value, CELL_STATE_BLANK_EDITABLE)
+        if user_id:
+            value.updated_by = user_id
 
 
 def format_period_label(year, month):
@@ -177,40 +226,28 @@ def _row_editability(period, submission):
             "editable": False,
             "reason": "Reporting period is not open for this month.",
         }
-    if _is_future_month(period.year, period.month):
-        return {
-            "state": "disabled",
-            "editable": False,
-            "reason": "Future months are not open for entry.",
-        }
-    if period.status not in EDITABLE_PERIOD_STATUSES:
-        return {
-            "state": "disabled",
-            "editable": False,
-            "reason": f"Reporting period is {period.status}.",
-        }
-    if not submission:
-        return {
-            "state": "editable",
-            "editable": True,
-            "reason": "Ready for draft entry.",
-        }
-    if submission.is_locked or submission.status == "Approved":
+    if submission and (submission.is_locked or submission.status == "Approved"):
         return {
             "state": "read_only",
             "editable": False,
             "reason": "Approved or locked monthly sheet.",
         }
-    if submission.status in EDITABLE_SUBMISSION_STATUSES:
+    if period.status in EDITABLE_PERIOD_STATUSES:
         return {
             "state": "editable",
             "editable": True,
-            "reason": "Monthly sheet is editable.",
+            "reason": "Reporting period is open for entry.",
+        }
+    if submission and submission.status in EDITABLE_SUBMISSION_STATUSES:
+        return {
+            "state": "editable",
+            "editable": True,
+            "reason": "Monthly sheet was sent back for changes.",
         }
     return {
-        "state": "read_only",
+        "state": "disabled",
         "editable": False,
-        "reason": f"Monthly sheet is {submission.status}.",
+        "reason": f"Reporting period is {period.status}.",
     }
 
 
@@ -647,6 +684,10 @@ def autosave_submission_values(submission_id, values_dict, user_id):
             
         val_row.raw_value = str(raw_value) if raw_value is not None and raw_value != "" else None
         val_row.calculated_value = None
+        set_submission_value_state(
+            val_row,
+            CELL_STATE_DRAFT_FILLED if val_row.raw_value is not None else CELL_STATE_BLANK_EDITABLE,
+        )
         val_row.updated_by = user_id
         
     db.session.flush()
@@ -709,6 +750,7 @@ def autosave_submission_values(submission_id, values_dict, user_id):
                     
                 calc_row.raw_value = None
                 calc_row.calculated_value = result
+                set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
                 calc_row.formula_version_id = formula_version.id
                 calc_row.formula_eval_at = datetime.now(timezone.utc)
                 
@@ -881,6 +923,7 @@ def submit_submission(submission_id, user_id):
     submission.submitted_at = datetime.now(timezone.utc)
     submission.last_status_changed_at = datetime.now(timezone.utc)
     submission.updated_by = user_id
+    sync_submission_values_for_status(submission, user_id)
     
     # Audit log
     from app.modules.AUDITL.service import log_audit

@@ -13,6 +13,7 @@ class Submission(FullLifecycleMixin, db.Model):
     form_version_id = db.Column(db.Integer, db.ForeignKey("form_versions.id"), nullable=False)
     reporting_period_id = db.Column(db.Integer, db.ForeignKey("reporting_periods.id"), nullable=False)
     workflow_version_id = db.Column(db.Integer, db.ForeignKey("workflow_versions.id"), nullable=False)
+    package_id = db.Column(db.Integer, db.ForeignKey("submission_packages.id"), nullable=True)
     status = db.Column(db.String(30), nullable=False, default="Draft", server_default="Draft")
     submitted_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     submitted_at = db.Column(db.DateTime(timezone=True), nullable=True)
@@ -35,8 +36,31 @@ class Submission(FullLifecycleMixin, db.Model):
             postgresql_where=db.text("is_deleted = false"),
         ),
         db.Index("idx_submissions_period", "reporting_period_id"),
+        db.Index("idx_submissions_package", "package_id"),
         db.Index("idx_submissions_site_form", "site_id", "form_id"),
         db.Index("idx_submissions_status", "status"),
+    )
+
+
+class SubmissionPackage(FullLifecycleMixin, db.Model):
+    __tablename__ = "submission_packages"
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id"), nullable=False)
+    period_id = db.Column(db.Integer, db.ForeignKey("reporting_periods.id"), nullable=False)
+    package_type = db.Column(db.String(50), nullable=False, default="monthly_workbook", server_default="monthly_workbook")
+    status = db.Column(db.String(30), nullable=False, default="Draft", server_default="Draft")
+    submitted_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    submitted_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    current_level = db.Column(db.Integer, nullable=True)
+    final_approved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    final_approved_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    metadata_json = db.Column(JSONB, nullable=True)
+
+    __table_args__ = (
+        db.Index("idx_submission_packages_site_period", "site_id", "period_id"),
+        db.Index("idx_submission_packages_status", "status"),
     )
 
 
@@ -53,10 +77,29 @@ class SubmissionValue(LifecycleMixin, db.Model):
     value_set_version_id = db.Column(db.Integer, db.ForeignKey("value_set_versions.id"), nullable=True)
     formula_inputs_snapshot = db.Column(JSONB, nullable=True)
     formula_eval_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    cell_state = db.Column(db.String(30), nullable=False, default="blank_editable", server_default="blank_editable")
+    is_locked = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
+    remark = db.Column(db.Text, nullable=True)
 
     __table_args__ = (
         db.UniqueConstraint("submission_id", "field_id", name="uq_submission_value"),
         db.Index("idx_sub_values_submission", "submission_id"),
+        db.Index("idx_submission_values_cell_state", "cell_state"),
+    )
+
+
+class SubmissionValueIssue(FullLifecycleMixin, db.Model):
+    __tablename__ = "submission_value_issues"
+
+    id = db.Column(db.Integer, primary_key=True)
+    submission_value_id = db.Column(db.Integer, db.ForeignKey("submission_values.id"), nullable=False)
+    raised_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    issue_text = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(30), nullable=False, default="Open", server_default="Open")
+
+    __table_args__ = (
+        db.Index("idx_submission_value_issues_value", "submission_value_id"),
+        db.Index("idx_submission_value_issues_status", "status"),
     )
 
 

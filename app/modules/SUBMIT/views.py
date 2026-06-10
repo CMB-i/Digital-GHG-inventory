@@ -17,6 +17,8 @@ from app.modules.SUBMIT.service import (
     create_draft_submission,
     autosave_submission_values,
     submit_submission,
+    set_submission_value_state,
+    CELL_STATE_DRAFT_FILLED,
     DuplicateSubmissionError,
     SubmissionValidationError
 )
@@ -362,6 +364,7 @@ def upload_proof_endpoint(submission_id, field_code):
             
         val_row.raw_value = saved_info["storage_key"]
         val_row.calculated_value = None
+        set_submission_value_state(val_row, CELL_STATE_DRAFT_FILLED)
         val_row.updated_by = user.id
         submission.updated_by = user.id
         

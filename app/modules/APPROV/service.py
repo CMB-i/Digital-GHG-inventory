@@ -10,7 +10,7 @@ from app.modules.WFLWBLD.service import (
 )
 from app.modules.APPROV.model import ApprovalAction, Issue
 from app.modules.USRMGMT.model import User
-from app.modules.SUBMIT.service import format_period_label
+from app.modules.SUBMIT.service import format_period_label, sync_submission_values_for_status
 
 REVIEWABLE_STATUSES = ("Submitted", "Resubmitted", "Under Review")
 SUPPORTED_APPROVAL_MODES = ("ANY_ONE", "SEQUENTIAL")
@@ -309,6 +309,7 @@ def approve_submission(submission_id, user_id, comment=None):
             submission.is_locked = True
             submission.last_status_changed_at = _utc_now()
             submission.updated_by = user_id
+            sync_submission_values_for_status(submission, user_id)
 
             # Log final approval in audit trail
             log_audit(
@@ -384,6 +385,7 @@ def request_changes_submission(submission_id, user_id, comment):
     submission.status = "Changes Requested"
     submission.last_status_changed_at = _utc_now()
     submission.updated_by = user_id
+    sync_submission_values_for_status(submission, user_id)
 
     # Audit log
     from app.modules.AUDITL.service import log_audit
