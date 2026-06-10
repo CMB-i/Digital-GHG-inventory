@@ -1,3 +1,5 @@
+import json
+
 from flask import Blueprint, render_template, request, jsonify, send_file
 from app.common.decorators import require_permission
 from app.common.auth import current_user, require_login
@@ -205,6 +207,10 @@ def get_submission_details(submission_id):
     from app.modules.SITEMST.model import Site
     site = Site.query.get(submission.site_id)
     form = Form.query.get(submission.form_id)
+    try:
+        parsed_desc = json.loads(form.description or "{}") if form else {}
+    except Exception:
+        parsed_desc = {}
     from app.modules.SUBMIT.service import format_period_label
     period = ReportingPeriod.query.get(submission.reporting_period_id)
     period_label = format_period_label(period.year, period.month) if period else ""
