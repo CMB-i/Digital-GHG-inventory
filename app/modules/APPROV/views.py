@@ -15,7 +15,8 @@ from app.modules.APPROV.service import (
     reject_submission,
     raise_issue,
     resolve_issue,
-    get_package_summary_for_reviewer
+    get_package_summary_for_reviewer,
+    compose_package_review_data,
 )
 from app.modules.SUBMIT.service import format_period_label
 
@@ -88,10 +89,24 @@ def view_package(package_id):
     if not get_package_summary_for_reviewer(package.id, user.id):
         return _page_no_access()
     return render_template(
-        "modules/APPROV/package_summary.html",
+        "modules/APPROV/package_review.html",
         module_code=MODULE_CODE,
         package_id=package.id
     )
+
+@bp.route("/api/packages/<int:package_id>/review")
+@require_login
+def get_package_review(package_id):
+    package = SubmissionPackage.query.get(package_id)
+    if not package or package.is_deleted:
+        return error_response("Package not found.", 404)
+
+    user = current_user()
+    review_data = compose_package_review_data(package.id, user.id)
+    if not review_data:
+        return error_response("Permission denied.", 403)
+
+    return success_response(data=review_data)
 
 @bp.route("/api/packages/<int:package_id>")
 @require_login

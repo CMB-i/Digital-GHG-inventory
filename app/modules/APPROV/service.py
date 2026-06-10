@@ -10,7 +10,13 @@ from app.modules.WFLWBLD.service import (
 )
 from app.modules.APPROV.model import ApprovalAction, Issue
 from app.modules.USRMGMT.model import User
-from app.modules.SUBMIT.service import format_period_label, sync_submission_values_for_status
+from app.modules.FORMBLD.service import get_form_version_fields
+from app.modules.SUBMIT.service import (
+    format_period_label,
+    sync_submission_values_for_status,
+    submission_proofs_payload,
+    submission_values_review_payload,
+)
 
 REVIEWABLE_STATUSES = ("Submitted", "Resubmitted", "Under Review")
 SUPPORTED_APPROVAL_MODES = ("ANY_ONE", "SEQUENTIAL")
@@ -215,6 +221,88 @@ def get_package_summary_for_reviewer(package_id, user_id):
         return None
 
     return _package_queue_item(package.id, eligible)
+
+
+def _fields_review_payload(form_version_id):
+    fields = []
+    for field_version, field in get_form_version_fields(form_version_id):
+        fields.append({
+            "field_id": field.id,
+            "field_code": field.field_code,
+            "field_name": field_version.field_name,
+            "field_type": field_version.field_type,
+            "field_config": field_version.field_config or {},
+            "display_order": field.display_order,
+        })
+    return fields
+
+
+def compose_package_review_data(package_id, user_id):
+    queue_summary = get_package_summary_for_reviewer(package_id, user_id)
+    if not queue_summary:
+        return None
+
+    package = SubmissionPackage.query.get(package_id)
+    if not package or package.is_deleted:
+        return None
+
+    from app.modules.FORMBLD.model import Form
+    from app.modules.SITEMST.model import Site
+    from app.modules.PERIOD.model import ReportingPeriod
+
+    site = Site.query.get(package.site_id)
+    period = ReportingPeriod.query.get(package.period_id)
+    submitter = User.query.get(package.submitted_by) if package.submitted_by else None
+
+    submissions = Submission.query.filter_by(package_id=package.id, is_deleted=False).all()
+    form_ids = [submission.form_id for submission in submissions]
+    forms_by_id = {
+        form.id: form
+        for form in Form.query.filter(Form.id.in_(form_ids or [0])).all()
+    }
+
+    sheets = []
+    for submission in submissions:
+        form = forms_by_id.get(submission.form_id)
+        fields = _fields_review_payload(submission.form_version_id)
+        sub_submitter = User.query.get(submission.submitted_by) if submission.submitted_by else None
+        sheets.append({
+            "submission_id": submission.id,
+            "form_id": submission.form_id,
+            "form_name": form.name if form else "Unknown Form",
+            "status": submission.status,
+            "current_level": submission.current_level,
+            "submitted_by": sub_submitter.full_name if sub_submitter else "System",
+            "submitted_at": submission.submitted_at,
+            "fields": fields,
+            "values": submission_values_review_payload(submission, fields),
+            "proofs": submission_proofs_payload(submission),
+            "_sort_name": form.name if form else "",
+        })
+
+    sheets.sort(key=lambda sheet: sheet["_sort_name"].lower())
+    for sheet in sheets:
+        sheet.pop("_sort_name", None)
+
+    return {
+        "package": {
+            "package_id": package.id,
+            "package_type": package.package_type,
+            "status": package.status,
+            "site_id": package.site_id,
+            "site_name": site.name if site else "Unknown Site",
+            "period_id": package.period_id,
+            "period_label": format_period_label(period.year, period.month) if period else "Unknown Period",
+            "month": period.month if period else None,
+            "year": period.year if period else None,
+            "current_level": package.current_level,
+            "current_level_name": queue_summary.get("current_level_name"),
+            "submitted_by": submitter.full_name if submitter else "System",
+            "submitted_at": package.submitted_at,
+            "included_submission_count": len(sheets),
+        },
+        "sheets": sheets,
+    }
 
 
 def get_approver_queue(user_id):

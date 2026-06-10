@@ -23,11 +23,6 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function loadQueueData() {
-    if (window.PACKAGE_ID) {
-      loadPackageSummary(window.PACKAGE_ID);
-      return;
-    }
-
     fetch("/module/APPROV/api/queue")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load approval queues.");
@@ -54,71 +49,6 @@ document.addEventListener("DOMContentLoaded", function () {
         const errRow = `<tr><td colspan="7" class="px-6 py-6 text-center text-rose-500 font-bold">Error loading queue: ${err.message}</td></tr>`;
         tablePending.innerHTML = errRow;
         tableHistory.innerHTML = errRow;
-      });
-  }
-
-  function loadPackageSummary(packageId) {
-    const target = document.getElementById("package-summary");
-    if (!target) return;
-    fetch(`/module/APPROV/api/packages/${packageId}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to load package summary.");
-        return res.json();
-      })
-      .then((resData) => {
-        const data = resData.data;
-        const pkg = data.package;
-        target.innerHTML = `
-          <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div>
-              <div class="text-xs font-bold uppercase tracking-wider text-indigo-600">Monthly Workbook Package</div>
-              <h2 class="mt-1 text-xl font-bold text-slate-900">${pkg.period_label} · ${pkg.site_name}</h2>
-              <p class="mt-1 text-sm text-slate-500">Submitted by ${pkg.submitted_by} on ${formatDate(pkg.submitted_at)}</p>
-            </div>
-            <span class="inline-flex w-max rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">${pkg.status}</span>
-          </div>
-          <div class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div class="text-xs font-semibold text-slate-500">Included sheets</div>
-              <div class="mt-1 text-lg font-bold text-slate-900">${pkg.included_submission_count}</div>
-            </div>
-            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div class="text-xs font-semibold text-slate-500">Current level</div>
-              <div class="mt-1 text-lg font-bold text-slate-900">${pkg.current_level || "—"}</div>
-            </div>
-            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div class="text-xs font-semibold text-slate-500">Package ID</div>
-              <div class="mt-1 text-lg font-bold text-slate-900">${pkg.package_id}</div>
-            </div>
-          </div>
-          <div class="mt-6 overflow-hidden rounded-lg border border-slate-200">
-            <table class="min-w-full divide-y divide-slate-200 text-sm">
-              <thead class="bg-slate-50 text-left text-xs font-bold uppercase tracking-wider text-slate-500">
-                <tr>
-                  <th class="px-4 py-3">Form</th>
-                  <th class="px-4 py-3">Status</th>
-                  <th class="px-4 py-3">Submitted By</th>
-                  <th class="px-4 py-3 text-right">Fallback Review</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100">
-                ${data.submissions.map((sub) => `
-                  <tr>
-                    <td class="px-4 py-3 font-semibold text-slate-900">${sub.form_name}</td>
-                    <td class="px-4 py-3 text-slate-600">${sub.status}</td>
-                    <td class="px-4 py-3 text-slate-600">${sub.submitted_by}</td>
-                    <td class="px-4 py-3 text-right">
-                      <a href="/module/APPROV/submissions/${sub.submission_id}" class="text-xs font-bold text-indigo-600 hover:text-indigo-700">Open sheet</a>
-                    </td>
-                  </tr>
-                `).join("")}
-              </tbody>
-            </table>
-          </div>
-        `;
-      })
-      .catch((err) => {
-        target.innerHTML = `<p class="text-sm font-semibold text-rose-600">${err.message}</p>`;
       });
   }
 
