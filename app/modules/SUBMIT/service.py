@@ -1,6 +1,7 @@
 import json
 import calendar
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import tuple_
 
@@ -15,6 +16,7 @@ from app.modules.SUBMIT.model import (
     Submission,
     SubmissionValue,
     SubmissionValueIssue,
+    WorkbookFieldValue,
     ProofDocument,
     SubmissionPackage,
 )
@@ -59,6 +61,8 @@ ALLOWED_CELL_STATES = {
     CELL_STATE_CHANGES_REQUESTED,
     CELL_STATE_LATE_ENTRY,
 }
+NON_MONTHLY_LAYOUT_TYPES = {"annual_table", "reference_table"}
+EDITABLE_WORKBOOK_VALUE_FREQUENCIES = {"annual"}
 
 
 def submission_value_has_content(value):
@@ -197,6 +201,123 @@ def _field_payload(form_version_id):
             "frequency": field_version.frequency or "monthly",
         })
     return fields
+
+
+def _sections_payload(form):
+    from app.modules.FORMBLD.model import FormSection
+
+    sections_query = (
+        FormSection.query.filter_by(form_id=form.id, is_deleted=False)
+        .order_by(FormSection.display_order.asc(), FormSection.id.asc())
+        .all()
+    )
+    return [{
+        "id": section.id,
+        "name": section.name,
+        "code": section.code,
+        "layout_type": section.layout_type,
+        "display_order": section.display_order,
+        "description": section.description,
+    } for section in sections_query]
+
+
+def _section_by_id(sections):
+    return {section["id"]: section for section in sections or []}
+
+
+def _normalized_frequency(value):
+    return (value or "monthly").strip().lower()
+
+
+def _normalized_layout_type(value):
+    return (value or "monthly_table").strip().lower()
+
+
+def _normalized_field_type(value):
+    return (value or "").strip().lower()
+
+
+def is_non_monthly_field(field, sections):
+    if _normalized_frequency(field.get("frequency")) in ("annual", "static"):
+        return True
+    section = _section_by_id(sections).get(field.get("section_id"))
+    return bool(section and _normalized_layout_type(section.get("layout_type")) in NON_MONTHLY_LAYOUT_TYPES)
+
+
+def is_editable_workbook_field(field, sections):
+    section = _section_by_id(sections).get(field.get("section_id"))
+    if section and _normalized_layout_type(section.get("layout_type")) == "reference_table":
+        return False
+    if _normalized_frequency(field.get("frequency")) not in EDITABLE_WORKBOOK_VALUE_FREQUENCIES:
+        return False
+    if _normalized_field_type(field.get("field_type")) in ("calculated", "file"):
+        return False
+    return True
+
+
+def _value_has_content(raw_value):
+    if isinstance(raw_value, dict):
+        return any(item not in (None, "") for item in raw_value.values())
+    if isinstance(raw_value, list):
+        return len(raw_value) > 0
+    return raw_value not in (None, "")
+
+
+def _coerce_numeric_value(raw_value):
+    if raw_value in (None, ""):
+        return None
+    try:
+        return Decimal(str(raw_value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _workbook_value_payload(value):
+    if not value:
+        return {
+            "workbook_value_id": None,
+            "raw_value": None,
+            "calculated_value": None,
+            "cell_state": CELL_STATE_BLANK_EDITABLE,
+            "is_locked": False,
+            "remark": None,
+        }
+    raw_value = value.value_json if value.value_json is not None else value.value_text
+    return {
+        "workbook_value_id": value.id,
+        "raw_value": raw_value,
+        "calculated_value": float(value.numeric_value) if value.numeric_value is not None else None,
+        "cell_state": value.cell_state,
+        "is_locked": value.is_locked,
+        "remark": value.remark,
+    }
+
+
+def workbook_values_payload(site_id, form_id, fy_start_year, fields):
+    field_version_ids = [
+        field["field_version_id"]
+        for field in fields
+        if field.get("field_version_id")
+    ]
+    if not field_version_ids:
+        return {}
+
+    values = (
+        WorkbookFieldValue.query.filter(
+            WorkbookFieldValue.site_id == site_id,
+            WorkbookFieldValue.form_id == form_id,
+            WorkbookFieldValue.fy_start_year == fy_start_year,
+            WorkbookFieldValue.field_version_id.in_(field_version_ids),
+            WorkbookFieldValue.is_deleted == False,
+        )
+        .all()
+    )
+    values_by_version = {value.field_version_id: value for value in values}
+    return {
+        field["field_code"]: _workbook_value_payload(values_by_version.get(field["field_version_id"]))
+        for field in fields
+        if field.get("field_version_id")
+    }
 
 
 def _submission_values_payload(submission, fields):
@@ -342,7 +463,7 @@ def submission_values_review_payload(submission, fields):
     return values
 
 
-def _row_editability(period, submission):
+def _row_editability(period, submission, can_edit_monthly):
     if not period:
         return {
             "state": "disabled",
@@ -360,6 +481,12 @@ def _row_editability(period, submission):
             "state": "read_only",
             "editable": False,
             "reason": f"Monthly sheet is {submission.status}.",
+        }
+    if not can_edit_monthly:
+        return {
+            "state": "disabled",
+            "editable": False,
+            "reason": "You do not have permission to edit submissions for this site.",
         }
     if submission and submission.status == "Changes Requested":
         return {
@@ -447,7 +574,13 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
         raise ValueError("This form is not assigned to the selected site.")
 
     fields = _field_payload(form.current_version_id)
+    sections = _sections_payload(form)
     months = _fy_months(fy_start_year)
+    can_edit_monthly = (
+        has_permission(user_id, "submission", "edit", scope_site_id=site_id)
+        or has_permission(user_id, "submission", "create", scope_site_id=site_id)
+        or has_permission(user_id, "submission", "submit", scope_site_id=site_id)
+    )
 
     periods = ReportingPeriod.query.filter(
         ReportingPeriod.site_id == site_id,
@@ -473,7 +606,7 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
     for item in months:
         period = period_by_key.get((item["year"], item["month"]))
         submission = submission_by_period.get(period.id) if period else None
-        editability = _row_editability(period, submission)
+        editability = _row_editability(period, submission, can_edit_monthly)
         rows.append({
             **item,
             "period_id": period.id if period else None,
@@ -491,17 +624,6 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
             "values": _submission_values_payload(submission, fields),
             "issues": submission_value_issues_by_field(submission, fields),
         })
-
-    from app.modules.FORMBLD.model import FormSection
-    sections_query = FormSection.query.filter_by(form_id=form.id, is_deleted=False).order_by(FormSection.display_order.asc(), FormSection.id.asc()).all()
-    sections = [{
-        "id": s.id,
-        "name": s.name,
-        "code": s.code,
-        "layout_type": s.layout_type,
-        "display_order": s.display_order,
-        "description": s.description
-    } for s in sections_query]
 
     return {
         "financial_year": {
@@ -522,7 +644,105 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
         },
         "fields": fields,
         "sections": sections,
+        "workbook_values": workbook_values_payload(site.id, form.id, fy_start_year, fields),
         "rows": rows,
+    }
+
+
+def save_annual_workbook_values(user_id, site_id, form_id, fy_start_year, values):
+    try:
+        site_id = int(site_id)
+        form_id = int(form_id)
+        fy_start_year = int(fy_start_year)
+    except (TypeError, ValueError):
+        raise ValueError("A valid site, form, and financial year are required.")
+
+    if not isinstance(values, dict):
+        raise ValueError("Values must be submitted as an object.")
+
+    if not (
+        has_permission(user_id, "submission", "edit", scope_site_id=site_id)
+        or has_permission(user_id, "submission", "create", scope_site_id=site_id)
+    ):
+        raise ValueError("Permission denied: You cannot edit annual workbook values for this site.")
+
+    site = Site.query.filter_by(id=site_id, is_deleted=False).first()
+    if not site:
+        raise ValueError("Site not found.")
+
+    form = Form.query.filter_by(id=form_id, is_deleted=False).first()
+    if not form or not form.current_version_id:
+        raise ValueError("Published form not found.")
+
+    metadata = _parse_form_metadata(form)
+    if site_id not in (metadata.get("sites") or []):
+        raise ValueError("This form is not assigned to the selected site.")
+
+    months = _fy_months(fy_start_year)
+    open_period_exists = ReportingPeriod.query.filter(
+        ReportingPeriod.site_id == site_id,
+        ReportingPeriod.is_deleted == False,
+        tuple_(ReportingPeriod.year, ReportingPeriod.month).in_(
+            [(item["year"], item["month"]) for item in months]
+        ),
+        ReportingPeriod.status.in_(EDITABLE_PERIOD_STATUSES),
+    ).first() is not None
+    if not open_period_exists:
+        raise ValueError("At least one reporting period in this financial year must be open for annual value entry.")
+
+    fields = _field_payload(form.current_version_id)
+    sections = _sections_payload(form)
+    editable_fields = {
+        field["field_code"]: field
+        for field in fields
+        if is_editable_workbook_field(field, sections)
+    }
+
+    saved = {}
+    for field_code, raw_value in values.items():
+        field = editable_fields.get(field_code)
+        if not field:
+            continue
+
+        value_row = WorkbookFieldValue.query.filter_by(
+            site_id=site_id,
+            form_id=form_id,
+            field_version_id=field["field_version_id"],
+            fy_start_year=fy_start_year,
+            is_deleted=False,
+        ).first()
+        if not value_row:
+            value_row = WorkbookFieldValue(
+                site_id=site_id,
+                form_id=form_id,
+                field_id=field["field_id"],
+                field_version_id=field["field_version_id"],
+                fy_start_year=fy_start_year,
+                created_by=user_id,
+            )
+            db.session.add(value_row)
+
+        value_row.value_text = None
+        value_row.numeric_value = None
+        value_row.value_json = None
+        if isinstance(raw_value, (dict, list)):
+            value_row.value_json = raw_value
+        elif raw_value not in (None, ""):
+            value_row.value_text = str(raw_value)
+            if _normalized_field_type(field.get("field_type")) in ("integer", "number", "decimal", "float", "numeric"):
+                value_row.numeric_value = _coerce_numeric_value(raw_value)
+
+        set_state = CELL_STATE_DRAFT_FILLED if _value_has_content(raw_value) else CELL_STATE_BLANK_EDITABLE
+        value_row.cell_state = set_state
+        value_row.is_locked = False
+        value_row.updated_by = user_id
+        saved[field_code] = value_row
+
+    db.session.flush()
+    payload = workbook_values_payload(site_id, form_id, fy_start_year, fields)
+    return {
+        "workbook_values": payload,
+        "saved_fields": list(saved.keys()),
     }
 
 
@@ -547,6 +767,7 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
         raise ValueError("Published form not found.")
 
     fields = _field_payload(form_version_id or form.current_version_id)
+    sections = _sections_payload(form)
     months = _fy_months(fy_start_year)
     month_keys = [(item["year"], item["month"]) for item in months]
 
@@ -592,17 +813,6 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
             "is_active_period": bool(period and active_period_id and period.id == active_period_id),
         })
 
-    from app.modules.FORMBLD.model import FormSection
-    sections_query = FormSection.query.filter_by(form_id=form.id, is_deleted=False).order_by(FormSection.display_order.asc(), FormSection.id.asc()).all()
-    sections = [{
-        "id": s.id,
-        "name": s.name,
-        "code": s.code,
-        "layout_type": s.layout_type,
-        "display_order": s.display_order,
-        "description": s.description
-    } for s in sections_query]
-
     return {
         "financial_year": {
             "start_year": fy_start_year,
@@ -620,6 +830,7 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
         },
         "fields": fields,
         "sections": sections,
+        "workbook_values": workbook_values_payload(site.id, form.id, fy_start_year, fields),
         "rows": rows,
         "active_row_key": next(
             (row["row_key"] for row in rows if row["is_active_period"]),
@@ -1094,7 +1305,12 @@ def autosave_submission_values(submission_id, values_dict, user_id):
     submission.updated_by = user_id
         
     # Get form version fields
+    form = Form.query.get(submission.form_id)
+    if not form:
+        raise ValueError("Submission form not found.")
+
     fields = get_form_version_fields(submission.form_version_id)
+    sections = _sections_payload(form)
     fields_map = {}
     for fv, f in fields:
         fields_map[f.field_code] = {
@@ -1156,6 +1372,32 @@ def autosave_submission_values(submission_id, values_dict, user_id):
                 field_values[code] = val.raw_value
             else:
                 field_values[code] = ""
+
+    period = ReportingPeriod.query.get(submission.reporting_period_id)
+    if period:
+        fy_start_year = period.year if period.month >= 4 else period.year - 1
+        version_to_code = {
+            info["field_version_id"]: code
+            for code, info in fields_map.items()
+            if info.get("field_version_id")
+        }
+        workbook_values = WorkbookFieldValue.query.filter(
+            WorkbookFieldValue.site_id == submission.site_id,
+            WorkbookFieldValue.form_id == submission.form_id,
+            WorkbookFieldValue.fy_start_year == fy_start_year,
+            WorkbookFieldValue.field_version_id.in_(list(version_to_code.keys()) or [0]),
+            WorkbookFieldValue.is_deleted == False,
+        ).all()
+        for workbook_value in workbook_values:
+            code = version_to_code.get(workbook_value.field_version_id)
+            if not code or code in field_values:
+                continue
+            if workbook_value.numeric_value is not None:
+                field_values[code] = float(workbook_value.numeric_value)
+            elif workbook_value.value_text not in (None, ""):
+                field_values[code] = workbook_value.value_text
+            elif workbook_value.value_json is not None:
+                field_values[code] = workbook_value.value_json
                 
     # Prepare value set snapshot
     value_set_snapshot = get_approved_valsets_snapshot()
@@ -1268,6 +1510,7 @@ def submit_submission(submission_id, user_id):
         
     # Get form version fields
     fields = get_form_version_fields(submission.form_version_id)
+    sections = _sections_payload(form)
     
     # Load saved values
     db_values = SubmissionValue.query.filter_by(submission_id=submission_id).all()
@@ -1276,6 +1519,12 @@ def submit_submission(submission_id, user_id):
     validation_errors = {}
     
     for fv, f in fields:
+        if is_non_monthly_field(
+            {"frequency": fv.frequency, "section_id": fv.section_id},
+            sections,
+        ):
+            continue
+
         config = fv.field_config or {}
         val_obj = values_map.get(f.id)
         

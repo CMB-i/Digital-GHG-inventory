@@ -103,6 +103,37 @@ class SubmissionValueIssue(FullLifecycleMixin, db.Model):
     )
 
 
+class WorkbookFieldValue(FullLifecycleMixin, db.Model):
+    __tablename__ = "workbook_field_values"
+
+    id = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id"), nullable=False)
+    form_id = db.Column(db.Integer, db.ForeignKey("forms.id"), nullable=False)
+    field_id = db.Column(db.Integer, db.ForeignKey("fields.id"), nullable=False)
+    field_version_id = db.Column(db.Integer, db.ForeignKey("field_versions.id"), nullable=False)
+    fy_start_year = db.Column(db.Integer, nullable=False)
+    value_text = db.Column(db.Text, nullable=True)
+    numeric_value = db.Column(db.Numeric, nullable=True)
+    value_json = db.Column(JSONB, nullable=True)
+    cell_state = db.Column(db.String(40), nullable=False, default="blank_editable", server_default="blank_editable")
+    is_locked = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
+    remark = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        db.Index("idx_workbook_field_values_site_fy", "site_id", "fy_start_year"),
+        db.Index("idx_workbook_field_values_field_version", "field_version_id"),
+        db.Index(
+            "uq_active_workbook_field_value",
+            "site_id",
+            "form_id",
+            "field_version_id",
+            "fy_start_year",
+            unique=True,
+            postgresql_where=db.text("is_deleted = false"),
+        ),
+    )
+
+
 class ProofDocument(SoftDeleteMixin, db.Model):
     __tablename__ = "proof_documents"
 

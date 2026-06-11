@@ -1,6 +1,6 @@
 import json
 
-from flask import Blueprint, redirect, render_template, request, jsonify, send_file
+from flask import Blueprint, current_app, redirect, render_template, request, jsonify, send_file
 from app.common.decorators import require_permission
 from app.common.auth import current_user, require_login
 from app.common.responses import success_response, error_response
@@ -14,6 +14,7 @@ from app.modules.SUBMIT.service import (
     get_spoc_sheets_buckets,
     get_annual_workbook_options,
     compose_annual_workbook_data,
+    save_annual_workbook_values,
     create_draft_submission,
     autosave_submission_values,
     submit_submission,
@@ -161,6 +162,34 @@ def submit_annual_workbook_package():
     except (ValueError, DuplicateSubmissionError) as e:
         db.session.rollback()
         return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Annual workbook package submit failed")
+        return error_response("Could not submit workbook package.", 500)
+
+
+@bp.route("/api/annual-workbook/values", methods=["PUT"])
+@require_login
+def save_annual_workbook_values_endpoint():
+    data = request.get_json() or {}
+    user = current_user()
+    try:
+        result = save_annual_workbook_values(
+            user_id=user.id,
+            site_id=data.get("site_id"),
+            form_id=data.get("form_id"),
+            fy_start_year=data.get("fy"),
+            values=data.get("values") or {},
+        )
+        db.session.commit()
+        return success_response(data=result, message="Annual workbook values saved successfully.")
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Annual workbook value save failed")
+        return error_response("Could not save annual workbook values.", 500)
 
 
 @bp.route("/api/submissions", methods=["POST"])
@@ -191,6 +220,10 @@ def create_submission_endpoint():
     except ValueError as e:
         db.session.rollback()
         return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Draft submission creation failed")
+        return error_response("Could not create draft for this month.", 500)
 
 
 @bp.route("/api/submissions/<int:submission_id>", methods=["GET"])
@@ -348,6 +381,10 @@ def autosave_endpoint(submission_id):
     except ValueError as e:
         db.session.rollback()
         return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Submission autosave failed")
+        return error_response("Could not save draft.", 500)
 
 
 @bp.route("/api/submissions/<int:submission_id>/proof/<string:field_code>", methods=["POST"])

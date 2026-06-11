@@ -1,8 +1,8 @@
 from functools import wraps
 
-from flask import render_template
+from flask import jsonify, render_template
 
-from app.common.auth import current_user, require_login
+from app.common.auth import current_user, is_api_request, require_login
 from app.common.permissions import has_permission
 
 
@@ -20,6 +20,8 @@ def require_permission(entity_type, action, scope_site_id_param=None, entity_id_
                 for item in actions
             )
             if not allowed:
+                if is_api_request():
+                    return jsonify({"error": "Permission denied."}), 403
                 return render_template("no_access.html"), 403
             return view_func(*args, **kwargs)
 
