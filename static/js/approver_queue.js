@@ -147,6 +147,9 @@ document.addEventListener("DOMContentLoaded", function () {
     rows.forEach((row) => {
       const tr = document.createElement("tr");
       tr.className = "hover:bg-slate-50/50 transition-colors";
+      const detailsHref = row.package_id
+        ? `/module/APPROV/packages/${row.package_id}`
+        : `/module/APPROV/submissions/${row.submission_id}`;
 
       let actionBadgeClass = "bg-emerald-100 text-emerald-800 border-emerald-200";
       if (row.action === "Request Changes") {
@@ -177,7 +180,7 @@ document.addEventListener("DOMContentLoaded", function () {
         </td>
         <td class="px-6 py-4 text-xs text-slate-500">${formatDate(row.acted_at)}</td>
         <td class="px-6 py-4 text-right">
-          <a href="/module/APPROV/submissions/${row.submission_id}" class="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all">
+          <a href="${detailsHref}" class="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all">
             View Details
           </a>
         </td>

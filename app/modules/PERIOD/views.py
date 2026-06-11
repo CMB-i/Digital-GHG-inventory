@@ -19,6 +19,7 @@ from app.modules.PERIOD.service import (
     transition_period,
 )
 from app.modules.SITEMST.model import Site
+from app.modules.NOTIFY.service import notify_period_open_for_entry
 
 
 MODULE_CODE = "PERIOD"
@@ -76,13 +77,15 @@ def index():
 def create():
     actor = current_user()
     try:
-        create_period(
+        period = create_period(
             site_id=request.form.get("site_id", type=int),
             year=request.form.get("year"),
             month=request.form.get("month"),
             deadline=request.form.get("deadline"),
             actor_id=actor.id,
         )
+        db.session.flush()
+        notify_period_open_for_entry(period.id)
         db.session.commit()
         flash("Reporting period opened.", "success")
         return redirect(url_for("period.index"))
@@ -108,12 +111,14 @@ def transition(period_id):
         return redirect(url_for("period.index"))
 
     try:
-        transition_period(
+        period = transition_period(
             period_id=period_id,
             target_status=target_status,
             actor_id=actor.id,
             reopen_reason=reopen_reason,
         )
+        if period.status in ("OPEN", "REOPENED"):
+            notify_period_open_for_entry(period.id)
         db.session.commit()
         flash("Status updated.", "success")
     except ValidationError as error:

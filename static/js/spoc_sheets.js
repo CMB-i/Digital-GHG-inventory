@@ -47,6 +47,13 @@ document.addEventListener("DOMContentLoaded", function () {
     return `/module/SUBMIT/annual?${params.toString()}`;
   }
 
+  function submittedViewUrl(row) {
+    if (row.package_id) {
+      return `/module/APPROV/packages/${row.package_id}`;
+    }
+    return `/module/SUBMIT/submissions/${row.submission_id}`;
+  }
+
   // Format date string to local readable string
   function formatDate(dateStr) {
     if (!dateStr) return "—";
@@ -334,7 +341,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <td class="px-6 py-4 text-xs font-medium text-slate-600">${row.submitted_by}</td>
         <td class="px-6 py-4 text-xs text-slate-500">${formatDate(row.submitted_at)}</td>
         <td class="px-6 py-4 text-right">
-          <a href="/module/SUBMIT/submissions/${row.submission_id}" class="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all">
+          <a href="${submittedViewUrl(row)}" class="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all">
             View Details
           </a>
         </td>

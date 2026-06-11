@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request
+from flask import Blueprint, redirect, render_template, request
 from app.database import db
 from app.common.auth import current_user, require_login
 from app.common.permissions import has_permission
@@ -76,6 +76,11 @@ def api_queue():
 def view_submission(submission_id):
     submission = Submission.query.get_or_404(submission_id)
     user = current_user()
+    if submission.package_id and (
+        _can_review_submission(user, submission, "approve", "reject") or
+        has_permission(user.id, "submission", "view", scope_site_id=submission.site_id)
+    ):
+        return redirect(f"/module/APPROV/packages/{submission.package_id}")
     if not _can_review_submission(user, submission, "approve", "reject"):
         return _page_no_access()
     return render_template(
@@ -89,7 +94,7 @@ def view_submission(submission_id):
 def view_package(package_id):
     package = SubmissionPackage.query.get_or_404(package_id)
     user = current_user()
-    if not get_package_summary_for_reviewer(package.id, user.id):
+    if not compose_package_review_data(package.id, user.id):
         return _page_no_access()
     return render_template(
         "modules/APPROV/package_review.html",
@@ -257,7 +262,10 @@ def get_submission_details(submission_id):
         for val in db_values:
             values_data[val.field_id] = {
                 "raw_value": val.raw_value,
-                "calculated_value": float(val.calculated_value) if val.calculated_value is not None else None
+                "calculated_value": float(val.calculated_value) if val.calculated_value is not None else None,
+                "cell_state": val.cell_state,
+                "is_locked": val.is_locked,
+                "remark": val.remark,
             }
 
         # Load proofs
@@ -322,6 +330,7 @@ def get_submission_details(submission_id):
             "site_name": site.name if site else "",
             "period_label": format_period_label(period.year, period.month) if period else "",
             "status": submission.status,
+            "is_locked": submission.is_locked,
             "current_level": submission.current_level,
             "submitted_by": User.query.get(submission.submitted_by).full_name if submission.submitted_by else "",
             "submitted_at": submission.submitted_at,

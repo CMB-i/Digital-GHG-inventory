@@ -239,8 +239,6 @@ def _fields_review_payload(form_version_id):
 
 def compose_package_review_data(package_id, user_id):
     queue_summary = get_package_summary_for_reviewer(package_id, user_id)
-    if not queue_summary:
-        return None
 
     package = SubmissionPackage.query.get(package_id)
     if not package or package.is_deleted:
@@ -255,6 +253,13 @@ def compose_package_review_data(package_id, user_id):
     submitter = User.query.get(package.submitted_by) if package.submitted_by else None
 
     submissions = Submission.query.filter_by(package_id=package.id, is_deleted=False).all()
+    can_view_package = any(
+        has_permission(user_id, "submission", "view", scope_site_id=submission.site_id)
+        for submission in submissions
+    )
+    if not queue_summary and not can_view_package:
+        return None
+
     form_ids = [submission.form_id for submission in submissions]
     forms_by_id = {
         form.id: form
@@ -286,7 +291,7 @@ def compose_package_review_data(package_id, user_id):
 
     can_reject = has_permission(user_id, "submission", "reject", scope_site_id=package.site_id)
     can_review = has_permission(user_id, "submission", "approve", scope_site_id=package.site_id) or can_reject
-    is_my_turn = bool(queue_summary.get("is_my_turn"))
+    is_my_turn = bool(queue_summary and queue_summary.get("is_my_turn"))
 
     return {
         "package": {
@@ -300,7 +305,7 @@ def compose_package_review_data(package_id, user_id):
             "month": period.month if period else None,
             "year": period.year if period else None,
             "current_level": package.current_level,
-            "current_level_name": queue_summary.get("current_level_name"),
+            "current_level_name": queue_summary.get("current_level_name") if queue_summary else None,
             "submitted_by": submitter.full_name if submitter else "System",
             "submitted_at": package.submitted_at,
             "included_submission_count": len(sheets),
@@ -540,6 +545,7 @@ def get_actioned_history(user_id):
 
         history.append({
             "submission_id": sub.id,
+            "package_id": sub.package_id,
             "form_name": form.name if form else "Unknown Form",
             "site_name": site.name if site else "Unknown Site",
             "period_label": format_period_label(period.year, period.month) if period else "Unknown Period",

@@ -48,6 +48,34 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
+  const escapeHtml = window.WorkbookSheet.escapeHtml;
+
+  function renderSubmissionTable(data) {
+    const valuesByCode = {};
+    (data.fields || []).forEach((field) => {
+      valuesByCode[field.field_code] = data.values ? data.values[field.field_id] : null;
+    });
+
+    window.WorkbookSheet.render({
+      mode: "review",
+      headEl: document.getElementById("review-sheet-head"),
+      bodyEl: document.getElementById("review-sheet-body"),
+      fields: data.fields || [],
+      rows: [{
+        row_key: `submission-${submissionId}`,
+        label: data.metadata.period_label || "Submission",
+        period_label: data.metadata.form_name || "",
+        status: data.metadata.status,
+        submission_status: data.metadata.status,
+        submission_id: data.metadata.submission_id,
+        values: valuesByCode,
+        proofs: data.proofs || {},
+        is_locked: data.metadata.is_locked,
+        editable: false,
+      }]
+    });
+  }
+
   function loadSubmissionDetails() {
     fetch(`/module/APPROV/api/submissions/${submissionId}`)
       .then((res) => {
@@ -95,33 +123,8 @@ document.addEventListener("DOMContentLoaded", function () {
           if (btnRaiseIssueModal) btnRaiseIssueModal.classList.add("hidden");
         }
 
-        // 2. Render Form in readonly_review mode
-        // Prepare values map and proofs map
-        const valuesMap = {};
-        const proofsMap = {};
-
-        data.fields.forEach((field) => {
-          const valObj = data.values[field.field_id];
-          if (valObj) {
-            if (field.field_type === "calculated") {
-              valuesMap[field.field_code] = valObj.calculated_value;
-            } else {
-              valuesMap[field.field_code] = valObj.raw_value;
-            }
-          }
-
-          const proofObj = data.proofs[field.field_id];
-          if (proofObj) {
-            valuesMap[field.field_code] = {
-              storage_key: proofObj.storage_key,
-              original_name: proofObj.original_name
-            };
-          }
-        });
-
-        if (window.renderForm) {
-          window.renderForm(data.fields, formContainer, "readonly_review", valuesMap);
-        }
+        // 2. Render entered data in workbook-style cells.
+        renderSubmissionTable(data);
 
         // 3. Populate dropdown fields in Raise Issue Modal
         issueFieldSelect.innerHTML = '<option value="">General Submission Issue (No specific field)</option>';

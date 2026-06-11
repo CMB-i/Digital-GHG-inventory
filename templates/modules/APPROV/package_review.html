@@ -52,19 +52,12 @@
           </div>
           <div class="flex items-center gap-3">
             <span id="sheet-status" class="inline-flex rounded-full px-2.5 py-1 text-xs font-bold bg-slate-100 text-slate-700">—</span>
-            <a id="sheet-fallback-link" href="#" class="text-xs font-bold text-indigo-600 hover:text-indigo-700">Open sheet</a>
+            <a id="sheet-fallback-link" href="#" class="text-xs font-bold text-indigo-600 hover:text-indigo-700">Focus sheet</a>
           </div>
         </div>
         <div class="overflow-x-auto">
-          <table class="min-w-full divide-y divide-slate-200 text-sm">
-            <thead class="bg-slate-50 text-left text-xs font-bold uppercase tracking-wider text-slate-500">
-              <tr>
-                <th class="px-5 py-3">Field</th>
-                <th class="px-5 py-3">Value</th>
-                <th class="px-5 py-3">Cell state</th>
-                <th class="px-5 py-3 text-center">Locked</th>
-              </tr>
-            </thead>
+          <table class="min-w-full border-collapse text-sm">
+            <thead id="sheet-head" class="bg-slate-50 text-left text-xs font-bold uppercase tracking-wider text-slate-500"></thead>
             <tbody id="sheet-values" class="divide-y divide-slate-100"></tbody>
           </table>
         </div>
@@ -104,5 +97,6 @@
 <script>
   window.PACKAGE_ID = {{ package_id }};
 </script>
+<script src="{{ url_for('static', filename='js/workbook_sheet.js') }}"></script>
 <script src="{{ url_for('static', filename='js/package_review.js') }}"></script>
 {% endblock %}

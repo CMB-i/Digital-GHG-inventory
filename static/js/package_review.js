@@ -18,6 +18,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const sheetMeta = document.getElementById("sheet-meta");
   const sheetStatus = document.getElementById("sheet-status");
   const sheetFallbackLink = document.getElementById("sheet-fallback-link");
+  const sheetHead = document.getElementById("sheet-head");
   const sheetValues = document.getElementById("sheet-values");
   const actionsPanel = document.getElementById("actions-panel");
   const actionsLocked = document.getElementById("actions-locked");
@@ -25,18 +26,11 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnApprovePackage = document.getElementById("btn-approve-package");
   const btnRequestChangesPackage = document.getElementById("btn-request-changes-package");
   const btnRejectPackage = document.getElementById("btn-reject-package");
+  const initialParams = new URLSearchParams(window.location.search);
+  const requestedSheet = initialParams.get("sheet");
 
   let reviewData = null;
   let activeSheetIndex = 0;
-
-  const CELL_STATE_META = {
-    blank_editable: { label: "Blank", className: "bg-slate-100 text-slate-700 border-slate-200" },
-    draft_filled: { label: "Draft", className: "bg-blue-50 text-blue-700 border-blue-200" },
-    submitted: { label: "Pending review", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-    approved_locked: { label: "Approved", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    changes_requested: { label: "Changes requested", className: "bg-amber-50 text-amber-700 border-amber-200" },
-    late_entry: { label: "Late entry", className: "bg-violet-50 text-violet-700 border-violet-200" },
-  };
 
   function formatDate(dateStr) {
     if (!dateStr) return "—";
@@ -52,14 +46,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
+  const escapeHtml = window.WorkbookSheet.escapeHtml;
 
   function getStatusClass(status) {
     switch (status) {
@@ -78,57 +65,11 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
-  function cellStateBadge(cellState) {
-    const meta = CELL_STATE_META[cellState] || {
-      label: cellState || "Unknown",
-      className: "bg-slate-100 text-slate-700 border-slate-200",
-    };
-    return `<span class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-bold ${meta.className}">${escapeHtml(meta.label)}</span>`;
-  }
-
   function renderLegend() {
-    legendItems.innerHTML = Object.keys(CELL_STATE_META)
-      .map((state) => cellStateBadge(state))
+    legendItems.innerHTML = Object.entries(window.WorkbookSheet.CELL_STATE_META)
+      .map(([state, meta]) => `<span class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-bold ${meta.className}" data-state="${state}">${escapeHtml(meta.label)}</span>`)
       .join("");
     cellStateLegend.classList.remove("hidden");
-  }
-
-  function formatFieldValue(field, valueObj, proofs) {
-    if (!valueObj) return "—";
-
-    if (field.field_type === "file") {
-      const proof = proofs[field.field_id] || proofs[String(field.field_id)];
-      if (proof && proof.storage_key) {
-        const href = `/module/SUBMIT/submissions/download/${encodeURIComponent(proof.storage_key)}`;
-        const label = proof.original_name || "Download file";
-        return `<a href="${href}" class="font-semibold text-indigo-600 hover:text-indigo-700">${escapeHtml(label)}</a>`;
-      }
-      return "—";
-    }
-
-    if (field.field_type === "boolean") {
-      const raw = valueObj.raw_value;
-      if (raw === true || raw === "true" || raw === "1" || raw === 1 || raw === "on") return "Yes";
-      if (raw === false || raw === "false" || raw === "0" || raw === 0) return "No";
-      return "—";
-    }
-
-    if (field.field_type === "calculated") {
-      if (valueObj.calculated_value !== null && valueObj.calculated_value !== undefined) {
-        return escapeHtml(valueObj.calculated_value);
-      }
-      return "—";
-    }
-
-    if (valueObj.raw_value !== null && valueObj.raw_value !== undefined && valueObj.raw_value !== "") {
-      return escapeHtml(valueObj.raw_value);
-    }
-
-    if (valueObj.calculated_value !== null && valueObj.calculated_value !== undefined) {
-      return escapeHtml(valueObj.calculated_value);
-    }
-
-    return "—";
   }
 
   function renderSheet(sheet) {
@@ -136,52 +77,42 @@ document.addEventListener("DOMContentLoaded", function () {
     sheetMeta.textContent = `Submitted by ${sheet.submitted_by} on ${formatDate(sheet.submitted_at)}`;
     sheetStatus.className = `inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${getStatusClass(sheet.status)}`;
     sheetStatus.textContent = sheet.status;
-    sheetFallbackLink.href = `/module/APPROV/submissions/${sheet.submission_id}`;
+    sheetFallbackLink.href = `/module/APPROV/packages/${packageId}?sheet=${encodeURIComponent(sheet.form_id)}#sheet-${sheet.submission_id}`;
+    sheetFallbackLink.dataset.submissionId = String(sheet.submission_id);
+    sheetFallbackLink.dataset.formId = String(sheet.form_id);
 
     const fields = [...(sheet.fields || [])].sort(
       (a, b) => (a.display_order || 0) - (b.display_order || 0)
     );
 
     if (!fields.length) {
+      sheetHead.innerHTML = "";
       sheetValues.innerHTML = `
         <tr>
-          <td colspan="4" class="px-5 py-8 text-center text-slate-400 italic">No fields configured for this form.</td>
+          <td colspan="2" class="px-5 py-8 text-center text-slate-400 italic">No fields configured for this form.</td>
         </tr>
       `;
       return;
     }
 
-    sheetValues.innerHTML = fields.map((field) => {
-      const valueObj = sheet.values ? sheet.values[field.field_code] : null;
-      const lockIcon = valueObj && valueObj.is_locked
-        ? `<span class="inline-flex items-center text-emerald-700" title="Locked">`
-          + `<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">`
-          + `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />`
-          + `</svg></span>`
-        : `<span class="text-slate-300">—</span>`;
-      const remark = valueObj && valueObj.remark
-        ? `<div class="mt-1 text-xs text-slate-400">${escapeHtml(valueObj.remark)}</div>`
-        : "";
-
-      return `
-        <tr class="hover:bg-slate-50/50">
-          <td class="px-5 py-4 align-top">
-            <div class="font-semibold text-slate-900">${escapeHtml(field.field_name)}</div>
-            ${field.field_config && field.field_config.unit
-              ? `<div class="text-xs text-slate-400">${escapeHtml(field.field_config.unit)}</div>`
-              : ""}
-          </td>
-          <td class="px-5 py-4 align-top text-slate-700">
-            ${formatFieldValue(field, valueObj, sheet.proofs || {})}
-            ${remark}
-          </td>
-          <td class="px-5 py-4 align-top">
-            ${cellStateBadge(valueObj ? valueObj.cell_state : "blank_editable")}
-          </td>
-          <td class="px-5 py-4 align-top text-center">${lockIcon}</td>
-        </tr>
-      `;
-    }).join("");
+    window.WorkbookSheet.render({
+      mode: "review",
+      headEl: sheetHead,
+      bodyEl: sheetValues,
+      fields,
+      rows: [{
+        row_key: `submission-${sheet.submission_id}`,
+        label: reviewData.package.period_label,
+        period_label: sheet.form_name,
+        status: sheet.status,
+        submission_status: sheet.status,
+        submission_id: sheet.submission_id,
+        submitted_at: sheet.submitted_at,
+        values: sheet.values || {},
+        proofs: sheet.proofs || {},
+        editable: false,
+      }]
+    });
   }
 
   function renderTabs() {
@@ -189,6 +120,7 @@ document.addEventListener("DOMContentLoaded", function () {
     reviewData.sheets.forEach((sheet, index) => {
       const button = document.createElement("button");
       button.type = "button";
+      button.id = `sheet-tab-${sheet.submission_id}`;
       const active = index === activeSheetIndex;
       button.className = `rounded-full border px-3 py-1.5 text-xs font-bold transition ${
         active
@@ -205,9 +137,32 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  function focusSheet(index, updateUrl = true) {
+    if (!reviewData || !reviewData.sheets[index]) return;
+    activeSheetIndex = index;
+    renderTabs();
+    renderSheet(reviewData.sheets[activeSheetIndex]);
+    const activeSheet = document.getElementById("active-sheet");
+    if (activeSheet) {
+      activeSheet.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    if (updateUrl && window.history && window.history.replaceState) {
+      const sheet = reviewData.sheets[activeSheetIndex];
+      const url = `/module/APPROV/packages/${packageId}?sheet=${encodeURIComponent(sheet.form_id)}#sheet-${sheet.submission_id}`;
+      window.history.replaceState(null, "", url);
+    }
+  }
+
   function renderReview(data) {
     reviewData = data;
     const pkg = data.package;
+    if (requestedSheet) {
+      const requestedIndex = data.sheets.findIndex((sheet) => (
+        String(sheet.form_id) === String(requestedSheet) ||
+        String(sheet.submission_id) === String(requestedSheet)
+      ));
+      if (requestedIndex >= 0) activeSheetIndex = requestedIndex;
+    }
 
     reviewTitle.textContent = `${pkg.period_label} · ${pkg.site_name}`;
     reviewSubtitle.textContent = `Submitted by ${pkg.submitted_by} on ${formatDate(pkg.submitted_at)}`;
@@ -226,6 +181,18 @@ document.addEventListener("DOMContentLoaded", function () {
     renderSheet(data.sheets[activeSheetIndex] || data.sheets[0]);
     renderActions(pkg);
     reviewContent.classList.remove("hidden");
+  }
+
+  if (sheetFallbackLink) {
+    sheetFallbackLink.addEventListener("click", function (event) {
+      event.preventDefault();
+      if (!reviewData) return;
+      const index = reviewData.sheets.findIndex((sheet) => (
+        String(sheet.submission_id) === String(sheetFallbackLink.dataset.submissionId) ||
+        String(sheet.form_id) === String(sheetFallbackLink.dataset.formId)
+      ));
+      focusSheet(index >= 0 ? index : activeSheetIndex);
+    });
   }
 
   function renderActions(pkg) {

@@ -73,7 +73,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function rowKey(row) {
-    return `${row.year}-${row.month}`;
+    return window.WorkbookSheet ? window.WorkbookSheet.rowKey(row) : `${row.year}-${row.month}`;
   }
 
   function selectedRow() {
@@ -216,100 +216,24 @@ document.addEventListener("DOMContentLoaded", function () {
     emptyEl.classList.add("hidden");
     tableWrap.classList.remove("hidden");
 
-    tableHead.innerHTML = `
-      <tr>
-        <th class="sticky left-0 z-10 bg-slate-50 px-4 py-3 text-left">Month</th>
-        <th class="px-4 py-3 text-left">Status</th>
-        ${fields.map(field => `
-          <th class="min-w-[180px] px-4 py-3 text-left">
-            <span>${escapeHtml(field.field_name)}</span>
-            ${field.field_config && field.field_config.unit ? `<span class="ml-1 text-slate-400 normal-case">(${escapeHtml(field.field_config.unit)})</span>` : ""}
-            ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-500">*</span>' : ""}
-          </th>
-        `).join("")}
-      </tr>
-    `;
-
-    tableBody.innerHTML = rows.map(row => renderRow(row, fields)).join("");
-    tableBody.querySelectorAll("tr[data-row-key]").forEach(tr => {
-      tr.addEventListener("click", function (event) {
-        if (event.target && ["INPUT", "SELECT", "TEXTAREA", "BUTTON", "A"].includes(event.target.tagName)) return;
-        state.selectedRowKey = tr.dataset.rowKey;
+    window.WorkbookSheet.render({
+      mode: "entry",
+      headEl: tableHead,
+      bodyEl: tableBody,
+      fields,
+      rows: rows.map(row => ({
+        ...row,
+        editable: Boolean(row.editability && row.editability.editable),
+        reason: row.editability ? row.editability.reason : ""
+      })),
+      selectedRowKey: state.selectedRowKey,
+      onRowSelect: function (key) {
+        state.selectedRowKey = key;
         renderTable();
         renderHeader();
-      });
+      },
+      onCellChange
     });
-
-    tableBody.querySelectorAll("[data-field-code]").forEach(input => {
-      input.addEventListener("input", onCellChange);
-      input.addEventListener("change", onCellChange);
-    });
-  }
-
-  function renderRow(row, fields) {
-    const key = rowKey(row);
-    const selected = key === state.selectedRowKey;
-    const editable = row.editability && row.editability.editable;
-    const rowClass = selected ? "bg-indigo-50/60 ring-1 ring-inset ring-indigo-200" : "hover:bg-slate-50/60";
-    const statusClass = editable
-      ? "bg-blue-50 text-blue-700 border-blue-100"
-      : row.editability && row.editability.state === "read_only"
-        ? "bg-slate-100 text-slate-600 border-slate-200"
-        : "bg-slate-50 text-slate-400 border-slate-200";
-
-    return `
-      <tr data-row-key="${key}" class="${rowClass} cursor-pointer transition">
-        <td class="sticky left-0 z-10 border-r border-slate-100 bg-inherit px-4 py-4">
-          <div class="font-bold text-slate-900">${escapeHtml(row.label)}</div>
-          <div class="text-xs text-slate-500">${escapeHtml(row.period_label)}</div>
-        </td>
-        <td class="px-4 py-4 align-top">
-          <span class="inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass}">
-            ${escapeHtml(row.submission_status || row.period_status || "Unavailable")}
-          </span>
-          <div class="mt-1 max-w-[180px] text-xs text-slate-400">${escapeHtml(row.editability ? row.editability.reason : "")}</div>
-        </td>
-        ${fields.map(field => renderCell(row, field, editable)).join("")}
-      </tr>
-    `;
-  }
-
-  function renderCell(row, field, editable) {
-    const value = fieldValue(row, field);
-    const disabled = !editable || field.field_type === "calculated" || field.field_type === "file";
-    const common = `data-row-key="${rowKey(row)}" data-field-code="${escapeHtml(field.field_code)}" class="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-800 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-500" ${disabled ? "disabled" : ""}`;
-
-    let control;
-    if (field.field_type === "boolean") {
-      const checked = value === true || value === "true" || value === "1" || value === 1 || value === "on";
-      control = `<input type="checkbox" data-row-key="${rowKey(row)}" data-field-code="${escapeHtml(field.field_code)}" class="h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>`;
-    } else if (field.field_type === "date") {
-      control = `<input type="date" value="${escapeHtml(value)}" ${common}>`;
-    } else if (field.field_type === "dropdown") {
-      const options = Array.isArray(field.field_config && field.field_config.options)
-        ? field.field_config.options
-        : [];
-      control = `
-        <select ${common}>
-          <option value="">Select...</option>
-          ${options.map(option => {
-            const optionValue = option.entry_code || option.code || option.value || "";
-            const optionLabel = option.entry_label || option.label || optionValue;
-            return `<option value="${escapeHtml(optionValue)}" ${String(value) === String(optionValue) ? "selected" : ""}>${escapeHtml(optionLabel)}</option>`;
-          }).join("")}
-        </select>
-      `;
-    } else if (field.field_type === "file") {
-      const fileLabel = value && typeof value === "object" ? value.original_name : "";
-      control = row.submission_id
-        ? `<a href="/module/SUBMIT/submissions/${row.submission_id}" class="text-sm font-semibold text-indigo-600 hover:text-indigo-700">${fileLabel ? escapeHtml(fileLabel) : "Open monthly sheet"}</a>`
-        : '<span class="text-sm text-slate-400">Create draft to upload</span>';
-    } else {
-      const type = field.field_type === "number" || field.field_type === "calculated" ? "number" : "text";
-      control = `<input type="${type}" value="${escapeHtml(value)}" ${common}>`;
-    }
-
-    return `<td class="min-w-[180px] px-4 py-4 align-top">${control}</td>`;
   }
 
   function onCellChange(event) {
