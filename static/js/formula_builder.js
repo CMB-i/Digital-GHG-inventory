@@ -330,7 +330,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const values = {};
     previewInputsGrid.querySelectorAll(".preview-var-input").forEach(input => {
-      values[input.dataset.var] = parseFloat(input.value) || 0;
+      values[input.dataset.var] = input.value.trim();
     });
 
     if (window.FormulaRuntime) {
