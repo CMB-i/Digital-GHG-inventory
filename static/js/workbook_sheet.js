@@ -230,6 +230,66 @@
   }
 
   function renderCell(row, field, options) {
+    if (options.mode === "calc_results") {
+      const cell = cellObject(row, field);
+      if (!cell) {
+        return `<td class="border px-3 py-3 bg-slate-50 text-slate-400 text-xs text-center italic">—</td>`;
+      }
+      if (cell.status === "not_configured") {
+        return `
+          <td class="border px-3 py-2 bg-slate-100 text-slate-400 text-xs align-top">
+            <div class="font-semibold text-slate-500">Not configured</div>
+          </td>
+        `;
+      }
+      if (cell.status === "missing_input") {
+        return `
+          <td class="border px-3 py-2 bg-slate-50 text-slate-500 text-xs align-top">
+            <div class="text-slate-400 font-bold">—</div>
+            ${Array.isArray(cell.warnings) ? cell.warnings.map(w => `<div class="mt-1 text-[10px] text-amber-600 bg-amber-50 px-1 py-0.5 rounded border border-amber-100 w-max max-w-[200px] whitespace-normal" title="${escapeHtml(w)}">${escapeHtml(w)}</div>`).join("") : ""}
+          </td>
+        `;
+      }
+      if (cell.status === "pending_approval" || cell.status === "preview_only") {
+        const valPreview = cell.preview_value !== null ? `${cell.preview_value} ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}` : "—";
+        return `
+          <td class="border px-3 py-2 bg-blue-50/20 text-xs align-top">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="font-bold text-blue-700 text-sm">${escapeHtml(valPreview)}</span>
+              <span class="inline-flex items-center rounded bg-blue-50 px-1 py-0.5 text-[9px] font-bold text-blue-600 border border-blue-100">Preview</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-500">
+              Reportable: <span class="italic text-slate-400">— (unapproved)</span>
+            </div>
+            ${Array.isArray(cell.warnings) ? cell.warnings.map(w => `<div class="mt-1 text-[10px] text-amber-600 bg-amber-50 px-1 py-0.5 rounded border border-amber-100 w-max max-w-[200px] whitespace-normal" title="${escapeHtml(w)}">${escapeHtml(w)}</div>`).join("") : ""}
+          </td>
+        `;
+      }
+      if (cell.status === "calculable") {
+        const valReportable = cell.reportable_value !== null ? `${cell.reportable_value} ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}` : "—";
+        return `
+          <td class="border px-3 py-2 bg-emerald-50/20 text-xs align-top">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="font-bold text-emerald-700 text-sm">${escapeHtml(valReportable)}</span>
+              <span class="inline-flex items-center rounded bg-emerald-50 px-1 py-0.5 text-[9px] font-bold text-emerald-600 border border-emerald-100">Approved</span>
+            </div>
+            <div class="mt-1 text-[10px] text-slate-500">
+              Reportable: <span class="font-semibold text-slate-700">${escapeHtml(valReportable)}</span>
+            </div>
+          </td>
+        `;
+      }
+      if (cell.status === "evaluation_error") {
+        return `
+          <td class="border px-3 py-2 bg-rose-50/50 text-xs align-top">
+            <div class="font-bold text-rose-700">Calculation error</div>
+            ${Array.isArray(cell.warnings) ? cell.warnings.map(w => `<div class="mt-1 text-[10px] text-rose-600 bg-rose-50 px-1 py-0.5 rounded border border-rose-100 w-max max-w-[200px] whitespace-normal" title="${escapeHtml(w)}">${escapeHtml(w)}</div>`).join("") : ""}
+          </td>
+        `;
+      }
+      return `<td class="border px-3 py-3 bg-slate-50 text-slate-400 text-xs text-center italic">—</td>`;
+    }
+
     const isNonMonthly = isFieldNonMonthly(field, options);
     const editable = options.mode === "entry" && row.editable && !cellLocked(row, field) && !isNonMonthly;
     const disabled = !editable || field.field_type === "calculated" || field.field_type === "file";

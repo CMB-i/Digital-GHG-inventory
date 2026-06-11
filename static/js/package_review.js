@@ -88,7 +88,9 @@ document.addEventListener("DOMContentLoaded", function () {
     sheetTitle.textContent = sheet.form_name;
     sheetMeta.textContent = `Full FY context · Submitted month highlighted · Submitted by ${sheet.submitted_by} on ${formatDate(sheet.submitted_at)}`;
     sheetStatus.className = `inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${getStatusClass(sheet.status)}`;
+    sheetStatus.classList.remove("hidden");
     sheetStatus.textContent = sheet.status;
+    sheetFallbackLink.classList.remove("hidden");
     sheetFallbackLink.href = `/module/APPROV/packages/${packageId}?sheet=${encodeURIComponent(sheet.form_id)}#sheet-${sheet.submission_id}`;
     sheetFallbackLink.dataset.submissionId = String(sheet.submission_id);
     sheetFallbackLink.dataset.formId = String(sheet.form_id);
@@ -151,9 +153,40 @@ document.addEventListener("DOMContentLoaded", function () {
       };
       formTabs.appendChild(button);
     });
+
+    // Add Calculation Results tab button for reviewer
+    const calcButton = document.createElement("button");
+    calcButton.type = "button";
+    calcButton.id = "sheet-tab-calc-results";
+    const calcActive = activeSheetIndex === "calc_results";
+    calcButton.className = `rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+      calcActive
+        ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+    }`;
+    calcButton.textContent = "Calculation Results";
+    calcButton.onclick = function () {
+      focusSheet("calc_results");
+    };
+    formTabs.appendChild(calcButton);
   }
 
   function focusSheet(index, updateUrl = true) {
+    if (index === "calc_results") {
+      activeSheetIndex = "calc_results";
+      renderTabs();
+      loadCalculationResultsForReview();
+      const activeSheet = document.getElementById("active-sheet");
+      if (activeSheet) {
+        activeSheet.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      if (updateUrl && window.history && window.history.replaceState) {
+        const url = `/module/APPROV/packages/${packageId}?sheet=calc_results`;
+        window.history.replaceState(null, "", url);
+      }
+      return;
+    }
+
     if (!reviewData || !reviewData.sheets[index]) return;
     activeSheetIndex = index;
     renderTabs();
@@ -169,15 +202,51 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
+  async function loadCalculationResultsForReview() {
+    sheetTitle.textContent = "Calculation Results";
+    sheetMeta.textContent = "Read-only calculation dashboard for this financial year.";
+    sheetStatus.classList.add("hidden");
+    sheetFallbackLink.classList.add("hidden");
+
+    sheetHead.innerHTML = `<tr><td class="px-5 py-4 text-slate-500">Loading calculations...</td></tr>`;
+    sheetValues.innerHTML = "";
+
+    try {
+      const response = await fetch(`/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${reviewData.package.site_id}&fy=${reviewData.package.financial_year_start}`);
+      if (!response.ok) throw new Error("Could not load calculation results.");
+      const data = await response.json();
+
+      window.WorkbookSheet.render({
+        mode: "calc_results",
+        headEl: sheetHead,
+        bodyEl: sheetValues,
+        fields: data.fields || [],
+        sections: data.sections || [],
+        rows: (data.rows || []).map(row => ({
+          ...row,
+          editable: false,
+          is_active_period: row.month === reviewData.package.month
+        })),
+        selectedRowKey: data.rows.find(row => row.month === reviewData.package.month) ? `${reviewData.package.year || "row"}-${reviewData.package.month || "0"}` : null,
+      });
+    } catch (err) {
+      sheetHead.innerHTML = `<tr><td class="px-5 py-4 text-rose-500 font-bold">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
   function renderReview(data) {
     reviewData = data;
     const pkg = data.package;
     if (requestedSheet) {
-      const requestedIndex = data.sheets.findIndex((sheet) => (
-        String(sheet.form_id) === String(requestedSheet) ||
-        String(sheet.submission_id) === String(requestedSheet)
-      ));
-      if (requestedIndex >= 0) activeSheetIndex = requestedIndex;
+      if (requestedSheet === "calc_results") {
+        activeSheetIndex = "calc_results";
+      } else {
+        const requestedIndex = data.sheets.findIndex((sheet) => (
+          String(sheet.form_id) === String(requestedSheet) ||
+          String(sheet.submission_id) === String(requestedSheet)
+        ));
+        if (requestedIndex >= 0) activeSheetIndex = requestedIndex;
+      }
     }
 
     reviewTitle.textContent = `${pkg.period_label} · ${pkg.site_name}`;
@@ -194,13 +263,17 @@ document.addEventListener("DOMContentLoaded", function () {
     reviewLoading.classList.add("hidden");
     renderLegend();
     renderTabs();
-    renderSheet(data.sheets[activeSheetIndex] || data.sheets[0]);
+    if (activeSheetIndex === "calc_results") {
+      loadCalculationResultsForReview();
+    } else {
+      renderSheet(data.sheets[activeSheetIndex] || data.sheets[0]);
+    }
     renderActions(pkg);
     reviewContent.classList.remove("hidden");
   }
 
   function activeSheet() {
-    return reviewData && reviewData.sheets ? reviewData.sheets[activeSheetIndex] : null;
+    return reviewData && reviewData.sheets && activeSheetIndex !== "calc_results" ? reviewData.sheets[activeSheetIndex] : null;
   }
 
   function activeField(fieldCode) {
