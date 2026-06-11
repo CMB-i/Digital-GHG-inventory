@@ -228,6 +228,7 @@ document.addEventListener("DOMContentLoaded", function () {
       headEl: tableHead,
       bodyEl: tableBody,
       fields,
+      sections: state.workbook.sections || [],
       rows: rows.map(row => ({
         ...row,
         editable: Boolean(row.editability && row.editability.editable),
@@ -275,6 +276,10 @@ document.addEventListener("DOMContentLoaded", function () {
     const input = event.target;
     const row = state.workbook.rows.find(item => rowKey(item) === input.dataset.rowKey);
     if (!row || !(row.editability && row.editability.editable)) return;
+
+    // Ignore change events from non-monthly fields
+    const field = state.workbook.fields.find(f => f.field_code === input.dataset.fieldCode);
+    if (field && window.WorkbookSheet.isFieldNonMonthly(field, state.workbook)) return;
 
     if (!row.values) row.values = {};
     row.values[input.dataset.fieldCode] = input.type === "checkbox" ? input.checked : input.value;

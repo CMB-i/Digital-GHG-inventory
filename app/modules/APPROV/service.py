@@ -285,6 +285,7 @@ def compose_package_review_data(package_id, user_id):
             "submitted_by": sub_submitter.full_name if sub_submitter else "System",
             "submitted_at": submission.submitted_at,
             "fields": workbook_context["fields"],
+            "sections": workbook_context.get("sections", []),
             "rows": workbook_context["rows"],
             "active_row_key": workbook_context["active_row_key"],
             "values": active_row.get("values", {}) if active_row else {},

@@ -193,6 +193,8 @@ def _field_payload(form_version_id):
             "field_type": field_version.field_type,
             "field_config": field_version.field_config or {},
             "display_order": field.display_order,
+            "section_id": field_version.section_id,
+            "frequency": field_version.frequency or "monthly",
         })
     return fields
 
@@ -490,6 +492,17 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
             "issues": submission_value_issues_by_field(submission, fields),
         })
 
+    from app.modules.FORMBLD.model import FormSection
+    sections_query = FormSection.query.filter_by(form_id=form.id, is_deleted=False).order_by(FormSection.display_order.asc(), FormSection.id.asc()).all()
+    sections = [{
+        "id": s.id,
+        "name": s.name,
+        "code": s.code,
+        "layout_type": s.layout_type,
+        "display_order": s.display_order,
+        "description": s.description
+    } for s in sections_query]
+
     return {
         "financial_year": {
             "start_year": fy_start_year,
@@ -508,6 +521,7 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
             "workflow_id": metadata.get("workflow_id"),
         },
         "fields": fields,
+        "sections": sections,
         "rows": rows,
     }
 
@@ -578,6 +592,17 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
             "is_active_period": bool(period and active_period_id and period.id == active_period_id),
         })
 
+    from app.modules.FORMBLD.model import FormSection
+    sections_query = FormSection.query.filter_by(form_id=form.id, is_deleted=False).order_by(FormSection.display_order.asc(), FormSection.id.asc()).all()
+    sections = [{
+        "id": s.id,
+        "name": s.name,
+        "code": s.code,
+        "layout_type": s.layout_type,
+        "display_order": s.display_order,
+        "description": s.description
+    } for s in sections_query]
+
     return {
         "financial_year": {
             "start_year": fy_start_year,
@@ -594,6 +619,7 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
             "code": form.code,
         },
         "fields": fields,
+        "sections": sections,
         "rows": rows,
         "active_row_key": next(
             (row["row_key"] for row in rows if row["is_active_period"]),

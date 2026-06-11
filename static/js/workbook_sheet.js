@@ -124,9 +124,42 @@
     ].join(" ");
   }
 
-  function renderEditableControl(field, row, disabled) {
+  function isFieldNonMonthly(field, options) {
+    if (field.frequency === "annual" || field.frequency === "static") {
+      return true;
+    }
+    if (options && Array.isArray(options.sections) && field.section_id) {
+      const section = options.sections.find(s => s.id === field.section_id);
+      if (section && (section.layout_type === "annual_table" || section.layout_type === "reference_table")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function renderEditableControl(field, row, disabled, options) {
     const value = primitiveValue(cellObject(row, field));
-    const common = `data-row-key="${escapeHtml(rowKey(row))}" data-field-code="${escapeHtml(field.field_code)}" class="${inputClass(disabled)}" ${disabled ? "disabled" : ""}`;
+    const isNonMonthly = isFieldNonMonthly(field, options);
+    let placeholderText = "";
+    if (isNonMonthly) {
+      if (field.frequency === "annual") {
+        placeholderText = "Annual parameter";
+      } else if (field.frequency === "static") {
+        placeholderText = "Static parameter";
+      } else if (options && Array.isArray(options.sections) && field.section_id) {
+        const section = options.sections.find(s => s.id === field.section_id);
+        if (section && section.layout_type === "annual_table") {
+          placeholderText = "Annual parameter";
+        } else if (section && section.layout_type === "reference_table") {
+          placeholderText = "Reference parameter";
+        }
+      }
+      if (!placeholderText) {
+        placeholderText = "Read-only parameter";
+      }
+    }
+
+    const common = `data-row-key="${escapeHtml(rowKey(row))}" data-field-code="${escapeHtml(field.field_code)}" class="${inputClass(disabled)}" ${placeholderText ? `placeholder="${escapeHtml(placeholderText)}"` : ""} ${disabled ? "disabled" : ""}`;
 
     if (field.field_type === "boolean") {
       const checked = value === true || value === "true" || value === "1" || value === 1 || value === "on";
@@ -136,13 +169,13 @@
       return `<input type="date" value="${escapeHtml(value)}" ${common}>`;
     }
     if (field.field_type === "dropdown") {
-      const options = Array.isArray(field.field_config && field.field_config.options)
+      const dropdownOptions = Array.isArray(field.field_config && field.field_config.options)
         ? field.field_config.options
         : [];
       return `
         <select ${common}>
-          <option value="">Select...</option>
-          ${options.map((option) => {
+          <option value="">${placeholderText ? escapeHtml(placeholderText) : "Select..."}</option>
+          ${dropdownOptions.map((option) => {
             const optionValue = option.entry_code || option.code || option.value || "";
             const optionLabel = option.entry_label || option.label || optionValue;
             return `<option value="${escapeHtml(optionValue)}" ${String(value) === String(optionValue) ? "selected" : ""}>${escapeHtml(optionLabel)}</option>`;
@@ -197,7 +230,8 @@
   }
 
   function renderCell(row, field, options) {
-    const editable = options.mode === "entry" && row.editable && !cellLocked(row, field);
+    const isNonMonthly = isFieldNonMonthly(field, options);
+    const editable = options.mode === "entry" && row.editable && !cellLocked(row, field) && !isNonMonthly;
     const disabled = !editable || field.field_type === "calculated" || field.field_type === "file";
     const state = cellState(row, field);
     const proof = proofFor(row, field);
@@ -206,7 +240,7 @@
     const locked = cellLocked(row, field);
     const openHandler = options.onCellOpen || options.onIssueClick;
     const canOpen = typeof openHandler === "function";
-    const stateClass = {
+    let stateClass = {
       blank_editable: "bg-white border-slate-200",
       draft_filled: "bg-blue-50/50 border-blue-100",
       submitted: "bg-indigo-50/60 border-indigo-100",
@@ -214,6 +248,11 @@
       changes_requested: "bg-amber-50/70 border-amber-200",
       late_entry: "bg-violet-50/60 border-violet-200 border-dashed",
     }[state] || "bg-white border-slate-200";
+
+    if (isNonMonthly) {
+      stateClass = "bg-slate-50 border-slate-200";
+    }
+
     const interactiveClass = canOpen && options.mode !== "entry"
       ? "cursor-pointer hover:ring-2 hover:ring-indigo-200"
       : "";
@@ -227,7 +266,7 @@
           ${proof && field.field_type !== "file" ? '<span class="absolute bottom-1 left-1 h-1.5 w-1.5 rounded-full bg-indigo-500" title="Proof attached"></span>' : ""}
           <div class="${issues.length || locked ? "pr-5" : "pr-2"}">
             ${options.mode === "entry"
-              ? renderEditableControl(field, row, disabled)
+              ? renderEditableControl(field, row, disabled, options)
               : `<div class="px-2 py-2 text-sm text-slate-800">${formatReadonlyValue(field, row)}</div>`}
           </div>
           ${issues.length && options.mode === "entry" && canOpen ? '<button type="button" class="absolute right-0 top-0 h-5 w-5 rounded-bl bg-amber-500 text-[10px] font-bold text-white" data-cell-open="true" title="View cell comments">!</button>' : ""}
@@ -246,27 +285,90 @@
   }
 
   function render(options) {
-    const fields = [...(options.fields || [])].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+    const fields = options.fields || [];
     const rows = options.rows || [];
     const headEl = options.headEl;
     const bodyEl = options.bodyEl;
     if (!headEl || !bodyEl) return;
 
-    headEl.innerHTML = `
-      <tr>
-        <th class="sticky left-0 z-20 min-w-[150px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Month</th>
-        <th class="min-w-[160px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Status</th>
-        ${fields.map((field) => `
-          <th class="min-w-[190px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">
-            <div class="font-bold text-slate-600">${escapeHtml(field.field_name)}</div>
-            <div class="mt-0.5 text-[10px] normal-case text-slate-400">
-              ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
-              ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-500">*</span>' : ""}
-            </div>
-          </th>
-        `).join("")}
-      </tr>
-    `;
+    const hasSections = Array.isArray(options.sections) && options.sections.length > 0;
+    let orderedFields = [];
+    let groups = [];
+
+    if (hasSections) {
+      // Group fields by section
+      options.sections.forEach(section => {
+        const sectionFields = fields.filter(f => f.section_id === section.id);
+        if (sectionFields.length > 0) {
+          groups.push({
+            id: section.id,
+            name: section.name,
+            layout_type: section.layout_type || "monthly_table",
+            fields: sectionFields.sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+          });
+        }
+      });
+
+      // Find any fields not in any of the active sections
+      const sectionIds = new Set(options.sections.map(s => s.id));
+      const ungroupedFields = fields.filter(f => !f.section_id || !sectionIds.has(f.section_id));
+      if (ungroupedFields.length > 0) {
+        groups.push({
+          id: null,
+          name: "Ungrouped",
+          layout_type: "monthly_table",
+          fields: ungroupedFields.sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+        });
+      }
+
+      groups.forEach(g => {
+        orderedFields.push(...g.fields);
+      });
+    } else {
+      orderedFields = [...fields].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+    }
+
+    if (hasSections && groups.length > 0) {
+      headEl.innerHTML = `
+        <tr>
+          <th rowspan="2" class="sticky left-0 z-20 min-w-[150px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Month</th>
+          <th rowspan="2" class="min-w-[160px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Status</th>
+          ${groups.map((group) => `
+            <th colspan="${group.fields.length}" class="border border-slate-200 bg-slate-100 px-3 py-1.5 text-center font-extrabold text-slate-700 tracking-wide uppercase text-xs">
+              ${escapeHtml(group.name)}
+              ${group.layout_type !== "monthly_table" ? `<span class="ml-1.5 text-[9px] font-normal lowercase text-slate-500 bg-slate-200 px-1.5 py-0.5 rounded">(${group.layout_type.replace("_table", "")})</span>` : ""}
+            </th>
+          `).join("")}
+        </tr>
+        <tr>
+          ${orderedFields.map((field) => `
+            <th class="min-w-[190px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">
+              <div class="font-bold text-slate-600">${escapeHtml(field.field_name)}</div>
+              <div class="mt-0.5 text-[10px] normal-case text-slate-400">
+                ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
+                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-500">*</span>' : ""}
+              </div>
+            </th>
+          `).join("")}
+        </tr>
+      `;
+    } else {
+      headEl.innerHTML = `
+        <tr>
+          <th class="sticky left-0 z-20 min-w-[150px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Month</th>
+          <th class="min-w-[160px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Status</th>
+          ${orderedFields.map((field) => `
+            <th class="min-w-[190px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">
+              <div class="font-bold text-slate-600">${escapeHtml(field.field_name)}</div>
+              <div class="mt-0.5 text-[10px] normal-case text-slate-400">
+                ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
+                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-500">*</span>' : ""}
+              </div>
+            </th>
+          `).join("")}
+        </tr>
+      `;
+    }
 
     bodyEl.innerHTML = rows.map((row) => {
       const key = rowKey(row);
@@ -283,7 +385,7 @@
             <span class="inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(row)}">${escapeHtml(status)}</span>
             ${row.reason ? `<div class="mt-1 max-w-[180px] text-xs text-slate-400">${escapeHtml(row.reason)}</div>` : ""}
           </td>
-          ${fields.map((field) => renderCell(row, field, options)).join("")}
+          ${orderedFields.map((field) => renderCell(row, field, options)).join("")}
         </tr>
       `;
     }).join("");
@@ -310,7 +412,7 @@
           if (options.mode === "entry" && !event.target.closest("[data-cell-open='true']")) return;
           const rowEl = cell.closest("tr[data-row-key]");
           const row = rows.find((item) => rowKey(item) === (rowEl ? rowEl.dataset.rowKey : ""));
-          const field = fields.find((item) => String(item.field_code) === String(cell.dataset.fieldCode));
+          const field = orderedFields.find((item) => String(item.field_code) === String(cell.dataset.fieldCode));
           if (!row || !field) return;
           openHandler(cellInfo(row, field));
         });
@@ -325,6 +427,7 @@
     primitiveValue,
     cellStateLabel,
     cellIssues,
+    isFieldNonMonthly,
     render,
   };
 })();
