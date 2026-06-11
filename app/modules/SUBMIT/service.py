@@ -621,6 +621,10 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
         "fields": fields,
         "sections": sections,
         "rows": rows,
+        "active_row_key": next(
+            (row["row_key"] for row in rows if row["is_active_period"]),
+            None,
+        ),
     }
 
 
@@ -896,6 +900,7 @@ def compose_calculation_results(site_id, fy_start_year, user_id):
 
         rows.append({
             **item,
+            "row_key": f"{item['year']}-{item['month']}",
             "period_id": period.id if period else None,
             "period_status": period.status if period else None,
             "submission_id": None,

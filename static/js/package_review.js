@@ -216,18 +216,21 @@ document.addEventListener("DOMContentLoaded", function () {
       if (!response.ok) throw new Error("Could not load calculation results.");
       const data = await response.json();
 
+      const mappedRows = (data.rows || []).map(row => ({
+        ...row,
+        editable: false,
+        is_active_period: row.month === reviewData.package.month
+      }));
+      const activeCalcRow = mappedRows.find(row => row.is_active_period);
+
       window.WorkbookSheet.render({
         mode: "calc_results",
         headEl: sheetHead,
         bodyEl: sheetValues,
         fields: data.fields || [],
         sections: data.sections || [],
-        rows: (data.rows || []).map(row => ({
-          ...row,
-          editable: false,
-          is_active_period: row.month === reviewData.package.month
-        })),
-        selectedRowKey: data.rows.find(row => row.month === reviewData.package.month) ? `${reviewData.package.year || "row"}-${reviewData.package.month || "0"}` : null,
+        rows: mappedRows,
+        selectedRowKey: activeCalcRow ? activeCalcRow.row_key : null,
       });
     } catch (err) {
       sheetHead.innerHTML = `<tr><td class="px-5 py-4 text-rose-500 font-bold">${escapeHtml(err.message)}</td></tr>`;
