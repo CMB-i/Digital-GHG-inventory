@@ -91,6 +91,43 @@
     </div>
   </div>
 </div>
+
+<div id="cell-issue-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4">
+  <div class="w-full max-w-lg rounded-xl bg-white shadow-xl">
+    <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+      <div>
+        <h2 class="text-sm font-bold text-slate-900">Cell issue/comment</h2>
+        <p id="cell-issue-context" class="mt-1 text-xs text-slate-500"></p>
+      </div>
+      <button id="btn-close-cell-issue" type="button" class="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</button>
+    </div>
+    <div class="space-y-4 px-5 py-4">
+      <div class="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm sm:grid-cols-2">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Value</div>
+          <div id="cell-issue-value" class="mt-1 font-semibold text-slate-900">—</div>
+        </div>
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-slate-500">State</div>
+          <div id="cell-issue-state" class="mt-1 font-semibold text-slate-900">—</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Existing comments</div>
+        <div id="cell-issue-list" class="mt-2 max-h-40 space-y-2 overflow-y-auto text-sm text-slate-600"></div>
+      </div>
+      <div id="cell-issue-add-section">
+        <label for="cell-issue-text" class="block text-xs font-bold uppercase tracking-wider text-slate-500">Add comment</label>
+        <textarea id="cell-issue-text" rows="4" maxlength="2000" class="mt-1 w-full rounded-lg border-slate-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500" placeholder="Describe what needs attention in this cell..."></textarea>
+      </div>
+      <div id="cell-issue-error" class="hidden rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700"></div>
+    </div>
+    <div class="flex justify-end gap-3 border-t border-slate-200 px-5 py-4">
+      <button id="btn-cancel-cell-issue" type="button" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
+      <button id="btn-save-cell-issue" type="button" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700">Save comment</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

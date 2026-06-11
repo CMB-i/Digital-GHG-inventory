@@ -26,11 +26,23 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnApprovePackage = document.getElementById("btn-approve-package");
   const btnRequestChangesPackage = document.getElementById("btn-request-changes-package");
   const btnRejectPackage = document.getElementById("btn-reject-package");
+  const cellIssueModal = document.getElementById("cell-issue-modal");
+  const cellIssueContext = document.getElementById("cell-issue-context");
+  const cellIssueList = document.getElementById("cell-issue-list");
+  const cellIssueValue = document.getElementById("cell-issue-value");
+  const cellIssueState = document.getElementById("cell-issue-state");
+  const cellIssueAddSection = document.getElementById("cell-issue-add-section");
+  const cellIssueText = document.getElementById("cell-issue-text");
+  const cellIssueError = document.getElementById("cell-issue-error");
+  const btnCloseCellIssue = document.getElementById("btn-close-cell-issue");
+  const btnCancelCellIssue = document.getElementById("btn-cancel-cell-issue");
+  const btnSaveCellIssue = document.getElementById("btn-save-cell-issue");
   const initialParams = new URLSearchParams(window.location.search);
   const requestedSheet = initialParams.get("sheet");
 
   let reviewData = null;
   let activeSheetIndex = 0;
+  let selectedIssueCell = null;
 
   function formatDate(dateStr) {
     if (!dateStr) return "—";
@@ -74,7 +86,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function renderSheet(sheet) {
     sheetTitle.textContent = sheet.form_name;
-    sheetMeta.textContent = `Submitted by ${sheet.submitted_by} on ${formatDate(sheet.submitted_at)}`;
+    sheetMeta.textContent = `Full FY context · Submitted month highlighted · Submitted by ${sheet.submitted_by} on ${formatDate(sheet.submitted_at)}`;
     sheetStatus.className = `inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${getStatusClass(sheet.status)}`;
     sheetStatus.textContent = sheet.status;
     sheetFallbackLink.href = `/module/APPROV/packages/${packageId}?sheet=${encodeURIComponent(sheet.form_id)}#sheet-${sheet.submission_id}`;
@@ -100,7 +112,7 @@ document.addEventListener("DOMContentLoaded", function () {
       headEl: sheetHead,
       bodyEl: sheetValues,
       fields,
-      rows: [{
+      rows: sheet.rows || [{
         row_key: `submission-${sheet.submission_id}`,
         label: reviewData.package.period_label,
         period_label: sheet.form_name,
@@ -111,7 +123,10 @@ document.addEventListener("DOMContentLoaded", function () {
         values: sheet.values || {},
         proofs: sheet.proofs || {},
         editable: false,
-      }]
+        is_active_period: true,
+      }],
+      selectedRowKey: sheet.active_row_key || null,
+      onCellOpen: openCellIssueModal
     });
   }
 
@@ -182,6 +197,134 @@ document.addEventListener("DOMContentLoaded", function () {
     renderActions(pkg);
     reviewContent.classList.remove("hidden");
   }
+
+  function activeSheet() {
+    return reviewData && reviewData.sheets ? reviewData.sheets[activeSheetIndex] : null;
+  }
+
+  function activeField(fieldCode) {
+    const sheet = activeSheet();
+    if (!sheet) return null;
+    return (sheet.fields || []).find((field) => String(field.field_code) === String(fieldCode)) || null;
+  }
+
+  function activeCellIssues(fieldCode) {
+    const sheet = activeSheet();
+    if (!sheet || !window.WorkbookSheet) return [];
+    const activeRow = (sheet.rows || []).find((row) => row.row_key === sheet.active_row_key);
+    return window.WorkbookSheet.cellIssues(
+      activeRow || { values: sheet.values || {}, issues: sheet.issues || {} },
+      activeField(fieldCode) || { field_code: fieldCode }
+    );
+  }
+
+  function renderCellIssueList(issues) {
+    if (!issues.length) {
+      cellIssueList.innerHTML = '<div class="rounded-lg bg-slate-50 px-3 py-2 text-slate-400">No comments for this cell yet.</div>';
+      return;
+    }
+    cellIssueList.innerHTML = issues.map((issue) => `
+      <div class="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+        <div class="text-xs font-bold text-amber-900">${escapeHtml(issue.raised_by_name || "Reviewer")}</div>
+        <div class="mt-1 text-sm text-amber-800">${escapeHtml(issue.issue_text || "")}</div>
+      </div>
+    `).join("");
+  }
+
+  function openCellIssueModal(cellInfo) {
+    const field = activeField(cellInfo.fieldCode);
+    const actions = reviewData.package.actions || {};
+    const canAddIssues = Boolean(actions.can_add_issues && cellInfo.submissionValueId);
+    selectedIssueCell = {
+      submissionValueId: cellInfo.submissionValueId,
+      fieldCode: cellInfo.fieldCode,
+      rowKey: cellInfo.rowKey,
+      canAddIssues,
+    };
+    cellIssueContext.textContent = `${activeSheet() ? activeSheet().form_name : "Sheet"} · ${cellInfo.rowLabel} · ${field ? field.field_name : cellInfo.fieldCode}`;
+    cellIssueValue.textContent = cellInfo.value || "Empty";
+    cellIssueState.textContent = `${cellInfo.cellStateLabel}${cellInfo.locked ? " · Locked" : ""}`;
+    cellIssueText.value = "";
+    cellIssueError.classList.add("hidden");
+    renderCellIssueList(cellInfo.issues || activeCellIssues(cellInfo.fieldCode));
+    cellIssueAddSection.classList.toggle("hidden", !canAddIssues);
+    btnSaveCellIssue.classList.toggle("hidden", !canAddIssues);
+    cellIssueModal.classList.remove("hidden");
+    cellIssueModal.classList.add("flex");
+    if (canAddIssues) cellIssueText.focus();
+  }
+
+  function closeCellIssueModal() {
+    selectedIssueCell = null;
+    cellIssueModal.classList.add("hidden");
+    cellIssueModal.classList.remove("flex");
+  }
+
+  function showCellIssueError(message) {
+    cellIssueError.textContent = message;
+    cellIssueError.classList.remove("hidden");
+  }
+
+  function saveCellIssue() {
+    if (!selectedIssueCell || !selectedIssueCell.canAddIssues) return;
+    const issueText = cellIssueText.value.trim();
+    if (!issueText) {
+      showCellIssueError("Enter a comment before saving.");
+      return;
+    }
+    btnSaveCellIssue.disabled = true;
+    btnSaveCellIssue.textContent = "Saving...";
+    fetch(`/module/APPROV/api/packages/${packageId}/values/${selectedIssueCell.submissionValueId}/issues`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ issue_text: issueText }),
+    })
+      .then((res) => {
+        return res.json().then((data) => {
+          if (!res.ok) throw new Error(data.error || "Could not save cell comment.");
+          return data;
+        });
+      })
+      .then((data) => {
+        const issue = data.data && data.data.issue;
+        const valueId = selectedIssueCell.submissionValueId;
+        const sheet = activeSheet();
+        const field = activeField(selectedIssueCell.fieldCode);
+        if (issue && sheet && field) {
+          const row = (sheet.rows || []).find((item) => item.row_key === selectedIssueCell.rowKey);
+          const source = row || sheet;
+          const cell = source.values ? source.values[field.field_code] : null;
+          if (cell && typeof cell === "object") {
+            if (!Array.isArray(cell.issues)) cell.issues = [];
+            cell.issues.push(issue);
+          }
+        }
+        const fieldCode = selectedIssueCell.fieldCode;
+        closeCellIssueModal();
+        renderSheet(activeSheet());
+        const refreshedField = activeField(fieldCode);
+        if (refreshedField) {
+          const selector = `[data-submission-value-id="${valueId}"]`;
+          const cellEl = sheetValues.querySelector(selector);
+          if (cellEl) cellEl.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        }
+      })
+      .catch((err) => showCellIssueError(err.message))
+      .finally(() => {
+        btnSaveCellIssue.disabled = false;
+        btnSaveCellIssue.textContent = "Save comment";
+      });
+  }
+
+  [btnCloseCellIssue, btnCancelCellIssue].forEach((button) => {
+    if (button) button.addEventListener("click", closeCellIssueModal);
+  });
+  if (cellIssueModal) {
+    cellIssueModal.addEventListener("click", function (event) {
+      if (event.target === cellIssueModal) closeCellIssueModal();
+    });
+  }
+  if (btnSaveCellIssue) btnSaveCellIssue.addEventListener("click", saveCellIssue);
 
   if (sheetFallbackLink) {
     sheetFallbackLink.addEventListener("click", function (event) {

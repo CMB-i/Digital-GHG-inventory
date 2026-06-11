@@ -65,12 +65,31 @@
     return cell && typeof cell === "object" ? cell.remark : null;
   }
 
+  function cellIssues(row, field) {
+    const cell = cellObject(row, field);
+    if (cell && typeof cell === "object" && Array.isArray(cell.issues)) return cell.issues;
+    const rowIssues = row.issues || {};
+    const issues = rowIssues[field.field_code] || rowIssues[String(field.field_id)] || rowIssues[field.field_id];
+    return Array.isArray(issues) ? issues : [];
+  }
+
+  function submissionValueId(row, field) {
+    const cell = cellObject(row, field);
+    if (cell && typeof cell === "object" && cell.submission_value_id) return cell.submission_value_id;
+    return null;
+  }
+
   function cellStateBadge(state) {
     const meta = CELL_STATE_META[state] || {
       label: state || "Unknown",
       className: "bg-slate-100 text-slate-600 border-slate-200",
     };
     return `<span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${meta.className}">${escapeHtml(meta.label)}</span>`;
+  }
+
+  function cellStateLabel(state) {
+    const meta = CELL_STATE_META[state] || { label: state || "Unknown" };
+    return meta.label;
   }
 
   function formatReadonlyValue(field, row) {
@@ -144,35 +163,74 @@
     return `<input type="${type}" value="${escapeHtml(value)}" ${common}>`;
   }
 
+  function displayValueText(field, row) {
+    const cell = cellObject(row, field);
+    const proof = proofFor(row, field);
+    if (field.field_type === "file" && proof) return proof.original_name || "Uploaded file";
+    const value = primitiveValue(cell);
+    if (field.field_type === "boolean") {
+      if (value === true || value === "true" || value === "1" || value === 1 || value === "on") return "Yes";
+      if (value === false || value === "false" || value === "0" || value === 0) return "No";
+    }
+    return value === "" ? "Empty" : String(value);
+  }
+
+  function cellInfo(row, field) {
+    const state = cellState(row, field);
+    const issues = cellIssues(row, field);
+    return {
+      rowKey: rowKey(row),
+      rowLabel: row.label || row.period_label || row.sheet_name || "Row",
+      fieldCode: field.field_code,
+      fieldId: field.field_id,
+      fieldName: field.field_name,
+      fieldType: field.field_type,
+      submissionId: row.submission_id || null,
+      submissionValueId: submissionValueId(row, field),
+      value: displayValueText(field, row),
+      cellState: state,
+      cellStateLabel: cellStateLabel(state),
+      locked: cellLocked(row, field),
+      remark: cellRemark(row, field),
+      issues,
+    };
+  }
+
   function renderCell(row, field, options) {
     const editable = options.mode === "entry" && row.editable && !cellLocked(row, field);
     const disabled = !editable || field.field_type === "calculated" || field.field_type === "file";
     const state = cellState(row, field);
     const proof = proofFor(row, field);
-    const remark = cellRemark(row, field);
+    const issues = cellIssues(row, field);
+    const valueId = submissionValueId(row, field);
     const locked = cellLocked(row, field);
-    const stateClass = state === "approved_locked"
-      ? "bg-emerald-50/40"
-      : state === "changes_requested"
-        ? "bg-amber-50/60"
-        : state === "submitted"
-          ? "bg-indigo-50/40"
-          : "bg-white";
+    const openHandler = options.onCellOpen || options.onIssueClick;
+    const canOpen = typeof openHandler === "function";
+    const stateClass = {
+      blank_editable: "bg-white border-slate-200",
+      draft_filled: "bg-blue-50/50 border-blue-100",
+      submitted: "bg-indigo-50/60 border-indigo-100",
+      approved_locked: "bg-emerald-50/60 border-emerald-100",
+      changes_requested: "bg-amber-50/70 border-amber-200",
+      late_entry: "bg-violet-50/60 border-violet-200 border-dashed",
+    }[state] || "bg-white border-slate-200";
+    const interactiveClass = canOpen && options.mode !== "entry"
+      ? "cursor-pointer hover:ring-2 hover:ring-indigo-200"
+      : "";
+    const stateTitle = `${cellStateLabel(state)}${locked ? " · Locked" : ""}${issues.length ? ` · ${issues.length} issue${issues.length === 1 ? "" : "s"}` : ""}`;
 
     return `
-      <td class="min-w-[180px] border border-slate-200 align-top ${stateClass}">
-        <div class="relative min-h-[56px]">
-          <div class="pr-2">
+      <td class="min-w-[180px] border align-top ${stateClass} ${interactiveClass}" data-submission-value-id="${valueId ? escapeHtml(valueId) : ""}" data-field-code="${escapeHtml(field.field_code)}" title="${escapeHtml(stateTitle)}">
+        <div class="relative min-h-[48px]">
+          ${issues.length ? '<span class="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" title="Cell has issues/comments"></span>' : ""}
+          ${locked ? '<span class="absolute bottom-1 right-1 rounded-sm bg-emerald-100 px-1 text-[9px] font-bold text-emerald-700" title="Locked">LOCK</span>' : ""}
+          ${proof && field.field_type !== "file" ? '<span class="absolute bottom-1 left-1 h-1.5 w-1.5 rounded-full bg-indigo-500" title="Proof attached"></span>' : ""}
+          <div class="${issues.length || locked ? "pr-5" : "pr-2"}">
             ${options.mode === "entry"
               ? renderEditableControl(field, row, disabled)
               : `<div class="px-2 py-2 text-sm text-slate-800">${formatReadonlyValue(field, row)}</div>`}
           </div>
-          <div class="flex flex-wrap items-center gap-1 border-t border-slate-100 px-2 py-1">
-            ${cellStateBadge(state)}
-            ${locked ? '<span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Locked</span>' : ""}
-            ${proof ? '<span class="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">Proof</span>' : ""}
-          </div>
-          ${remark ? `<div class="border-t border-slate-100 px-2 py-1 text-xs text-slate-500">${escapeHtml(remark)}</div>` : ""}
+          ${issues.length && options.mode === "entry" && canOpen ? '<button type="button" class="absolute right-0 top-0 h-5 w-5 rounded-bl bg-amber-500 text-[10px] font-bold text-white" data-cell-open="true" title="View cell comments">!</button>' : ""}
         </div>
       </td>
     `;
@@ -237,10 +295,27 @@
       });
     });
 
-    bodyEl.querySelectorAll("[data-field-code]").forEach((input) => {
+    bodyEl.querySelectorAll("input[data-field-code], select[data-field-code], textarea[data-field-code]").forEach((input) => {
       input.addEventListener("input", options.onCellChange || function () {});
       input.addEventListener("change", options.onCellChange || function () {});
     });
+
+    const openHandler = options.onCellOpen || options.onIssueClick;
+    if (typeof openHandler === "function") {
+      bodyEl.querySelectorAll("td[data-field-code]").forEach((cell) => {
+        cell.addEventListener("click", function (event) {
+          const tagName = event.target ? event.target.tagName : "";
+          const isControl = ["INPUT", "SELECT", "TEXTAREA", "A"].includes(tagName);
+          if (isControl) return;
+          if (options.mode === "entry" && !event.target.closest("[data-cell-open='true']")) return;
+          const rowEl = cell.closest("tr[data-row-key]");
+          const row = rows.find((item) => rowKey(item) === (rowEl ? rowEl.dataset.rowKey : ""));
+          const field = fields.find((item) => String(item.field_code) === String(cell.dataset.fieldCode));
+          if (!row || !field) return;
+          openHandler(cellInfo(row, field));
+        });
+      });
+    }
   }
 
   window.WorkbookSheet = {
@@ -248,6 +323,8 @@
     escapeHtml,
     rowKey,
     primitiveValue,
+    cellStateLabel,
+    cellIssues,
     render,
   };
 })();

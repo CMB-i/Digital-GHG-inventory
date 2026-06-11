@@ -17,11 +17,17 @@ from app.modules.APPROV.service import (
     resolve_issue,
     get_package_summary_for_reviewer,
     compose_package_review_data,
+    list_package_value_issues,
+    add_package_value_issue,
     approve_package,
     request_changes_package,
     reject_package,
 )
-from app.modules.SUBMIT.service import format_period_label
+from app.modules.SUBMIT.service import (
+    format_period_label,
+    serialize_submission_value_issue,
+    submission_value_issues_map,
+)
 
 MODULE_CODE = "APPROV"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
@@ -173,6 +179,42 @@ def reject_package_endpoint(package_id):
         db.session.rollback()
         return error_response(str(e), 500)
 
+@bp.route("/api/packages/<int:package_id>/values/<int:value_id>/issues")
+@require_login
+def get_package_value_issues(package_id, value_id):
+    user = current_user()
+    try:
+        issues = list_package_value_issues(package_id, value_id, user.id)
+        return success_response(data={"issues": issues})
+    except ValueError as e:
+        return error_response(str(e), 403 if str(e) == "Permission denied." else 400)
+    except Exception as e:
+        return error_response(str(e), 500)
+
+@bp.route("/api/packages/<int:package_id>/values/<int:value_id>/issues", methods=["POST"])
+@require_login
+def create_package_value_issue(package_id, value_id):
+    user = current_user()
+    data = request.get_json() or {}
+    try:
+        issue = add_package_value_issue(
+            package_id,
+            value_id,
+            user.id,
+            data.get("issue_text") or data.get("comment"),
+        )
+        db.session.commit()
+        return success_response(
+            message="Cell issue added successfully.",
+            data={"issue": serialize_submission_value_issue(issue)},
+        )
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 403 if str(e) == "Permission denied." else 400)
+    except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 500)
+
 @bp.route("/api/packages/<int:package_id>")
 @require_login
 def get_package_summary(package_id):
@@ -258,14 +300,17 @@ def get_submission_details(submission_id):
 
         # Load saved values
         db_values = SubmissionValue.query.filter_by(submission_id=submission_id).all()
+        issue_map = submission_value_issues_map([val.id for val in db_values])
         values_data = {}
         for val in db_values:
             values_data[val.field_id] = {
+                "submission_value_id": val.id,
                 "raw_value": val.raw_value,
                 "calculated_value": float(val.calculated_value) if val.calculated_value is not None else None,
                 "cell_state": val.cell_state,
                 "is_locked": val.is_locked,
                 "remark": val.remark,
+                "issues": issue_map.get(val.id, []),
             }
 
         # Load proofs

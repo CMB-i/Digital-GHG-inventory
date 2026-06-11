@@ -82,6 +82,37 @@
     </p>
   </section>
 </div>
+
+<div id="cell-detail-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4">
+  <div class="w-full max-w-lg rounded-xl bg-white shadow-xl">
+    <div class="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+      <div>
+        <h2 class="text-sm font-bold text-slate-900">Cell details</h2>
+        <p id="cell-detail-context" class="mt-1 text-xs text-slate-500"></p>
+      </div>
+      <button id="btn-close-cell-detail" type="button" class="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</button>
+    </div>
+    <div class="space-y-4 px-5 py-4">
+      <div class="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm sm:grid-cols-2">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Value</div>
+          <div id="cell-detail-value" class="mt-1 font-semibold text-slate-900">—</div>
+        </div>
+        <div>
+          <div class="text-xs font-bold uppercase tracking-wider text-slate-500">State</div>
+          <div id="cell-detail-state" class="mt-1 font-semibold text-slate-900">—</div>
+        </div>
+      </div>
+      <div>
+        <div class="text-xs font-bold uppercase tracking-wider text-slate-500">Comments</div>
+        <div id="cell-detail-issues" class="mt-2 max-h-48 space-y-2 overflow-y-auto text-sm text-slate-600"></div>
+      </div>
+    </div>
+    <div class="flex justify-end border-t border-slate-200 px-5 py-4">
+      <button id="btn-cancel-cell-detail" type="button" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50">Close</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

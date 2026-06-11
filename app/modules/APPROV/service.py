@@ -1,7 +1,13 @@
 from datetime import datetime, timezone
 from app.database import db
 from app.common.permissions import has_permission
-from app.modules.SUBMIT.model import Submission, ProofDocument, SubmissionPackage
+from app.modules.SUBMIT.model import (
+    Submission,
+    ProofDocument,
+    SubmissionPackage,
+    SubmissionValue,
+    SubmissionValueIssue,
+)
 from app.modules.WFLWBLD.model import WorkflowLevel
 from app.modules.WFLWBLD.service import (
     find_next_applicable_level,
@@ -10,12 +16,11 @@ from app.modules.WFLWBLD.service import (
 )
 from app.modules.APPROV.model import ApprovalAction, Issue
 from app.modules.USRMGMT.model import User
-from app.modules.FORMBLD.service import get_form_version_fields
 from app.modules.SUBMIT.service import (
+    compose_readonly_workbook_context,
     format_period_label,
     sync_submission_values_for_status,
-    submission_proofs_payload,
-    submission_values_review_payload,
+    serialize_submission_value_issue,
 )
 
 REVIEWABLE_STATUSES = ("Submitted", "Resubmitted", "Under Review")
@@ -223,20 +228,6 @@ def get_package_summary_for_reviewer(package_id, user_id):
     return _package_queue_item(package.id, eligible)
 
 
-def _fields_review_payload(form_version_id):
-    fields = []
-    for field_version, field in get_form_version_fields(form_version_id):
-        fields.append({
-            "field_id": field.id,
-            "field_code": field.field_code,
-            "field_name": field_version.field_name,
-            "field_type": field_version.field_type,
-            "field_config": field_version.field_config or {},
-            "display_order": field.display_order,
-        })
-    return fields
-
-
 def compose_package_review_data(package_id, user_id):
     queue_summary = get_package_summary_for_reviewer(package_id, user_id)
 
@@ -251,6 +242,7 @@ def compose_package_review_data(package_id, user_id):
     site = Site.query.get(package.site_id)
     period = ReportingPeriod.query.get(package.period_id)
     submitter = User.query.get(package.submitted_by) if package.submitted_by else None
+    fy_start_year = period.year if period and period.month >= 4 else (period.year - 1 if period else None)
 
     submissions = Submission.query.filter_by(package_id=package.id, is_deleted=False).all()
     can_view_package = any(
@@ -269,8 +261,21 @@ def compose_package_review_data(package_id, user_id):
     sheets = []
     for submission in submissions:
         form = forms_by_id.get(submission.form_id)
-        fields = _fields_review_payload(submission.form_version_id)
         sub_submitter = User.query.get(submission.submitted_by) if submission.submitted_by else None
+        workbook_context = compose_readonly_workbook_context(
+            submission.site_id,
+            submission.form_id,
+            fy_start_year,
+            active_period_id=package.period_id,
+            form_version_id=submission.form_version_id,
+        )
+        active_row = next(
+            (
+                row for row in workbook_context["rows"]
+                if row.get("submission_id") == submission.id
+            ),
+            None,
+        )
         sheets.append({
             "submission_id": submission.id,
             "form_id": submission.form_id,
@@ -279,9 +284,11 @@ def compose_package_review_data(package_id, user_id):
             "current_level": submission.current_level,
             "submitted_by": sub_submitter.full_name if sub_submitter else "System",
             "submitted_at": submission.submitted_at,
-            "fields": fields,
-            "values": submission_values_review_payload(submission, fields),
-            "proofs": submission_proofs_payload(submission),
+            "fields": workbook_context["fields"],
+            "rows": workbook_context["rows"],
+            "active_row_key": workbook_context["active_row_key"],
+            "values": active_row.get("values", {}) if active_row else {},
+            "proofs": active_row.get("proofs", {}) if active_row else {},
             "_sort_name": form.name if form else "",
         })
 
@@ -304,6 +311,7 @@ def compose_package_review_data(package_id, user_id):
             "period_label": format_period_label(period.year, period.month) if period else "Unknown Period",
             "month": period.month if period else None,
             "year": period.year if period else None,
+            "financial_year_start": fy_start_year,
             "current_level": package.current_level,
             "current_level_name": queue_summary.get("current_level_name") if queue_summary else None,
             "submitted_by": submitter.full_name if submitter else "System",
@@ -314,10 +322,81 @@ def compose_package_review_data(package_id, user_id):
                 "can_approve": is_my_turn and can_review,
                 "can_request_changes": can_review,
                 "can_reject": can_reject,
+                "can_add_issues": bool(queue_summary and can_review),
             },
         },
         "sheets": sheets,
     }
+
+
+def _package_submission_value(package_id, value_id):
+    package = SubmissionPackage.query.get(package_id)
+    if not package or package.is_deleted:
+        raise ValueError("Package not found.")
+
+    value = SubmissionValue.query.get(value_id)
+    if not value:
+        raise ValueError("Cell value not found.")
+
+    submission = Submission.query.get(value.submission_id)
+    if not submission or submission.is_deleted or submission.package_id != package.id:
+        raise ValueError("Cell value does not belong to this package.")
+
+    return package, submission, value
+
+
+def list_package_value_issues(package_id, value_id, user_id):
+    package, _submission, _value = _package_submission_value(package_id, value_id)
+    review_data = compose_package_review_data(package.id, user_id)
+    if not review_data:
+        raise ValueError("Permission denied.")
+
+    issues = (
+        SubmissionValueIssue.query.filter_by(
+            submission_value_id=value_id,
+            is_deleted=False,
+        )
+        .order_by(SubmissionValueIssue.created_at.asc(), SubmissionValueIssue.id.asc())
+        .all()
+    )
+    return [serialize_submission_value_issue(issue) for issue in issues]
+
+
+def add_package_value_issue(package_id, value_id, user_id, issue_text):
+    if not issue_text or not issue_text.strip():
+        raise ValueError("Issue comment is required.")
+    if len(issue_text.strip()) > 2000:
+        raise ValueError("Issue comment must be 2000 characters or fewer.")
+
+    package, _submission, value = _package_submission_value(package_id, value_id)
+    if not get_package_summary_for_reviewer(package.id, user_id):
+        raise ValueError("Permission denied.")
+
+    issue = SubmissionValueIssue(
+        submission_value_id=value.id,
+        raised_by=user_id,
+        issue_text=issue_text.strip(),
+        status="Open",
+        created_by=user_id,
+        updated_by=user_id,
+    )
+    db.session.add(issue)
+    db.session.flush()
+
+    from app.modules.AUDITL.service import log_audit
+    log_audit(
+        actor_user_id=user_id,
+        entity_type="submission_value_issue",
+        entity_id=issue.id,
+        action="RAISE_CELL_ISSUE",
+        old_values=None,
+        new_values={
+            "package_id": package.id,
+            "submission_value_id": value.id,
+            "status": issue.status,
+        },
+    )
+    return issue
 
 
 def _get_package_for_action(package_id, user_id):

@@ -15,6 +15,13 @@ document.addEventListener("DOMContentLoaded", function () {
   const tableBody = document.getElementById("workbook-body");
   const btnSave = document.getElementById("btn-save-row");
   const btnSubmit = document.getElementById("btn-submit-row");
+  const cellDetailModal = document.getElementById("cell-detail-modal");
+  const cellDetailContext = document.getElementById("cell-detail-context");
+  const cellDetailValue = document.getElementById("cell-detail-value");
+  const cellDetailState = document.getElementById("cell-detail-state");
+  const cellDetailIssues = document.getElementById("cell-detail-issues");
+  const btnCloseCellDetail = document.getElementById("btn-close-cell-detail");
+  const btnCancelCellDetail = document.getElementById("btn-cancel-cell-detail");
   const initialParams = new URLSearchParams(window.location.search);
 
   function paramInt(name) {
@@ -232,8 +239,36 @@ document.addEventListener("DOMContentLoaded", function () {
         renderTable();
         renderHeader();
       },
-      onCellChange
+      onCellChange,
+      onCellOpen: openCellDetail
     });
+  }
+
+  function renderIssueList(issues) {
+    if (!issues || !issues.length) {
+      cellDetailIssues.innerHTML = '<div class="rounded-lg bg-slate-50 px-3 py-2 text-slate-400">No comments for this cell.</div>';
+      return;
+    }
+    cellDetailIssues.innerHTML = issues.map(issue => `
+      <div class="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+        <div class="text-xs font-bold text-amber-900">${escapeHtml(issue.raised_by_name || "Reviewer")}</div>
+        <div class="mt-1 text-sm text-amber-800">${escapeHtml(issue.issue_text || "")}</div>
+      </div>
+    `).join("");
+  }
+
+  function openCellDetail(cellInfo) {
+    cellDetailContext.textContent = `${state.workbook ? state.workbook.selected_form.name : "Workbook"} · ${cellInfo.rowLabel} · ${cellInfo.fieldName}`;
+    cellDetailValue.textContent = cellInfo.value || "Empty";
+    cellDetailState.textContent = `${cellInfo.cellStateLabel}${cellInfo.locked ? " · Locked" : ""}`;
+    renderIssueList(cellInfo.issues || []);
+    cellDetailModal.classList.remove("hidden");
+    cellDetailModal.classList.add("flex");
+  }
+
+  function closeCellDetail() {
+    cellDetailModal.classList.add("hidden");
+    cellDetailModal.classList.remove("flex");
   }
 
   function onCellChange(event) {
@@ -441,6 +476,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
   btnSave.addEventListener("click", saveSelectedRow);
   btnSubmit.addEventListener("click", submitSelectedRow);
+  [btnCloseCellDetail, btnCancelCellDetail].forEach(button => {
+    if (button) button.addEventListener("click", closeCellDetail);
+  });
+  if (cellDetailModal) {
+    cellDetailModal.addEventListener("click", function (event) {
+      if (event.target === cellDetailModal) closeCellDetail();
+    });
+  }
 
   loadOptions().catch(error => {
     setEmpty("Could not load annual workbook", error.message);

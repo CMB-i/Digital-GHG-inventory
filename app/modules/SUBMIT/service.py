@@ -11,7 +11,13 @@ from app.modules.SITEMST.model import Site
 from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion
 from app.modules.FORMBLD.service import get_form_version_fields
 from app.modules.PERIOD.model import ReportingPeriod
-from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument, SubmissionPackage
+from app.modules.SUBMIT.model import (
+    Submission,
+    SubmissionValue,
+    SubmissionValueIssue,
+    ProofDocument,
+    SubmissionPackage,
+)
 from app.modules.FRMULA.model import FormulaVersion
 from app.modules.FRMULA.service import evaluate_formula
 from app.modules.WFLWBLD.model import Workflow
@@ -242,14 +248,67 @@ def submission_proofs_payload(submission):
     }
 
 
+def serialize_submission_value_issue(issue):
+    from app.modules.USRMGMT.model import User
+
+    raiser = User.query.get(issue.raised_by) if issue.raised_by else None
+    return {
+        "id": issue.id,
+        "submission_value_id": issue.submission_value_id,
+        "issue_text": issue.issue_text,
+        "status": issue.status,
+        "raised_by": issue.raised_by,
+        "raised_by_name": raiser.full_name if raiser else "System",
+        "created_at": issue.created_at,
+    }
+
+
+def submission_value_issues_map(value_ids):
+    if not value_ids:
+        return {}
+
+    issues = (
+        SubmissionValueIssue.query.filter(
+            SubmissionValueIssue.submission_value_id.in_(value_ids),
+            SubmissionValueIssue.is_deleted == False,
+        )
+        .order_by(SubmissionValueIssue.created_at.asc(), SubmissionValueIssue.id.asc())
+        .all()
+    )
+    issue_map = {}
+    for issue in issues:
+        issue_map.setdefault(issue.submission_value_id, []).append(
+            serialize_submission_value_issue(issue)
+        )
+    return issue_map
+
+
+def submission_value_issues_by_field(submission, fields):
+    if not submission:
+        return {}
+
+    db_values = SubmissionValue.query.filter_by(submission_id=submission.id).all()
+    value_by_field_id = {value.field_id: value for value in db_values}
+    issue_map = submission_value_issues_map([value.id for value in db_values])
+    issues_by_field = {}
+    for field in fields:
+        value = value_by_field_id.get(field["field_id"])
+        if not value:
+            continue
+        issues = issue_map.get(value.id, [])
+        if issues:
+            issues_by_field[field["field_code"]] = issues
+            issues_by_field[str(field["field_id"])] = issues
+    return issues_by_field
+
+
 def submission_values_review_payload(submission, fields):
     if not submission:
         return {}
 
-    db_values_by_field = {
-        value.field_id: value
-        for value in SubmissionValue.query.filter_by(submission_id=submission.id).all()
-    }
+    db_values = SubmissionValue.query.filter_by(submission_id=submission.id).all()
+    db_values_by_field = {value.field_id: value for value in db_values}
+    issue_map = submission_value_issues_map([value.id for value in db_values])
     values = {}
     for field in fields:
         code = field["field_code"]
@@ -266,6 +325,7 @@ def submission_values_review_payload(submission, fields):
                 "cell_state": db_value.cell_state,
                 "is_locked": db_value.is_locked,
                 "remark": db_value.remark,
+                "issues": issue_map.get(db_value.id, []),
             }
         else:
             values[code] = {
@@ -275,6 +335,7 @@ def submission_values_review_payload(submission, fields):
                 "cell_state": CELL_STATE_BLANK_EDITABLE,
                 "is_locked": False,
                 "remark": None,
+                "issues": [],
             }
     return values
 
@@ -426,6 +487,7 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
             ),
             "editability": editability,
             "values": _submission_values_payload(submission, fields),
+            "issues": submission_value_issues_by_field(submission, fields),
         })
 
     return {
@@ -447,6 +509,96 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
         },
         "fields": fields,
         "rows": rows,
+    }
+
+
+def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_period_id=None, form_version_id=None):
+    """
+    Builds a read-only annual workbook context without creating submissions.
+    Intended for review/view modes where surrounding months are comparison context.
+    """
+    try:
+        site_id = int(site_id)
+        form_id = int(form_id)
+        fy_start_year = int(fy_start_year)
+    except (TypeError, ValueError):
+        raise ValueError("A valid site, form, and financial year are required.")
+
+    site = Site.query.filter_by(id=site_id, is_deleted=False).first()
+    if not site:
+        raise ValueError("Site not found.")
+
+    form = Form.query.filter_by(id=form_id, is_deleted=False).first()
+    if not form or not form.current_version_id:
+        raise ValueError("Published form not found.")
+
+    fields = _field_payload(form_version_id or form.current_version_id)
+    months = _fy_months(fy_start_year)
+    month_keys = [(item["year"], item["month"]) for item in months]
+
+    periods = ReportingPeriod.query.filter(
+        ReportingPeriod.site_id == site_id,
+        ReportingPeriod.is_deleted == False,
+        tuple_(ReportingPeriod.year, ReportingPeriod.month).in_(month_keys),
+    ).all()
+    period_by_key = {(period.year, period.month): period for period in periods}
+
+    submissions = Submission.query.filter(
+        Submission.site_id == site_id,
+        Submission.form_id == form_id,
+        Submission.is_deleted == False,
+        Submission.reporting_period_id.in_([period.id for period in periods] or [0]),
+    ).all()
+    submission_by_period = {
+        submission.reporting_period_id: submission
+        for submission in submissions
+    }
+
+    rows = []
+    for item in months:
+        period = period_by_key.get((item["year"], item["month"]))
+        submission = submission_by_period.get(period.id) if period else None
+        rows.append({
+            **item,
+            "row_key": f"{item['year']}-{item['month']}",
+            "period_id": period.id if period else None,
+            "period_status": period.status if period else None,
+            "submission_id": submission.id if submission else None,
+            "submission_status": submission.status if submission else "Not Started",
+            "status": submission.status if submission else (period.status if period else "Not Started"),
+            "is_locked": bool(submission.is_locked) if submission else False,
+            "last_saved": (
+                (submission.updated_at or submission.created_at).isoformat()
+                if submission and (submission.updated_at or submission.created_at)
+                else None
+            ),
+            "values": submission_values_review_payload(submission, fields),
+            "proofs": submission_proofs_payload(submission),
+            "editable": False,
+            "is_active_period": bool(period and active_period_id and period.id == active_period_id),
+        })
+
+    return {
+        "financial_year": {
+            "start_year": fy_start_year,
+            "label": financial_year_label(fy_start_year),
+        },
+        "site": {
+            "id": site.id,
+            "name": site.name,
+            "code": site.code,
+        },
+        "form": {
+            "id": form.id,
+            "name": form.name,
+            "code": form.code,
+        },
+        "fields": fields,
+        "rows": rows,
+        "active_row_key": next(
+            (row["row_key"] for row in rows if row["is_active_period"]),
+            None,
+        ),
     }
 
 def get_approved_valsets_snapshot():
