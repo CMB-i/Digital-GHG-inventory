@@ -15,6 +15,7 @@ from app.modules.SUBMIT.service import (
     get_annual_workbook_options,
     compose_annual_workbook_data,
     save_annual_workbook_values,
+    compose_calculation_results,
     create_draft_submission,
     autosave_submission_values,
     submit_submission,
@@ -122,6 +123,24 @@ def annual_workbook_data():
             site_id=request.args.get("site_id"),
             form_id=request.args.get("form_id"),
             fy_start_year=request.args.get("fy"),
+        )
+        return jsonify(data)
+    except ValueError as e:
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/annual-workbook/calculation-results", methods=["GET"])
+@require_login
+def annual_workbook_calculation_results():
+    """
+    Returns read-only calculated results across forms for the site and FY.
+    """
+    user = current_user()
+    try:
+        data = compose_calculation_results(
+            site_id=request.args.get("site_id"),
+            fy_start_year=request.args.get("fy"),
+            user_id=user.id,
         )
         return jsonify(data)
     except ValueError as e:

@@ -192,7 +192,7 @@ document.addEventListener("DOMContentLoaded", function () {
   function renderFormTabs() {
     const forms = formsForSelectedSite();
     formTabs.innerHTML = "";
-    if (!forms.length) {
+    if (!forms.length && state.selectedFormId !== "calc_results") {
       formTabs.innerHTML = '<span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">No assigned forms</span>';
       return;
     }
@@ -213,12 +213,39 @@ document.addEventListener("DOMContentLoaded", function () {
       };
       formTabs.appendChild(button);
     });
+
+    // Append Calculation Results tab button
+    if (state.selectedSiteId) {
+      const calcButton = document.createElement("button");
+      calcButton.type = "button";
+      const calcActive = state.selectedFormId === "calc_results";
+      calcButton.className = `rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+        calcActive
+          ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+      }`;
+      calcButton.textContent = "Calculation Results";
+      calcButton.onclick = function () {
+        state.selectedFormId = "calc_results";
+        loadWorkbook();
+      };
+      formTabs.appendChild(calcButton);
+    }
   }
 
   function renderHeader() {
     const site = state.options.sites.find(item => String(item.id) === String(state.selectedSiteId));
     siteNameEl.textContent = site ? site.name : "Select a site";
     fyLabelEl.textContent = `FY ${state.selectedFy}-${String(state.selectedFy + 1).slice(-2)}`;
+
+    if (state.selectedFormId === "calc_results") {
+      selectedStatusEl.textContent = "Calculation Results";
+      selectedStatusEl.className = "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 border border-slate-200";
+      lastSavedEl.textContent = "Read-only calculation dashboard for this financial year.";
+      btnSave.disabled = true;
+      btnSubmit.disabled = true;
+      return;
+    }
 
     const row = selectedRow();
     if (!row) {
@@ -230,7 +257,7 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
 
-    const status = row.submission_status || row.period_status || "Not Started";
+    const status = row.submission_status || row.status || row.period_status || "Not Started";
     selectedStatusEl.textContent = `${row.label}: ${status}`;
     selectedStatusEl.className = "rounded-full px-2.5 py-1 text-xs font-semibold ";
     if (status === "Approved") {
@@ -263,8 +290,10 @@ document.addEventListener("DOMContentLoaded", function () {
     emptyEl.classList.add("hidden");
     tableWrap.classList.remove("hidden");
 
+    const mode = state.selectedFormId === "calc_results" ? "calc_results" : "entry";
+
     window.WorkbookSheet.render({
-      mode: "entry",
+      mode: mode,
       headEl: tableHead,
       bodyEl: tableBody,
       fields,
@@ -273,7 +302,7 @@ document.addEventListener("DOMContentLoaded", function () {
       canEditWorkbookValues: hasOpenWorkbookPeriod(),
       rows: rows.map(row => ({
         ...row,
-        editable: Boolean(row.editability && row.editability.editable),
+        editable: mode === "calc_results" ? false : Boolean(row.editability && row.editability.editable),
         reason: row.editability ? row.editability.reason : ""
       })),
       selectedRowKey: state.selectedRowKey,
@@ -381,20 +410,31 @@ document.addEventListener("DOMContentLoaded", function () {
       setEmpty("No assigned sites", "You do not have site access for submissions.");
       return;
     }
-    if (!forms.length) {
+    if (!forms.length && state.selectedFormId !== "calc_results") {
       setEmpty("No forms assigned", "Published forms assigned to this site will appear as tabs.");
       return;
     }
     if (!state.selectedFormId) {
-      state.selectedFormId = forms[0].id;
+      state.selectedFormId = forms[0] ? forms[0].id : "calc_results";
     }
 
-    const params = new URLSearchParams({
-      site_id: state.selectedSiteId,
-      form_id: state.selectedFormId,
-      fy: state.selectedFy
-    });
-    const response = await fetch(`/module/SUBMIT/api/annual-workbook?${params.toString()}`);
+    let url = "";
+    if (state.selectedFormId === "calc_results") {
+      const params = new URLSearchParams({
+        site_id: state.selectedSiteId,
+        fy: state.selectedFy
+      });
+      url = `/module/SUBMIT/api/annual-workbook/calculation-results?${params.toString()}`;
+    } else {
+      const params = new URLSearchParams({
+        site_id: state.selectedSiteId,
+        form_id: state.selectedFormId,
+        fy: state.selectedFy
+      });
+      url = `/module/SUBMIT/api/annual-workbook?${params.toString()}`;
+    }
+
+    const response = await fetch(url);
     const data = await parseJsonResponse(response, "Could not load annual workbook.");
     if (!response.ok) throw new Error(data.error || "Could not load annual workbook.");
 
