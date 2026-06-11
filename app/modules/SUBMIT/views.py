@@ -1,6 +1,6 @@
 import json
 
-from flask import Blueprint, render_template, request, jsonify, send_file
+from flask import Blueprint, redirect, render_template, request, jsonify, send_file
 from app.common.decorators import require_permission
 from app.common.auth import current_user, require_login
 from app.common.responses import success_response, error_response
@@ -54,6 +54,16 @@ def edit_submission(submission_id):
     Form Data Entry page.
     """
     sub = Submission.query.get_or_404(submission_id)
+    if sub.status not in ("Draft", "Changes Requested"):
+        if sub.package_id:
+            return redirect(f"/module/APPROV/packages/{sub.package_id}")
+        period = ReportingPeriod.query.get(sub.reporting_period_id)
+        if period:
+            fy_start = period.year if period.month >= 4 else period.year - 1
+            return redirect(
+                f"/module/SUBMIT/annual?site_id={sub.site_id}"
+                f"&form_id={sub.form_id}&fy={fy_start}&month={period.month}"
+            )
     return render_template(
         "modules/SUBMIT/data_entry.html",
         module_code=MODULE_CODE,

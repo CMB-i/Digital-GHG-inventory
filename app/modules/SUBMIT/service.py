@@ -559,6 +559,7 @@ def get_spoc_sheets_buckets(user_id):
 
         item = {
             "submission_id": sub.id,
+            "package_id": sub.package_id,
             "site_id": sub.site_id,
             "form_name": form.name,
             "form_id": sub.form_id,

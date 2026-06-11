@@ -109,6 +109,70 @@ def notify_spoc(submission_id, event_type, message):
     )
 
 
+def notify_period_open_for_entry(period_id):
+    """
+    Notify users who can create/edit/submit submissions for this period's site.
+    Access Matrix remains the only source of eligibility.
+    """
+    from app.modules.ACCESS.model import AccessMatrix
+    from app.modules.PERIOD.model import ReportingPeriod
+    from app.modules.SITEMST.model import Site
+    from app.modules.SUBMIT.service import format_period_label
+    from app.modules.USRMGMT.model import User
+
+    period = ReportingPeriod.query.filter_by(id=period_id, is_deleted=False).first()
+    if not period or period.status not in ("OPEN", "REOPENED"):
+        return []
+
+    eligible_rows = AccessMatrix.query.filter(
+        AccessMatrix.entity_type == "submission",
+        AccessMatrix.is_deleted == False,
+        (
+            (AccessMatrix.can_create == True) |
+            (AccessMatrix.can_edit == True) |
+            (AccessMatrix.can_submit == True)
+        ),
+        (
+            (AccessMatrix.scope_type == "global") |
+            (
+                (AccessMatrix.scope_type == "site") &
+                (AccessMatrix.scope_site_id == period.site_id)
+            )
+        )
+    ).all()
+
+    user_ids = {row.user_id for row in eligible_rows}
+    if not user_ids:
+        return []
+
+    active_user_ids = {
+        row.id
+        for row in User.query.filter(
+            User.id.in_(user_ids),
+            User.is_active == True,
+            User.is_deleted == False,
+        ).all()
+    }
+    if not active_user_ids:
+        return []
+
+    site = Site.query.get(period.site_id)
+    site_name = site.name if site else "this site"
+    period_label = format_period_label(period.year, period.month)
+    message = (
+        f"{period_label} reporting period is now open for {site_name}. "
+        "You can start entering data."
+    )
+
+    return create_notifications_for_users(
+        sorted(active_user_ids),
+        event_type="PERIOD_OPEN_FOR_ENTRY",
+        entity_type="reporting_period",
+        entity_id=period.id,
+        message=message,
+    )
+
+
 def mark_as_read(notification_id, user_id):
     """
     Marks a single notification as read by the recipient.

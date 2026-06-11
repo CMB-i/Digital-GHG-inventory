@@ -68,7 +68,7 @@
     </div>
 
     <div id="workbook-table-wrap" class="hidden overflow-x-auto">
-      <table class="min-w-full divide-y divide-slate-200">
+      <table class="min-w-full border-collapse">
         <thead id="workbook-head" class="bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500"></thead>
         <tbody id="workbook-body" class="divide-y divide-slate-100 text-sm text-slate-700"></tbody>
       </table>
@@ -85,5 +85,6 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/workbook_sheet.js') }}"></script>
 <script src="{{ url_for('static', filename='js/annual_workbook.js') }}"></script>
 {% endblock %}

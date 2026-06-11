@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request
+from flask import Blueprint, redirect, render_template, request
 from app.database import db
 from app.common.auth import current_user, require_login
 from app.common.permissions import has_permission
@@ -17,6 +17,9 @@ from app.modules.APPROV.service import (
     resolve_issue,
     get_package_summary_for_reviewer,
     compose_package_review_data,
+    approve_package,
+    request_changes_package,
+    reject_package,
 )
 from app.modules.SUBMIT.service import format_period_label
 
@@ -73,6 +76,11 @@ def api_queue():
 def view_submission(submission_id):
     submission = Submission.query.get_or_404(submission_id)
     user = current_user()
+    if submission.package_id and (
+        _can_review_submission(user, submission, "approve", "reject") or
+        has_permission(user.id, "submission", "view", scope_site_id=submission.site_id)
+    ):
+        return redirect(f"/module/APPROV/packages/{submission.package_id}")
     if not _can_review_submission(user, submission, "approve", "reject"):
         return _page_no_access()
     return render_template(
@@ -86,7 +94,7 @@ def view_submission(submission_id):
 def view_package(package_id):
     package = SubmissionPackage.query.get_or_404(package_id)
     user = current_user()
-    if not get_package_summary_for_reviewer(package.id, user.id):
+    if not compose_package_review_data(package.id, user.id):
         return _page_no_access()
     return render_template(
         "modules/APPROV/package_review.html",
@@ -107,6 +115,63 @@ def get_package_review(package_id):
         return error_response("Permission denied.", 403)
 
     return success_response(data=review_data)
+
+@bp.route("/api/packages/<int:package_id>/approve", methods=["POST"])
+@require_login
+def approve_package_endpoint(package_id):
+    user = current_user()
+    comment = request.json.get("comment") if request.json else None
+    try:
+        package, results = approve_package(package_id, user.id, comment)
+        db.session.commit()
+        return success_response(
+            message="Package approved successfully.",
+            data={"status": package.status, "results": results},
+        )
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 500)
+
+@bp.route("/api/packages/<int:package_id>/request-changes", methods=["POST"])
+@require_login
+def request_changes_package_endpoint(package_id):
+    user = current_user()
+    comment = request.json.get("comment") if request.json else None
+    try:
+        package, results = request_changes_package(package_id, user.id, comment)
+        db.session.commit()
+        return success_response(
+            message="Package returned for changes successfully.",
+            data={"status": package.status, "results": results},
+        )
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 500)
+
+@bp.route("/api/packages/<int:package_id>/reject", methods=["POST"])
+@require_login
+def reject_package_endpoint(package_id):
+    user = current_user()
+    comment = request.json.get("comment") if request.json else None
+    try:
+        package, results = reject_package(package_id, user.id, comment)
+        db.session.commit()
+        return success_response(
+            message="Package rejected successfully.",
+            data={"status": package.status, "results": results},
+        )
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 500)
 
 @bp.route("/api/packages/<int:package_id>")
 @require_login
@@ -197,7 +262,10 @@ def get_submission_details(submission_id):
         for val in db_values:
             values_data[val.field_id] = {
                 "raw_value": val.raw_value,
-                "calculated_value": float(val.calculated_value) if val.calculated_value is not None else None
+                "calculated_value": float(val.calculated_value) if val.calculated_value is not None else None,
+                "cell_state": val.cell_state,
+                "is_locked": val.is_locked,
+                "remark": val.remark,
             }
 
         # Load proofs
@@ -262,6 +330,7 @@ def get_submission_details(submission_id):
             "site_name": site.name if site else "",
             "period_label": format_period_label(period.year, period.month) if period else "",
             "status": submission.status,
+            "is_locked": submission.is_locked,
             "current_level": submission.current_level,
             "submitted_by": User.query.get(submission.submitted_by).full_name if submission.submitted_by else "",
             "submitted_at": submission.submitted_at,
