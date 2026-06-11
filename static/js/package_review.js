@@ -113,6 +113,8 @@ document.addEventListener("DOMContentLoaded", function () {
       bodyEl: sheetValues,
       fields,
       sections: sheet.sections || [],
+      workbookValues: sheet.workbook_values || {},
+      canEditWorkbookValues: false,
       rows: sheet.rows || [{
         row_key: `submission-${sheet.submission_id}`,
         label: reviewData.package.period_label,

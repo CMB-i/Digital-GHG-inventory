@@ -39,7 +39,8 @@ document.addEventListener("DOMContentLoaded", function () {
     requestedMonth: paramInt("month"),
     workbook: null,
     selectedRowKey: null,
-    dirtyRows: new Set()
+    dirtyRows: new Set(),
+    dirtyWorkbookFields: new Set()
   };
 
   function defaultFyStartYear() {
@@ -105,6 +106,40 @@ document.addEventListener("DOMContentLoaded", function () {
     alertEl.classList.add("hidden");
   }
 
+  async function parseJsonResponse(response, fallbackMessage) {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      return response.json();
+    }
+    const text = await response.text();
+    const preview = text.replace(/\s+/g, " ").trim().slice(0, 120);
+    throw new Error(`${fallbackMessage} The server returned a non-JSON response (${response.status})${preview ? `: ${preview}` : "."}`);
+  }
+
+  function packageSubmitErrorMessage(data) {
+    const parts = [data.error || "Could not submit workbook package."];
+    if (Array.isArray(data.errors) && data.errors.length) {
+      data.errors.forEach(item => {
+        const label = item.form_name ? `${item.form_name}: ` : "";
+        if (item.validation_errors) {
+          const fieldMessages = Object.values(item.validation_errors).filter(Boolean).join(" ");
+          if (fieldMessages) {
+            parts.push(`${label}${fieldMessages}`);
+            return;
+          }
+        }
+        if (item.error) parts.push(`${label}${item.error}`);
+      });
+    }
+    if (Array.isArray(data.warnings) && data.warnings.length) {
+      data.warnings.forEach(item => {
+        const label = item.form_name ? `${item.form_name}: ` : "";
+        if (item.reason) parts.push(`${label}${item.reason}`);
+      });
+    }
+    return parts.filter(Boolean).join(" ");
+  }
+
   function setEmpty(title, body) {
     tableWrap.classList.add("hidden");
     emptyTitleEl.textContent = title;
@@ -112,6 +147,11 @@ document.addEventListener("DOMContentLoaded", function () {
     emptyEl.classList.remove("hidden");
     btnSave.disabled = true;
     btnSubmit.disabled = true;
+  }
+
+  function hasOpenWorkbookPeriod() {
+    if (!state.workbook || !Array.isArray(state.workbook.rows)) return false;
+    return state.workbook.rows.some(row => row.period_status === "OPEN" || row.period_status === "REOPENED");
   }
 
   function renderFyOptions() {
@@ -169,7 +209,7 @@ document.addEventListener("DOMContentLoaded", function () {
       button.textContent = form.name;
       button.onclick = function () {
         state.selectedFormId = form.id;
-        loadWorkbook();
+        loadWorkbook().catch(error => showAlert(error.message, "error"));
       };
       formTabs.appendChild(button);
     });
@@ -185,7 +225,7 @@ document.addEventListener("DOMContentLoaded", function () {
       selectedStatusEl.textContent = "No month selected";
       selectedStatusEl.className = "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600";
       lastSavedEl.textContent = "Select a month row to save or submit.";
-      btnSave.disabled = true;
+      btnSave.disabled = state.dirtyWorkbookFields.size === 0;
       btnSubmit.disabled = true;
       return;
     }
@@ -202,7 +242,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     lastSavedEl.textContent = row.last_saved ? `Last saved ${formatDateTime(row.last_saved)}` : row.editability.reason;
-    btnSave.disabled = !(row.editability && row.editability.editable);
+    btnSave.disabled = !(row.editability && row.editability.editable) && state.dirtyWorkbookFields.size === 0;
     btnSubmit.disabled = !(row.editability && row.editability.editable);
   }
 
@@ -229,6 +269,8 @@ document.addEventListener("DOMContentLoaded", function () {
       bodyEl: tableBody,
       fields,
       sections: state.workbook.sections || [],
+      workbookValues: state.workbook.workbook_values || {},
+      canEditWorkbookValues: hasOpenWorkbookPeriod(),
       rows: rows.map(row => ({
         ...row,
         editable: Boolean(row.editability && row.editability.editable),
@@ -241,6 +283,7 @@ document.addEventListener("DOMContentLoaded", function () {
         renderHeader();
       },
       onCellChange,
+      onWorkbookValueChange,
       onCellOpen: openCellDetail
     });
   }
@@ -288,6 +331,23 @@ document.addEventListener("DOMContentLoaded", function () {
     renderHeader();
   }
 
+  function onWorkbookValueChange(event) {
+    const input = event.target;
+    const fieldCode = input.dataset.workbookFieldCode;
+    if (!fieldCode || !state.workbook) return;
+    if (!state.workbook.workbook_values) state.workbook.workbook_values = {};
+    const current = state.workbook.workbook_values[fieldCode] || {};
+    const rawValue = input.type === "checkbox" ? input.checked : input.value;
+    state.workbook.workbook_values[fieldCode] = {
+      ...current,
+      raw_value: rawValue,
+      cell_state: rawValue ? "draft_filled" : "blank_editable",
+      is_locked: false
+    };
+    state.dirtyWorkbookFields.add(fieldCode);
+    renderHeader();
+  }
+
   async function loadOptions() {
     const response = await fetch("/module/SUBMIT/api/annual-workbook/options");
     if (!response.ok) throw new Error("Could not load assigned sites and forms.");
@@ -309,9 +369,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
   async function loadWorkbook() {
     hideAlert();
+    const previousRowKey = state.selectedRowKey;
     state.workbook = null;
-    state.selectedRowKey = null;
     state.dirtyRows.clear();
+    state.dirtyWorkbookFields.clear();
     renderFormTabs();
     renderHeader();
 
@@ -334,16 +395,19 @@ document.addEventListener("DOMContentLoaded", function () {
       fy: state.selectedFy
     });
     const response = await fetch(`/module/SUBMIT/api/annual-workbook?${params.toString()}`);
-    const data = await response.json();
+    const data = await parseJsonResponse(response, "Could not load annual workbook.");
     if (!response.ok) throw new Error(data.error || "Could not load annual workbook.");
 
     state.workbook = data;
     const requestedRow = state.requestedMonth
       ? data.rows.find(row => parseInt(row.month) === state.requestedMonth)
       : null;
+    const previousRow = previousRowKey
+      ? data.rows.find(row => rowKey(row) === previousRowKey)
+      : null;
     state.selectedRowKey = requestedRow
       ? rowKey(requestedRow)
-      : (data.rows[0] ? rowKey(data.rows[0]) : null);
+      : (previousRow ? rowKey(previousRow) : (data.rows[0] ? rowKey(data.rows[0]) : null));
     renderTable();
     renderHeader();
     scrollSelectedRowIntoView();
@@ -361,53 +425,83 @@ document.addEventListener("DOMContentLoaded", function () {
 
   async function saveSelectedRow() {
     const row = selectedRow();
-    if (!row || !(row.editability && row.editability.editable)) return;
+    const shouldSaveMonthly = row && row.editability && row.editability.editable;
+    const shouldSaveWorkbookValues = state.dirtyWorkbookFields.size > 0;
+    if (!shouldSaveMonthly && !shouldSaveWorkbookValues) return;
 
     try {
       btnSave.disabled = true;
       btnSave.textContent = "Saving...";
-      let submissionId = row.submission_id;
-      if (!submissionId) {
-        if (!row.period_id) {
-          throw new Error("A reporting period must exist before this month can be saved.");
-        }
-        const createResponse = await fetch("/module/SUBMIT/api/submissions", {
-          method: "POST",
+      if (shouldSaveWorkbookValues) {
+        const values = {};
+        state.dirtyWorkbookFields.forEach(fieldCode => {
+          const cell = state.workbook.workbook_values ? state.workbook.workbook_values[fieldCode] : null;
+          values[fieldCode] = cell && typeof cell === "object" ? cell.raw_value : cell;
+        });
+        const valueResponse = await fetch("/module/SUBMIT/api/annual-workbook/values", {
+          method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             site_id: state.workbook.site.id,
             form_id: state.workbook.selected_form.id,
-            reporting_period_id: row.period_id
+            fy: state.workbook.financial_year.start_year,
+            values
           })
         });
-        const createData = await createResponse.json();
-        if (createResponse.status === 409 && createData.existing_id) {
-          submissionId = createData.existing_id;
-        } else if (!createResponse.ok) {
-          throw new Error(createData.error || "Could not create draft for this month.");
-        } else {
-          submissionId = createData.data.submission_id;
+        const valueData = await parseJsonResponse(valueResponse, "Could not save annual workbook values.");
+        if (!valueResponse.ok) {
+          throw new Error(valueData.error || "Could not save annual workbook values.");
         }
+        if (valueData.data && valueData.data.workbook_values) {
+          state.workbook.workbook_values = valueData.data.workbook_values;
+        }
+        state.dirtyWorkbookFields.clear();
       }
 
-      const saveResponse = await fetch(`/module/SUBMIT/api/submissions/${submissionId}/autosave`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values: row.values || {} })
-      });
-      const saveData = await saveResponse.json();
-      if (!saveResponse.ok) {
-        throw new Error(saveData.error || "Could not save draft.");
-      }
+      if (shouldSaveMonthly) {
+        let submissionId = row.submission_id;
+        if (!submissionId) {
+          if (!row.period_id) {
+            throw new Error("A reporting period must exist before this month can be saved.");
+          }
+          const createResponse = await fetch("/module/SUBMIT/api/submissions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              site_id: state.workbook.site.id,
+              form_id: state.workbook.selected_form.id,
+              reporting_period_id: row.period_id
+            })
+          });
+          const createData = await parseJsonResponse(createResponse, "Could not create draft for this month.");
+          if (createResponse.status === 409 && createData.existing_id) {
+            submissionId = createData.existing_id;
+          } else if (!createResponse.ok) {
+            throw new Error(createData.error || "Could not create draft for this month.");
+          } else {
+            submissionId = createData.data.submission_id;
+          }
+        }
 
-      row.submission_id = submissionId;
-      row.submission_status = "Draft";
-      row.last_saved = new Date().toISOString();
-      row.values = saveData.data && saveData.data.values ? saveData.data.values : row.values;
-      state.dirtyRows.delete(rowKey(row));
+        const saveResponse = await fetch(`/module/SUBMIT/api/submissions/${submissionId}/autosave`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ values: row.values || {} })
+        });
+        const saveData = await parseJsonResponse(saveResponse, "Could not save draft.");
+        if (!saveResponse.ok) {
+          throw new Error(saveData.error || "Could not save draft.");
+        }
+
+        row.submission_id = submissionId;
+        row.submission_status = "Draft";
+        row.last_saved = new Date().toISOString();
+        row.values = saveData.data && saveData.data.values ? saveData.data.values : row.values;
+        state.dirtyRows.delete(rowKey(row));
+      }
       renderTable();
       renderHeader();
-      showAlert("Monthly draft saved.", "success");
+      showAlert("Workbook draft saved.", "success");
     } catch (error) {
       showAlert(error.message, "error");
     } finally {
@@ -442,18 +536,9 @@ document.addEventListener("DOMContentLoaded", function () {
           values: row.values || {}
         })
       });
-      const data = await response.json();
+      const data = await parseJsonResponse(response, "Could not submit workbook package.");
       if (!response.ok) {
-        if (response.status === 422 && data.errors) {
-          const details = data.errors.map(item => {
-            if (item.validation_errors) {
-              return Object.values(item.validation_errors).join(" ");
-            }
-            return item.error || "";
-          }).filter(Boolean).join(" ");
-          throw new Error(`${data.error || "Validation failed."} ${details}`);
-        }
-        throw new Error(data.error || "Could not submit workbook package.");
+        throw new Error(packageSubmitErrorMessage(data));
       }
       const included = data.data && data.data.included_submissions ? data.data.included_submissions.length : 0;
       showAlert(`Workbook package submitted for approval. ${included} sheet${included === 1 ? "" : "s"} included.`, "success");
