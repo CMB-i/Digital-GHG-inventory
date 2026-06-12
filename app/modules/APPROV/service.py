@@ -288,7 +288,9 @@ def compose_package_review_data(package_id, user_id):
             "sections": workbook_context.get("sections", []),
             "workbook_values": workbook_context.get("workbook_values", {}),
             "rows": workbook_context["rows"],
-            "active_row_key": workbook_context["active_row_key"],
+            "active_row_key": workbook_context.get("active_row_key") or (
+                active_row.get("row_key") if active_row else None
+            ),
             "values": active_row.get("values", {}) if active_row else {},
             "proofs": active_row.get("proofs", {}) if active_row else {},
             "_sort_name": form.name if form else "",
