@@ -36,7 +36,7 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 @require_permission("submission", ("submit", "view"))
 def index():
     """
-    My Sheets landing dashboard page.
+    My Workbooks dashboard page.
     """
     return render_template("modules/SUBMIT/my_sheets.html", module_code=MODULE_CODE)
 
