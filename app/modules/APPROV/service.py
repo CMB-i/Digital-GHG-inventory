@@ -609,6 +609,24 @@ def get_actioned_history(user_id):
     from app.modules.SITEMST.model import Site
     from app.modules.PERIOD.model import ReportingPeriod
 
+    def action_label(action):
+        return {
+            "Approve": "Approved",
+            "Request Changes": "Returned for correction",
+            "Reject": "Sent back",
+        }.get(action, action or "Reviewed")
+
+    def status_label(status):
+        return {
+            "Approved": "Approved and locked",
+            "Draft": "Draft saved",
+            "Changes Requested": "Needs correction",
+            "Rejected": "Sent back",
+            "Resubmitted": "Sent again for review",
+            "Under Review": "Under review",
+            "Submitted": "Submitted",
+        }.get(status, status or "Unknown")
+
     history = []
     seen_submissions = set()
     for act in actions:
@@ -631,9 +649,11 @@ def get_actioned_history(user_id):
             "site_name": site.name if site else "Unknown Site",
             "period_label": format_period_label(period.year, period.month) if period else "Unknown Period",
             "action": act.action,
+            "action_text": action_label(act.action),
             "comment": act.comment,
             "acted_at": act.acted_at,
-            "current_status": sub.status
+            "current_status": sub.status,
+            "current_status_text": status_label(sub.status),
         })
     return history
 

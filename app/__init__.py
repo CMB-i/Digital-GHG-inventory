@@ -5,7 +5,6 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import text
 
 from app.common.auth import current_user, require_login
-from app.common.permissions import has_permission
 from app.config import Config
 from app.database import db
 from app.modules.ACCESS import bp as access_bp
@@ -104,9 +103,11 @@ def create_app(config_class=Config):
         user = current_user()
 
         from app.modules.RPTBLD.service import _get_user_allowed_sites, get_missing_submissions
-        from app.modules.SITEMST.model import Site
         from app.modules.FORMBLD.model import Form
+        from app.modules.APPROV.service import get_approver_queue, get_actioned_history
+        from app.modules.SUBMIT.service import get_spoc_sheets_buckets
 
+        capabilities = build_user_capabilities(user)
         allowed_site_ids, is_global = _get_user_allowed_sites(user.id, "submission")
 
         total_sheets = 0
@@ -131,36 +132,42 @@ def create_app(config_class=Config):
                 Submission.is_deleted == False
             ).count()
 
-        # Get missing submissions
-        missing_submissions = get_missing_submissions(user.id)
-        # Filter down to actual missing ones: "Not Started", "Draft", "Changes Requested"
-        actual_missing = [item for item in missing_submissions if item["status"] in ("Not Started", "Draft", "Changes Requested")]
+        missing_submissions = get_missing_submissions(user.id) if (
+            capabilities["can_manage_setup"] or capabilities["can_view_reports"]
+        ) else []
+        actual_missing = [
+            item
+            for item in missing_submissions
+            if item["status"] in ("Not Started", "Draft", "Changes Requested")
+        ]
+        for item in actual_missing:
+            item["status_text"] = human_status(item["status"])
         missing_sheets_count = len(actual_missing)
 
-        # Recent activities: Last 5 updated submissions in site scope
         recent_submissions = []
         if allowed_site_ids:
-            recent_submissions = Submission.query.filter(
+            recent_query = Submission.query.filter(
                 Submission.site_id.in_(list(allowed_site_ids)),
                 Submission.is_deleted == False
-            ).order_by(Submission.updated_at.desc()).limit(5).all()
+            )
+            if capabilities["can_contribute"] and not (
+                capabilities["can_review"] or capabilities["can_manage_setup"]
+            ):
+                recent_query = recent_query.filter(Submission.submitted_by == user.id)
+            recent_submissions = recent_query.order_by(Submission.updated_at.desc()).limit(5).all()
 
         sites_map = {s.id: s.name for s in Site.query.filter_by(is_deleted=False).all()}
         forms_map = {f.id: f.name for f in Form.query.filter_by(is_deleted=False).all()}
 
         recent_activities = []
         for sub in recent_submissions:
-            status_text = sub.status
-            if sub.status in ("Submitted", "Resubmitted", "Under Review") and sub.current_level is not None:
-                status_text = f"{sub.status} (Level {sub.current_level})"
-
             recent_activities.append({
                 "id": sub.id,
                 "site_name": sites_map.get(sub.site_id, "Unknown"),
-                "form_name": forms_map.get(sub.form_id, "Unknown"),
+                "sheet_name": forms_map.get(sub.form_id, "Unknown sheet"),
                 "updated_at": sub.updated_at,
                 "status": sub.status,
-                "status_text": status_text
+                "status_text": human_status(sub.status),
             })
 
         metrics = {
@@ -170,11 +177,52 @@ def create_app(config_class=Config):
             "missing_sheets": missing_sheets_count
         }
 
+        my_work_items = []
+        if capabilities["can_contribute"]:
+            sheet_buckets = get_spoc_sheets_buckets(user.id)
+            my_work_items.extend(
+                dashboard_sheet_item(item, "Fix issue" if item["status"] == "Changes Requested" else "Continue sheet")
+                for item in sheet_buckets.get("action_needed", [])
+            )
+            my_work_items.extend(
+                dashboard_sheet_item(item, "Start sheet")
+                for item in sheet_buckets.get("not_started", [])
+            )
+            my_work_items.extend(
+                dashboard_sheet_item(item, "View submitted sheet")
+                for item in sheet_buckets.get("submitted", [])[:3]
+            )
+            my_work_items = my_work_items[:8]
+
+        review_queue = []
+        review_history = []
+        if capabilities["can_review"]:
+            review_queue = [dashboard_review_item(item) for item in get_approver_queue(user.id)[:8]]
+            review_history = [
+                {
+                    "site_name": item["site_name"],
+                    "period_label": item["period_label"],
+                    "sheet_name": item["form_name"],
+                    "status_text": item.get("current_status_text") or human_status(item["current_status"]),
+                    "acted_at": item["acted_at"],
+                    "href": (
+                        f"/module/APPROV/packages/{item['package_id']}"
+                        if item.get("package_id") else
+                        f"/module/APPROV/submissions/{item['submission_id']}"
+                    ),
+                }
+                for item in get_actioned_history(user.id)[:5]
+            ]
+
         return render_template(
             "dashboard.html",
+            capabilities=capabilities,
             dashboard_cards=build_dashboard_cards(user),
-            setup_checklist=build_setup_checklist(),
+            setup_checklist=build_setup_checklist() if capabilities["can_manage_setup"] else [],
             metrics=metrics,
+            my_work_items=my_work_items,
+            review_queue=review_queue,
+            review_history=review_history,
             recent_activities=recent_activities,
             missing_submissions=actual_missing
         )
@@ -201,31 +249,131 @@ def create_app(config_class=Config):
 def user_can(user, entity_type, *actions):
     if not user:
         return False
-    return any(has_permission(user.id, entity_type, action) for action in actions)
+    return any(user_has_access(user, entity_type, action) for action in actions)
+
+
+def user_has_access(user, entity_type, action):
+    if not user:
+        return False
+    flag = f"can_{action}"
+    if action == "manage_forms":
+        flag = "can_manage_forms"
+    elif action == "manage_users":
+        flag = "can_manage_users"
+    if not hasattr(AccessMatrix, flag):
+        return False
+    return AccessMatrix.query.filter(
+        AccessMatrix.user_id == user.id,
+        AccessMatrix.entity_type == entity_type,
+        AccessMatrix.is_deleted == False,
+        getattr(AccessMatrix, flag) == True,
+    ).first() is not None
+
+
+def build_user_capabilities(user):
+    can_contribute = user_can(user, "submission", "view", "create", "edit", "submit")
+    can_review = user_can(user, "submission", "approve", "reject")
+    can_manage_setup = any((
+        user_can(user, "user", "manage_users", "view"),
+        user_can(user, "site", "create", "edit", "delete"),
+        user_can(user, "form", "manage_forms"),
+        user_can(user, "value_set", "manage_forms"),
+        user_can(user, "formula", "manage_forms"),
+        user_can(user, "workflow", "manage_forms"),
+        user_can(user, "period", "create", "edit", "reopen"),
+    ))
+    can_view_reports = user_can(user, "report", "view", "export")
+    return {
+        "can_contribute": can_contribute,
+        "can_review": can_review,
+        "can_manage_setup": can_manage_setup,
+        "can_view_reports": can_view_reports,
+    }
+
+
+def human_status(status):
+    return {
+        "Approved": "Approved and locked",
+        "Draft": "Draft saved",
+        "Changes Requested": "Needs correction",
+        "Rejected": "Sent back",
+        "Resubmitted": "Sent again for review",
+        "Under Review": "Under review",
+        "Submitted": "Submitted",
+        "Partially Submitted": "Partially submitted",
+        "Ready for Review": "Ready for review",
+        "Not Started": "Not started",
+    }.get(status, status or "Unknown")
+
+
+def dashboard_sheet_item(item, action_label):
+    fy_start = item["year"] if item["month"] >= 4 else item["year"] - 1
+    href = (
+        f"/module/SUBMIT/annual?site_id={item['site_id']}"
+        f"&form_id={item['form_id']}&fy={fy_start}&month={item['month']}"
+    )
+    return {
+        "site_name": item["site_name"],
+        "period_label": item["period_label"],
+        "sheet_name": item["form_name"],
+        "status": item.get("status", "Not Started"),
+        "status_text": human_status(item.get("status", "Not Started")),
+        "action_label": action_label,
+        "href": href,
+    }
+
+
+def dashboard_review_item(item):
+    included = item.get("included_submissions", [])
+    submitted_statuses = ("Submitted", "Resubmitted", "Under Review", "Approved")
+    submitted_count = len([
+        sub for sub in included if sub.get("status") in submitted_statuses
+    ]) if included else item.get("included_submission_count")
+    waiting_on = ", ".join(
+        sub["form_name"] for sub in included if sub.get("status") not in submitted_statuses
+    )
+    package_status = item["status"]
+    if item.get("item_type") == "package" and included:
+        package_status = "Ready for Review" if not waiting_on else "Partially Submitted"
+    return {
+        "site_name": item["site_name"],
+        "period_label": item["period_label"],
+        "status": package_status,
+        "status_text": human_status(package_status),
+        "submitted_count": submitted_count,
+        "sheet_count": len(included) if included else item.get("included_submission_count"),
+        "waiting_on": waiting_on,
+        "action_label": "Review package" if item.get("is_my_turn") else "View package",
+        "href": (
+            f"/module/APPROV/packages/{item['package_id']}"
+            if item.get("item_type") == "package" and item.get("package_id") else
+            f"/module/APPROV/submissions/{item['submission_id']}"
+        ),
+    }
 
 
 def build_nav_items(user):
     if not user:
         return []
 
+    capabilities = build_user_capabilities(user)
     groups = [
         {
             "label": None,
-            "items": [{"label": "Dashboard", "href": "/dashboard", "visible": True}],
+            "items": [{"label": "Home", "href": "/dashboard", "visible": True}],
         },
         {
-            "label": "Operations",
+            "label": None,
             "items": [
                 {
-                    "label": "My Sheets",
+                    "label": "My Work",
                     "href": "/module/SUBMIT/",
-                    "visible": user_can(user, "submission", "submit", "view")
-                    or user_can(user, "form", "view"),
+                    "visible": capabilities["can_contribute"],
                 },
                 {
                     "label": "Review Queue",
                     "href": "/module/APPROV/",
-                    "visible": user_can(user, "submission", "approve", "reject"),
+                    "visible": capabilities["can_review"],
                 },
                 {
                     "label": "Notifications",
@@ -235,52 +383,52 @@ def build_nav_items(user):
             ],
         },
         {
-            "label": "System Setup / Configuration",
+            "label": "Setup",
             "items": [
+                {
+                    "label": "People",
+                    "href": "/module/ACCESS/",
+                    "visible": capabilities["can_manage_setup"] and user_can(user, "user", "view", "manage_users"),
+                },
                 {
                     "label": "Sites",
                     "href": "/module/SITEMST/",
-                    "visible": user_can(user, "site", "view"),
+                    "visible": capabilities["can_manage_setup"] and user_can(user, "site", "view"),
                 },
                 {
-                    "label": "Reporting Periods",
-                    "href": "/module/PERIOD/",
-                    "visible": user_can(user, "period", "view"),
-                },
-                {
-                    "label": "Value Sets",
-                    "href": "/module/VALSET/",
-                    "visible": user_can(user, "value_set", "view"),
-                },
-                {
-                    "label": "Formula Builder",
-                    "href": "/module/FRMULA/",
-                    "visible": user_can(user, "formula", "view"),
-                },
-                {
-                    "label": "Form Builder",
+                    "label": "Workbook Formats",
                     "href": "/module/FORMBLD/",
-                    "visible": user_can(user, "form", "manage_forms"),
+                    "visible": capabilities["can_manage_setup"] and user_can(user, "form", "manage_forms"),
                 },
                 {
-                    "label": "Workflow Builder",
+                    "label": "Constants & Lookup Tables",
+                    "href": "/module/VALSET/",
+                    "visible": capabilities["can_manage_setup"] and user_can(user, "value_set", "view"),
+                },
+                {
+                    "label": "Automatic Calculations",
+                    "href": "/module/FRMULA/",
+                    "visible": capabilities["can_manage_setup"] and user_can(user, "formula", "view"),
+                },
+                {
+                    "label": "Approval Paths",
                     "href": "/module/WFLWBLD/",
-                    "visible": user_can(user, "workflow", "view"),
+                    "visible": capabilities["can_manage_setup"] and user_can(user, "workflow", "view"),
                 },
             ],
         },
         {
-            "label": "Administration",
+            "label": "Operations",
             "items": [
                 {
-                    "label": "Users & Access",
-                    "href": "/module/ACCESS/",
-                    "visible": user_can(user, "user", "view", "manage_users"),
+                    "label": "Reporting Calendar",
+                    "href": "/module/PERIOD/",
+                    "visible": capabilities["can_manage_setup"] and user_can(user, "period", "view"),
                 },
                 {
                     "label": "Reports",
                     "href": "/module/RPTBLD/",
-                    "visible": user_can(user, "report", "export", "view"),
+                    "visible": capabilities["can_manage_setup"] or capabilities["can_view_reports"],
                 },
                 {
                     "label": "Audit Log",
@@ -299,31 +447,31 @@ def build_nav_items(user):
 
 
 def build_dashboard_cards(user):
+    capabilities = build_user_capabilities(user)
     cards = [
         {
-            "title": "My Sheets",
-            "href": "/module/SUBMIT/",
-            "description": "Monthly site submissions available to you.",
-            "visible": user_can(user, "submission", "submit", "view")
-            or user_can(user, "form", "view"),
-        },
-        {
-            "title": "Review Queue",
-            "href": "/module/APPROV/",
-            "description": "Submissions waiting for review action.",
-            "visible": user_can(user, "submission", "approve", "reject"),
-        },
-        {
-            "title": "Users & Access",
+            "title": "People",
             "href": "/module/ACCESS/",
-            "description": "Manage users and access.",
-            "visible": user_can(user, "user", "manage_users"),
+            "description": "Add and manage users who contribute, review, or manage reporting.",
+            "visible": capabilities["can_manage_setup"] and user_can(user, "user", "manage_users"),
         },
         {
-            "title": "Form Builder",
+            "title": "Sites",
+            "href": "/module/SITEMST/",
+            "description": "Manage ports and sites included in GHG reporting.",
+            "visible": capabilities["can_manage_setup"] and user_can(user, "site", "view"),
+        },
+        {
+            "title": "Workbook Formats",
             "href": "/module/FORMBLD/",
-            "description": "Configure forms for monthly site data entry.",
-            "visible": user_can(user, "form", "manage_forms"),
+            "description": "Build reusable sheet structures for site reporting.",
+            "visible": capabilities["can_manage_setup"] and user_can(user, "form", "manage_forms"),
+        },
+        {
+            "title": "Approval Paths",
+            "href": "/module/WFLWBLD/",
+            "description": "Decide who reviews and approves each site monthly package.",
+            "visible": capabilities["can_manage_setup"] and user_can(user, "workflow", "view"),
         },
         {
             "title": "Reports",
@@ -340,33 +488,33 @@ def build_setup_checklist():
     from app.modules.FRMULA.model import FormulaVersion
     checks = [
         (
-            "Users & Access configured",
+            "People and access configured",
             User.query.filter_by(is_deleted=False).count() > 0
             and AccessMatrix.query.filter_by(is_deleted=False).count() > 0,
         ),
-        ("Sites configured", Site.query.filter_by(is_deleted=False).count() > 0),
+        ("Sites ready", Site.query.filter_by(is_deleted=False).count() > 0),
         (
-            "Reporting periods opened",
+            "Reporting months opened",
             ReportingPeriod.query.filter_by(is_deleted=False, status="OPEN").count() > 0,
         ),
         (
-            "Value Sets approved",
+            "Constants and lookup tables approved",
             ValueSetVersion.query.filter_by(status="Approved").count() > 0,
         ),
         (
-            "Formulas published",
+            "Automatic calculations published",
             FormulaVersion.query.filter(FormulaVersion.published_at.is_not(None)).count() > 0,
         ),
         (
-            "Forms published",
+            "Sheets configured",
             FormVersion.query.filter(FormVersion.published_at.is_not(None)).count() > 0,
         ),
         (
-            "Workflows published/assigned",
+            "Approval paths assigned",
             WorkflowLevelApprover.query.filter_by(is_deleted=False).count() > 0,
         ),
         (
-            "Test submission approved",
+            "Approved monthly package available",
             Submission.query.filter_by(is_deleted=False, status="Approved").count() > 0,
         ),
     ]

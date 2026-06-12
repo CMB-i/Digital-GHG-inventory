@@ -7,7 +7,7 @@
   <div class="flex flex-col md:flex-row md:items-center md:justify-between border-b border-slate-200 pb-5">
     <div>
       <h1 class="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Review Queue</h1>
-      <p class="mt-2 text-sm text-slate-500">Review submitted workbook packages and legacy data sheets.</p>
+      <p class="mt-2 text-sm text-slate-500">Review monthly workbook packages assigned to you.</p>
     </div>
   </div>
 
@@ -27,7 +27,7 @@
               <dt class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Awaiting Review</dt>
               <dd class="flex items-baseline">
                 <div id="stat-pending" class="text-2xl font-bold text-slate-900">0</div>
-                <div class="ml-2 text-xs font-medium text-indigo-600">items assigned</div>
+                <div class="ml-2 text-xs font-medium text-indigo-600">packages assigned</div>
               </dd>
             </dl>
           </div>
@@ -49,7 +49,7 @@
               <dt class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Recently Actioned</dt>
               <dd class="flex items-baseline">
                 <div id="stat-history" class="text-2xl font-bold text-slate-900">0</div>
-                <div class="ml-2 text-xs font-medium text-emerald-600">sheets completed</div>
+                <div class="ml-2 text-xs font-medium text-emerald-600">reviews completed</div>
               </dd>
             </dl>
           </div>
@@ -66,7 +66,7 @@
           <span class="h-2 w-2 rounded-full bg-indigo-500 mr-2.5"></span>
           Pending Review
         </h2>
-        <p class="text-xs text-slate-500 mt-0.5">Workbook packages and legacy submissions awaiting your level authorization.</p>
+        <p class="text-xs text-slate-500 mt-0.5">Monthly packages waiting for your review.</p>
       </div>
       <span id="badge-pending" class="bg-indigo-100 text-indigo-800 text-[10px] px-2 py-0.5 rounded-full font-bold">0 items</span>
     </div>
@@ -77,7 +77,7 @@
             <th class="px-6 py-3 text-left">Review Item</th>
             <th class="px-6 py-3 text-left">Site</th>
             <th class="px-6 py-3 text-left">Reporting Period</th>
-            <th class="px-6 py-3 text-left">Current Level</th>
+            <th class="px-6 py-3 text-left">Review Step</th>
             <th class="px-6 py-3 text-left">Submitted By</th>
             <th class="px-6 py-3 text-left">Days Waiting</th>
             <th class="px-6 py-3 text-right">Actions</th>
@@ -98,9 +98,9 @@
       <div>
         <h2 class="text-md font-bold text-slate-900 flex items-center">
           <span class="h-2 w-2 rounded-full bg-slate-400 mr-2.5"></span>
-          Recently Actioned (History)
+          Recently Reviewed
         </h2>
-        <p class="text-xs text-slate-500 mt-0.5">Sheets you approved, returned, or rejected recently.</p>
+        <p class="text-xs text-slate-500 mt-0.5">Packages and sheets you approved, returned, or rejected recently.</p>
       </div>
       <span id="badge-history" class="bg-slate-100 text-slate-800 text-[10px] px-2 py-0.5 rounded-full font-bold">0 sheets</span>
     </div>
@@ -108,7 +108,7 @@
       <table class="min-w-full divide-y divide-slate-200">
         <thead class="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           <tr>
-            <th class="px-6 py-3 text-left">Form Name</th>
+            <th class="px-6 py-3 text-left">Sheet Name</th>
             <th class="px-6 py-3 text-left">Site</th>
             <th class="px-6 py-3 text-left">Reporting Period</th>
             <th class="px-6 py-3 text-left">Your Action</th>

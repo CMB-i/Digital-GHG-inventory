@@ -1,6 +1,5 @@
 from flask import Blueprint, jsonify, render_template
 from app.common.auth import current_user, require_login
-from app.common.decorators import require_permission
 from app.common.permissions import has_permission
 from app.modules.NOTIFY.service import (
     get_recent_notifications,

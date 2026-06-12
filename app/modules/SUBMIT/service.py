@@ -1234,6 +1234,17 @@ def get_spoc_sheets_buckets(user_id):
             users_cache[uid] = u.full_name if u else f"User {uid}"
         return users_cache[uid]
 
+    def plain_submission_status(status):
+        return {
+            "Approved": "Approved and locked",
+            "Draft": "Draft saved",
+            "Changes Requested": "Needs correction",
+            "Rejected": "Sent back",
+            "Resubmitted": "Sent again for review",
+            "Under Review": "Under review",
+            "Submitted": "Submitted",
+        }.get(status, status or "Unknown")
+
     # Track submission combos (site_id, form_id, reporting_period_id)
     submitted_combos = set()
     
@@ -1249,10 +1260,6 @@ def get_spoc_sheets_buckets(user_id):
         
         period_label = format_period_label(period.year, period.month)
         
-        status_text = sub.status
-        if sub.status in ("Submitted", "Resubmitted", "Under Review") and sub.current_level is not None:
-            status_text = f"{sub.status} (Level {sub.current_level})"
-
         item = {
             "submission_id": sub.id,
             "package_id": sub.package_id,
@@ -1266,7 +1273,7 @@ def get_spoc_sheets_buckets(user_id):
             "year": period.year,
             "month": period.month,
             "status": sub.status,
-            "status_text": status_text,
+            "status_text": plain_submission_status(sub.status),
             "last_saved": sub.updated_at or sub.created_at,
             "submitted_at": sub.submitted_at,
             "submitted_by": get_username(sub.submitted_by)
