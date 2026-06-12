@@ -483,24 +483,7 @@
     return "bg-slate-100 text-slate-600 border-slate-200";
   }
 
-  function getRowWarnings(row, prevRow, fields) {
-    if (!prevRow) return [];
-    const warnings = [];
-    fields.forEach(field => {
-      const fieldType = String(field.field_type || "").trim().toLowerCase();
-      if (["number", "integer", "decimal", "float", "numeric"].includes(fieldType)) {
-        const valCurrent = parseFloat(primitiveValue(cellObject(row, field)));
-        const valPrev = parseFloat(primitiveValue(cellObject(prevRow, field)));
-        if (!isNaN(valCurrent) && !isNaN(valPrev) && valPrev > 0) {
-          if (valCurrent > valPrev * 1.2) {
-            const percentIncrease = Math.round(((valCurrent - valPrev) / valPrev) * 100);
-            warnings.push(`<strong>${escapeHtml(field.field_name)}</strong> is ${percentIncrease}% higher than previous month.`);
-          }
-        }
-      }
-    });
-    return warnings;
-  }
+
 
   function render(options) {
     const fields = options.fields || [];
@@ -663,21 +646,7 @@
         </tr>
       `;
 
-      if (!isCalcMode) {
-        const warnings = getRowWarnings(row, prevRow, displayFields);
-        if (warnings.length > 0) {
-          tbodyHtml += `
-            <tr class="bg-[#fcf3d7] border-b border-amber-200">
-              <td colspan="${displayFields.length + 2}" class="px-6 py-2 text-xs text-[#8a6a13] font-semibold">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm">⚠️</span>
-                  <span>${warnings.join(" | ")}</span>
-                </div>
-              </td>
-            </tr>
-          `;
-        }
-      }
+
     }
 
     bodyEl.innerHTML = tbodyHtml + (isCalcMode ? "" : nonMonthlyGroups.map((group) => renderWorkbookValueSection(group, {
