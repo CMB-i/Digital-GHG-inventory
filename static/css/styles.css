@@ -917,47 +917,6 @@ body[data-theme="jsw-excel"] .submitted {
   border-color: var(--ghg-navy);
 }
 
-.ghg-period-table thead th {
-  background: #1a3a6b;
-  border-bottom: 2px solid #c4d4e8;
-  color: #ffffff;
-}
-
-.ghg-period-table tbody td {
-  padding: 10px 14px;
-}
-
-.ghg-period-table .period-month-row > td {
-  background: #dfeaf8;
-  border-top: 1px solid #c4d4e8;
-  padding-top: 16px;
-}
-
-.ghg-period-table .period-month-row > td:first-child {
-  border-left: 4px solid #1a3a6b;
-}
-
-/* Reporting Periods — sticky scroll container */
-.reporting-periods-table-wrapper {
-  overflow-y: auto;
-  max-height: calc(100vh - 220px);
-  position: relative;
-}
-
-.reporting-periods-table thead tr {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  background: #1a3a6b;
-}
-
-.reporting-periods-table tr.month-group-header {
-  position: sticky;
-  top: 44px;
-  z-index: 10;
-  background: #dfeaf8;
-}
-
 /* Reporting Periods — rp-table scroll + sticky */
 .rp-table-wrapper {
   overflow-y: scroll;
