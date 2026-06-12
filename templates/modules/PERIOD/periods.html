@@ -2,16 +2,15 @@
 {% block title %}Reporting Periods - Digital GHG Inventory{% endblock %}
 
 {% block content %}
-<section class="min-w-0 space-y-6">
+<section class="min-w-0 space-y-4">
 
   <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
     <div>
       <h1 class="text-2xl font-semibold">Reporting Periods</h1>
-      <p class="mt-1 text-sm text-slate-600">Open, close, lock, and reopen monthly reporting periods for each site.</p>
+      <p class="mt-1 text-sm text-slate-500">Open, close, lock, or reopen reporting months by site.</p>
     </div>
     {% if perm_create %}
-    <a class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-       href="{{ url_for('period.index', drawer='create') }}">Open Period</a>
+    <a class="action-button btn-primary" href="{{ url_for('period.index', drawer='create') }}">Open Period</a>
     {% endif %}
   </div>
 
@@ -19,9 +18,10 @@
     {% if messages %}
     <div class="space-y-2">
       {% for category, message in messages %}
-      <div class="rounded-md border px-4 py-3 text-sm
-        {%- if category == 'error' %} border-red-200 bg-red-50 text-red-700
-        {%- else %} border-emerald-200 bg-emerald-50 text-emerald-700{% endif %}">
+      <div class="border px-4 py-3 text-sm
+        {%- if category == 'error' %} border-[#fbe3e6] bg-[#fbe3e6] text-[#9a1224]
+        {%- elif category == 'info' %} border-[#dfeaf8] bg-[#dfeaf8] text-[#1a3a6b]
+        {%- else %} border-[#def0e2] bg-[#def0e2] text-[#1f6b34]{% endif %}">
         {{ message }}
       </div>
       {% endfor %}
@@ -29,11 +29,11 @@
     {% endif %}
   {% endwith %}
 
-  <form class="flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-white px-4 py-3"
+  <form class="flex flex-wrap items-center gap-3 border border-[#d0d8e4] bg-white px-4 py-3"
         method="get" action="{{ url_for('period.index') }}">
     <div class="flex items-center gap-2">
-      <label class="text-xs font-medium text-slate-600" for="filter_site_id">Site</label>
-      <select class="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+      <label class="text-xs font-medium text-slate-500" for="filter_site_id">Site</label>
+      <select class="border border-slate-300 px-3 py-1.5 text-sm"
               id="filter_site_id" name="site_id">
         <option value="">All sites</option>
         {% for site in sites %}
@@ -42,8 +42,8 @@
       </select>
     </div>
     <div class="flex items-center gap-2">
-      <label class="text-xs font-medium text-slate-600" for="filter_status">Status</label>
-      <select class="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+      <label class="text-xs font-medium text-slate-500" for="filter_status">Status</label>
+      <select class="border border-slate-300 px-3 py-1.5 text-sm"
               id="filter_status" name="status">
         <option value="">All statuses</option>
         {% for s in valid_statuses %}
@@ -51,118 +51,155 @@
         {% endfor %}
       </select>
     </div>
-    <button class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-50" type="submit">Filter</button>
+    <button class="action-button action-button-secondary" type="submit">Filter</button>
     {% if filter_site_id or filter_status %}
     <a class="text-xs font-medium text-slate-500 underline hover:text-slate-900"
        href="{{ url_for('period.index') }}">Clear</a>
     {% endif %}
   </form>
 
-  <div class="w-full overflow-x-auto rounded-md border border-slate-200 bg-white lg:overflow-x-visible">
-    <table class="w-full table-fixed text-sm max-lg:min-w-[800px]">
-      <colgroup>
-        <col class="w-[20%]">
-        <col class="w-[22%]">
-        <col class="w-[18%]">
-        <col class="w-[16%]">
-        <col class="w-[24%]">
-      </colgroup>
-      <thead class="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
-        <tr>
-          <th class="px-4 py-2.5">Period</th>
-          <th class="px-3 py-2.5">Site</th>
-          <th class="px-3 py-2.5">Status</th>
-          <th class="px-3 py-2.5">Deadline</th>
-          <th class="px-3 py-2.5 text-right">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% set status_colors = {
-          "OPEN": "bg-emerald-50 text-emerald-700",
-          "SUBMISSION_CLOSED": "bg-amber-50 text-amber-800",
-          "LOCKED": "bg-red-50 text-red-700",
-          "REOPENED": "bg-blue-50 text-blue-700"
-        } %}
-        {% for period in periods %}
-        {% set site = site_map.get(period.site_id) %}
-        {% set next_status = valid_transitions.get(period.status) %}
-        <tr class="border-b border-slate-100 align-middle hover:bg-slate-50">
-          <td class="px-4 py-3">
-            <span class="text-sm font-semibold text-slate-900">
-              {{ month_names[period.month] }} {{ period.year }}
-            </span>
-          </td>
-          <td class="max-w-0 overflow-hidden px-3 py-3">
-            <div class="truncate text-sm text-slate-700" title="{{ site.name if site else '' }}">
-              {{ site.name if site else "—" }}
-            </div>
-            {% if site %}
-            <div class="truncate text-xs text-slate-400">{{ site.code }}</div>
-            {% endif %}
-          </td>
-          <td class="px-3 py-3">
-            <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium
-              {{ status_colors.get(period.status, 'bg-slate-100 text-slate-600') }}">
-              {{ status_labels.get(period.status, period.status) }}
-            </span>
-          </td>
-          <td class="whitespace-nowrap px-3 py-3 text-sm text-slate-600">
-            {{ period.deadline.strftime("%d %b %Y") if period.deadline else "—" }}
-          </td>
-          <td class="whitespace-nowrap px-3 py-3 text-right">
-            {% if next_status %}
-              {% if period.status == "LOCKED" %}
-                {% if perm_reopen %}
-                <button class="action-button action-button-secondary reopen-button"
-                        data-period-id="{{ period.id }}"
-                        data-transition-url="{{ url_for('period.transition', period_id=period.id) }}"
-                        data-period-label="{{ month_names[period.month] }} {{ period.year }}{% if site %} — {{ site.name }}{% endif %}"
-                        type="button">Reopen</button>
-                {% else %}
-                <span class="text-xs text-slate-400">—</span>
-                {% endif %}
-              {% else %}
-                {% if perm_edit %}
-                <form class="period-transition-form inline"
-                      data-confirm="Move {{ month_names[period.month] }} {{ period.year }} to '{{ status_labels.get(next_status, next_status) }}'?"
-                      method="post"
-                      action="{{ url_for('period.transition', period_id=period.id) }}">
-                  <input type="hidden" name="target_status" value="{{ next_status }}">
-                  <button class="action-button action-button-secondary" type="submit">
-                    {{ transition_labels.get(period.status, "Advance") }}
+  {% set status_badge_classes = {
+    "OPEN": "status-badge status-badge-info",
+    "SUBMISSION_CLOSED": "status-badge status-badge-neutral",
+    "LOCKED": "status-badge status-badge-neutral",
+    "REOPENED": "status-badge status-badge-warning"
+  } %}
+
+  {% if month_groups %}
+
+  <div class="rp-table-wrapper">
+    <table class="rp-table">
+        <colgroup>
+          <col class="w-[30%]">
+          <col class="w-[13%]">
+          <col class="w-[15%]">
+          <col class="w-[14%]">
+          <col class="w-[28%]">
+        </colgroup>
+        <thead class="text-left text-xs font-semibold uppercase tracking-wide">
+          <tr>
+            <th class="px-4 py-2.5">Site</th>
+            <th class="px-3 py-2.5">Status</th>
+            <th class="px-3 py-2.5">Deadline</th>
+            <th class="px-3 py-2.5">Last Updated</th>
+            <th class="px-3 py-2.5 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+
+          {% for group in month_groups %}
+
+          <tr class="period-month-row month-group-header">
+            <td colspan="5">
+              <div class="flex items-center justify-between gap-4">
+                <div class="flex flex-wrap items-center gap-3">
+                  <span class="text-[13px] font-semibold text-[#1a3a6b]">{{ group.month_name }} {{ group.year }}</span>
+                  <span class="month-summary">
+                    {% set ns = namespace(first=true) %}
+                    {% for s in valid_statuses %}
+                      {% set cnt = group.status_counts.get(s, 0) %}
+                      {% if cnt > 0 %}
+                        {% if not ns.first %} · {% endif %}{{ cnt }} {{ status_labels.get(s) | lower }}{% set ns.first = false %}
+                      {% endif %}
+                    {% endfor %}
+                  </span>
+                </div>
+                {% if perm_create and group.can_bulk_open and not filter_site_id and not filter_status %}
+                <form class="bulk-open-form inline" method="post"
+                      action="{{ url_for('period.bulk_open_periods') }}"
+                      data-confirm="Open {{ group.missing_count }} reporting period(s) for active sites that do not yet have a period for {{ group.month_name }} {{ group.year }}?">
+                  <input type="hidden" name="year" value="{{ group.year }}">
+                  <input type="hidden" name="month" value="{{ group.month }}">
+                  <button class="border border-[#1a3a6b] px-2.5 py-1 text-[11px] font-medium text-[#1a3a6b] hover:bg-[#dfeaf8]"
+                          type="submit"
+                          title="Creates open reporting periods for active sites that do not already have this month.">
+                    Open remaining sites ({{ group.missing_count }})
                   </button>
                 </form>
-                {% else %}
-                <span class="text-xs text-slate-400">—</span>
                 {% endif %}
+              </div>
+            </td>
+          </tr>
+
+          {% for period in group.periods %}
+          {% set site = site_map.get(period.site_id) %}
+          {% set next_status = valid_transitions.get(period.status) %}
+          <tr class="border-b border-[#dde5ef] align-middle hover:bg-[#f0f4f8]">
+            <td class="max-w-0 px-4 py-2.5">
+              <div class="truncate text-sm text-slate-800" title="{{ site.name if site else '' }}">
+                {{ site.name if site else "—" }}
+              </div>
+            </td>
+            <td class="px-3 py-2.5">
+              <span class="{{ status_badge_classes.get(period.status, 'status-badge status-badge-neutral') }}">
+                {{ status_labels.get(period.status, period.status) }}
+              </span>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2.5 text-sm text-slate-500">
+              {{ period.deadline.strftime("%d %b %Y") if period.deadline else "—" }}
+            </td>
+            <td class="whitespace-nowrap px-3 py-2.5 text-xs text-slate-400">
+              {{ period.updated_at.strftime("%d %b %Y") if period.updated_at else "—" }}
+            </td>
+            <td class="whitespace-nowrap px-3 py-2.5 text-right">
+              {% if next_status %}
+                {% if period.status == "LOCKED" %}
+                  {% if perm_reopen %}
+                  <button class="action-button action-button-secondary reopen-button"
+                          data-period-id="{{ period.id }}"
+                          data-transition-url="{{ url_for('period.transition', period_id=period.id) }}"
+                          data-period-label="{{ group.month_name }} {{ group.year }}{% if site %} — {{ site.name }}{% endif %}"
+                          type="button">Reopen</button>
+                  {% else %}
+                  <span class="text-xs text-slate-400">—</span>
+                  {% endif %}
+                {% else %}
+                  {% if perm_edit %}
+                  <form class="period-transition-form inline"
+                        data-confirm="Move {{ site.name if site else 'this site' }} ({{ group.month_name }} {{ group.year }}) to '{{ status_labels.get(next_status, next_status) }}'?"
+                        method="post"
+                        action="{{ url_for('period.transition', period_id=period.id) }}">
+                    <input type="hidden" name="target_status" value="{{ next_status }}">
+                    <button class="action-button {% if period.status == 'REOPENED' %}btn-outline{% else %}btn-neutral{% endif %}" type="submit">
+                      {{ transition_labels.get(period.status, "Advance") }}
+                    </button>
+                  </form>
+                  {% else %}
+                  <span class="text-xs text-slate-400">—</span>
+                  {% endif %}
+                {% endif %}
+              {% else %}
+              <span class="text-xs text-slate-400">—</span>
               {% endif %}
-            {% endif %}
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td class="px-5 py-10 text-center" colspan="5">
-            <div class="mx-auto flex max-w-xs flex-col items-center">
-              <p class="text-sm font-medium text-slate-700">No reporting periods found.</p>
-              <p class="mt-1 text-xs text-slate-500">
-                {% if filter_site_id or filter_status %}
-                No periods match the current filters.
-                {% else %}
-                Open a period to allow monthly site data submissions.
-                {% endif %}
-              </p>
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
+            </td>
+          </tr>
+          {% endfor %}
+
+          {% endfor %}
+
+        </tbody>
     </table>
   </div>
+
+  {% else %}
+  <div class="border border-[#d0d8e4] bg-white px-4 py-12 text-center">
+    <p class="text-sm font-medium text-slate-700">
+      {% if filter_site_id or filter_status %}
+        No reporting months match these filters.
+      {% else %}
+        No reporting months configured yet.
+      {% endif %}
+    </p>
+    {% if not filter_site_id and not filter_status %}
+    <p class="mt-1 text-xs text-slate-400">Create reporting months to start collecting site data.</p>
+    {% endif %}
+  </div>
+  {% endif %}
 
 </section>
 
 <div class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4" id="reopen_modal">
-  <div class="w-full max-w-md rounded-md bg-white shadow-xl" role="dialog" aria-modal="true" aria-labelledby="reopen_modal_title">
+  <div class="w-full max-w-md bg-white shadow-xl" role="dialog" aria-modal="true" aria-labelledby="reopen_modal_title">
     <div class="border-b border-slate-200 px-5 py-4">
       <h2 class="text-lg font-semibold" id="reopen_modal_title">Reopen Period</h2>
       <p class="mt-1 text-sm text-slate-600" id="reopen_modal_period"></p>
@@ -171,13 +208,13 @@
       <input type="hidden" name="target_status" value="REOPENED">
       <div>
         <label class="text-xs font-medium text-slate-600" for="reopen_reason_input">Reason for reopening</label>
-        <textarea class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+        <textarea class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
                   id="reopen_reason_input" name="reopen_reason" rows="3" required
                   placeholder="Describe why this period is being reopened…"></textarea>
       </div>
       <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
-        <button class="reopen-cancel rounded-md border border-slate-300 px-4 py-2 text-sm font-medium" type="button">Cancel</button>
-        <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Reopen Period</button>
+        <button class="reopen-cancel action-button action-button-secondary" type="button">Cancel</button>
+        <button class="action-button action-button-primary" type="submit">Reopen Period</button>
       </div>
     </form>
   </div>
@@ -191,7 +228,7 @@
       <h2 class="text-lg font-semibold">Open Period</h2>
       <p class="mt-1 text-sm text-slate-600">Open a new monthly reporting period for a site.</p>
     </div>
-    <a class="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+    <a class="action-button action-button-secondary"
        href="{{ url_for('period.index') }}">Cancel</a>
   </div>
   <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5"
@@ -199,7 +236,7 @@
         action="{{ url_for('period.create') }}">
     <div>
       <label class="text-xs font-medium text-slate-600" for="create_site_id">Site</label>
-      <select class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+      <select class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
               id="create_site_id" name="site_id" required>
         <option value="">Select a site…</option>
         {% for site in sites %}
@@ -210,7 +247,7 @@
     <div class="grid grid-cols-2 gap-3">
       <div>
         <label class="text-xs font-medium text-slate-600" for="create_year">Year</label>
-        <select class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+        <select class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
                 id="create_year" name="year" required>
           {% for y in years %}
           <option value="{{ y }}" {% if y == current_year %}selected{% endif %}>{{ y }}</option>
@@ -219,7 +256,7 @@
       </div>
       <div>
         <label class="text-xs font-medium text-slate-600" for="create_month">Month</label>
-        <select class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+        <select class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
                 id="create_month" name="month" required>
           {% for m_num, m_name in month_names.items() %}
           <option value="{{ m_num }}" {% if m_num == current_month %}selected{% endif %}>{{ m_name }}</option>
@@ -231,13 +268,13 @@
       <label class="text-xs font-medium text-slate-600" for="create_deadline">
         Deadline <span class="font-normal text-slate-400">(optional)</span>
       </label>
-      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+      <input class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
              id="create_deadline" name="deadline" type="date">
     </div>
     <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
-      <a class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium"
+      <a class="action-button action-button-secondary"
          href="{{ url_for('period.index') }}">Cancel</a>
-      <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Open Period</button>
+      <button class="action-button action-button-primary" type="submit">Open Period</button>
     </div>
   </form>
 </aside>
@@ -249,6 +286,14 @@
 <script>
   (function () {
     document.querySelectorAll(".period-transition-form").forEach(function (form) {
+      form.addEventListener("submit", function (event) {
+        if (!window.confirm(form.dataset.confirm)) {
+          event.preventDefault();
+        }
+      });
+    });
+
+    document.querySelectorAll(".bulk-open-form").forEach(function (form) {
       form.addEventListener("submit", function (event) {
         if (!window.confirm(form.dataset.confirm)) {
           event.preventDefault();

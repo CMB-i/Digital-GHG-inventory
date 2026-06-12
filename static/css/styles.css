@@ -732,7 +732,8 @@ body[data-theme="jsw-excel"] .btn-sm {
 .ghg-status-neutral,
 .status-badge-neutral {
   background: var(--ghg-neutral-bg);
-  border-color: var(--ghg-neutral-text);
+  border-color: var(--ghg-input-border);
+  border-width: 2px;
   color: var(--ghg-neutral-text);
 }
 
@@ -914,6 +915,88 @@ body[data-theme="jsw-excel"] .submitted {
   background: var(--ghg-info-bg);
   color: var(--ghg-navy);
   border-color: var(--ghg-navy);
+}
+
+/* Reporting Periods — rp-table scroll + sticky */
+.rp-table-wrapper {
+  overflow-y: scroll;
+  height: calc(100vh - 280px);
+  position: relative;
+  border: 1px solid #d0d8e4;
+}
+
+.rp-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.rp-table thead {
+  border-bottom: none;
+  box-shadow: none;
+}
+
+.rp-table thead tr {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #1a3a6b;
+}
+
+.rp-table thead th {
+  background: #1a3a6b;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  padding: 10px 14px;
+  white-space: nowrap;
+}
+
+.rp-table tr.month-group-header {
+  position: sticky;
+  top: 41px;
+  z-index: 10;
+  background: #dfeaf8;
+}
+
+.rp-table tr.month-group-header td {
+  background: #dfeaf8;
+  border-left: 4px solid #1a3a6b;
+  padding: 16px 14px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a3a6b;
+  white-space: nowrap;
+}
+
+.rp-table tr.month-group-header:first-of-type td {
+  padding-top: 8px;
+}
+
+.rp-table tr.month-group-header td span.month-summary {
+  font-size: 12px;
+  font-weight: 400;
+  color: #64748b;
+  margin-left: 8px;
+}
+
+.rp-table tbody tr:not(.month-group-header) td {
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 400;
+  color: #1f2937;
+  border-bottom: 1px solid #e8edf3;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.rp-table tbody tr:not(.month-group-header):nth-child(even) {
+  background: #f8fafc;
+}
+
+.rp-table tbody tr:not(.month-group-header):hover {
+  background: #eef3fa;
 }
 
 .ghg-line-clamp-2 {
