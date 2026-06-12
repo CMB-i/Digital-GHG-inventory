@@ -193,7 +193,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const forms = formsForSelectedSite();
     formTabs.innerHTML = "";
     if (!forms.length && state.selectedFormId !== "calc_results") {
-      formTabs.innerHTML = '<span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">No assigned forms</span>';
+      formTabs.innerHTML = '<span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">No assigned sheets</span>';
       return;
     }
 
@@ -379,7 +379,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   async function loadOptions() {
     const response = await fetch("/module/SUBMIT/api/annual-workbook/options");
-    if (!response.ok) throw new Error("Could not load assigned sites and forms.");
+    if (!response.ok) throw new Error("Could not load assigned sites and sheets.");
     state.options = await response.json();
     const requestedSite = state.options.sites.find(site => parseInt(site.id) === state.requestedSiteId);
     state.selectedSiteId = requestedSite
@@ -411,7 +411,7 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
     if (!forms.length && state.selectedFormId !== "calc_results") {
-      setEmpty("No forms assigned", "Published forms assigned to this site will appear as tabs.");
+      setEmpty("No sheets assigned", "Published sheets assigned to this site will appear as tabs.");
       return;
     }
     if (!state.selectedFormId) {

@@ -22,6 +22,18 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  function humanStatus(status) {
+    return {
+      "Approved": "Approved and locked",
+      "Draft": "Draft saved",
+      "Changes Requested": "Needs correction",
+      "Rejected": "Sent back",
+      "Resubmitted": "Sent again for review",
+      "Under Review": "Under review",
+      "Submitted": "Submitted"
+    }[status] || status || "Unknown";
+  }
+
   function loadQueueData() {
     fetch("/module/APPROV/api/queue")
       .then((res) => {
@@ -38,7 +50,7 @@ document.addEventListener("DOMContentLoaded", function () {
         statHistory.textContent = historyCount;
 
         badgePending.textContent = `${pendingCount} items`;
-        badgeHistory.textContent = `${historyCount} sheets`;
+        badgeHistory.textContent = `${historyCount} reviews`;
 
         // Render queues
         renderPendingTable(data.pending);
@@ -58,7 +70,7 @@ document.addEventListener("DOMContentLoaded", function () {
       tablePending.innerHTML = `
         <tr>
           <td colspan="7" class="px-6 py-8 text-center text-slate-400 italic">
-            No sheets pending your approval. Well done!
+            No monthly packages are waiting for your review.
           </td>
         </tr>
       `;
@@ -83,7 +95,7 @@ document.addEventListener("DOMContentLoaded", function () {
         const href = row.item_type === "package"
           ? `/module/APPROV/packages/${row.package_id}`
           : `/module/APPROV/submissions/${row.submission_id}`;
-        const label = row.item_type === "package" ? "Review Package" : "Review Submission";
+        const label = row.item_type === "package" ? "Review package" : "Review sheet";
         actionBtn = `
           <a href="${href}" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm hover:shadow transition-all">
             ${label}
@@ -92,17 +104,17 @@ document.addEventListener("DOMContentLoaded", function () {
       } else {
         actionBtn = `
           <span class="inline-flex items-center px-2 py-1 bg-slate-100 text-slate-500 text-xs font-medium rounded-lg border border-slate-200 cursor-not-allowed" title="It is not your turn in the sequence.">
-            Awaiting Sequence
+            Waiting for earlier review
           </span>
         `;
       }
 
       const itemLabel = row.item_type === "package"
         ? (row.label || "Monthly Workbook Package")
-        : (row.form_name || "Unknown Form");
+        : (row.form_name || "Unknown sheet");
       const includedForms = Array.isArray(row.forms_included) ? row.forms_included : [];
       const itemMeta = row.item_type === "package"
-        ? `${row.included_submission_count || 0} sheets · ${includedForms.join(", ") || "Forms unavailable"}`
+        ? `${row.included_submission_count || 0} sheets · ${includedForms.join(", ") || "Sheet names unavailable"}`
         : "Single sheet";
 
       tr.innerHTML = `
@@ -114,7 +126,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <td class="px-6 py-4 font-medium text-slate-700">${row.period_label}</td>
         <td class="px-6 py-4">
           <span class="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold">
-            Level ${row.current_level_number}: ${row.current_level_name}
+            Step ${row.current_level_number}: ${row.current_level_name}
           </span>
         </td>
         <td class="px-6 py-4 text-xs font-medium text-slate-600">${row.submitted_by_name}</td>
@@ -137,7 +149,7 @@ document.addEventListener("DOMContentLoaded", function () {
       tableHistory.innerHTML = `
         <tr>
           <td colspan="7" class="px-6 py-8 text-center text-slate-400 italic">
-            You haven't actioned any sheets recently.
+            You haven't reviewed any packages recently.
           </td>
         </tr>
       `;
@@ -170,18 +182,18 @@ document.addEventListener("DOMContentLoaded", function () {
         <td class="px-6 py-4 font-medium text-slate-700">${row.period_label}</td>
         <td class="px-6 py-4">
           <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold border ${actionBadgeClass}">
-            ${row.action}
+            ${row.action_text || row.action}
           </span>
         </td>
         <td class="px-6 py-4">
           <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${statusBadgeClass}">
-            ${row.current_status}
+            ${row.current_status_text || humanStatus(row.current_status)}
           </span>
         </td>
         <td class="px-6 py-4 text-xs text-slate-500">${formatDate(row.acted_at)}</td>
         <td class="px-6 py-4 text-right">
           <a href="${detailsHref}" class="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all">
-            View Details
+            View package
           </a>
         </td>
       `;

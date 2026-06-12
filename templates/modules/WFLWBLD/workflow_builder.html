@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Workflow Builder - Digital GHG Inventory{% endblock %}
+{% block title %}Workflow Paths - Digital GHG Inventory{% endblock %}
 
 {% block content %}
 <div class="space-y-6">
@@ -8,17 +8,17 @@
 
   <!-- 1. LIST VIEW -->
   <div id="list-view">
-    <div class="text-xs text-slate-500 mb-2">Configuration · <strong class="text-indigo-600">All Workflows</strong></div>
+    <div class="text-xs text-slate-500 mb-2">Configuration · <strong class="text-indigo-600">All Workflow Paths</strong></div>
     <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-slate-800">Workflow Builder</h1>
+        <h1 class="text-2xl font-bold text-slate-800">Workflow Paths</h1>
         <p class="text-xs text-slate-500 mt-1">Configure submission review levels and assign approvers.</p>
       </div>
       <button onclick="startNewWorkflow()" class="inline-flex items-center justify-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
         <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
         </svg>
-        Create Workflow
+        Create Workflow Path
       </button>
     </div>
 

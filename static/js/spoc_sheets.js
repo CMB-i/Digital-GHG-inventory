@@ -81,6 +81,18 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  function humanStatus(status) {
+    return {
+      "Approved": "Approved and locked",
+      "Draft": "Draft saved",
+      "Changes Requested": "Needs correction",
+      "Rejected": "Sent back",
+      "Resubmitted": "Sent again for review",
+      "Under Review": "Under review",
+      "Submitted": "Submitted"
+    }[status] || status || "Unknown";
+  }
+
   // Fetch all sheets for the dashboard
   function loadDashboardData() {
     Promise.all([
@@ -189,7 +201,7 @@ document.addEventListener("DOMContentLoaded", function () {
       workbookCards.innerHTML = `
         <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center md:col-span-2 xl:col-span-3">
           <p class="text-sm font-bold text-slate-700">No annual workbook is available.</p>
-          <p class="mt-1 text-sm text-slate-500">Ask an admin to assign forms and open reporting periods for your site.</p>
+          <p class="mt-1 text-sm text-slate-500">Ask an admin to assign sheets and open reporting periods for your site.</p>
         </div>
       `;
       return;
@@ -207,7 +219,7 @@ document.addEventListener("DOMContentLoaded", function () {
           </div>
           <dl class="mt-5 grid grid-cols-2 gap-3 text-sm">
             <div class="rounded-xl border border-slate-200 bg-white/80 p-3">
-              <dt class="text-xs font-semibold text-slate-400">Assigned forms</dt>
+              <dt class="text-xs font-semibold text-slate-400">Assigned sheets</dt>
               <dd class="mt-1 text-xl font-bold text-slate-900">${summary.assignedForms}</dd>
             </div>
             <div class="rounded-xl border border-amber-100 bg-amber-50/70 p-3">
@@ -225,7 +237,7 @@ document.addEventListener("DOMContentLoaded", function () {
           </dl>
         </div>
         <a href="${workbookUrl(summary, summary.firstFormId)}" class="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-bold text-white shadow-sm hover:bg-slate-800">
-          Open Workbook
+          Open workbook
         </a>
       </article>
     `).join("");
@@ -237,7 +249,7 @@ document.addEventListener("DOMContentLoaded", function () {
       tableActionNeeded.innerHTML = `
         <tr>
           <td colspan="6" class="px-6 py-8 text-center text-slate-400 italic">
-            No drafts or pending actions. Excellent!
+            No sheets need your attention right now.
           </td>
         </tr>
       `;
@@ -259,13 +271,13 @@ document.addEventListener("DOMContentLoaded", function () {
         <td class="px-6 py-4 font-medium text-slate-700">${row.period_label}</td>
         <td class="px-6 py-4">
           <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${badgeClass}">
-            ${row.status}
+            ${row.status_text || humanStatus(row.status)}
           </span>
         </td>
         <td class="px-6 py-4 text-xs text-slate-500">${formatDate(row.last_saved)}</td>
         <td class="px-6 py-4 text-right">
           <a href="${workbookUrl(row)}" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm hover:shadow transition-all">
-            Open in Workbook
+            Open workbook
           </a>
         </td>
       `;
@@ -279,7 +291,7 @@ document.addEventListener("DOMContentLoaded", function () {
       tableNotStarted.innerHTML = `
         <tr>
           <td colspan="5" class="px-6 py-8 text-center text-slate-400 italic">
-            All forms have been started or submitted for the current periods!
+            All open sheets have been started or submitted.
           </td>
         </tr>
       `;
@@ -297,7 +309,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <td class="px-6 py-4 text-xs font-medium text-slate-500">${formatShortDate(row.deadline)}</td>
         <td class="px-6 py-4 text-right">
           <a href="${workbookUrl(row)}" class="inline-flex items-center px-3 py-1.5 bg-white border border-slate-300 hover:border-indigo-500 hover:text-indigo-600 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition-all">
-            Open in Workbook
+            Open workbook
           </a>
         </td>
       `;
@@ -342,7 +354,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <td class="px-6 py-4 text-xs text-slate-500">${formatDate(row.submitted_at)}</td>
         <td class="px-6 py-4 text-right">
           <a href="${submittedViewUrl(row)}" class="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all">
-            View Details
+            View submitted sheet
           </a>
         </td>
       `;

@@ -13,6 +13,7 @@ from app.modules.SITEMST.model import Site
 from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.FORMBLD.model import Form, Field, FieldVersion
 from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument
+from app.modules.SUBMIT.service import human_sheet_label
 from app.modules.USRMGMT.model import User
 
 def list_report_templates(user_id):
@@ -225,7 +226,7 @@ def generate_report_data(template_id, user_id):
             results.append({
                 "period_label": format_period_label(p.year, p.month),
                 "site_name": site.name,
-                "form_name": form.name,
+                "form_name": human_sheet_label(form),
                 "field_code": f.field_code,
                 "field_name": fv.field_name,
                 "field_type": fv.field_type,
@@ -414,7 +415,7 @@ def get_missing_submissions(user_id):
                 "site_id": site.id,
                 "site_name": site.name,
                 "form_id": f.id,
-                "form_name": f.name,
+                "form_name": human_sheet_label(f),
                 "period_id": p.id,
                 "period_label": period_label,
                 "submission_id": sub_id,

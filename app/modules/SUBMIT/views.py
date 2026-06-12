@@ -20,6 +20,7 @@ from app.modules.SUBMIT.service import (
     autosave_submission_values,
     submit_submission,
     submit_monthly_workbook_package,
+    human_sheet_label,
     set_submission_value_state,
     CELL_STATE_DRAFT_FILLED,
     DuplicateSubmissionError,
@@ -35,7 +36,7 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 @require_permission("submission", ("submit", "view"))
 def index():
     """
-    My Sheets landing dashboard page.
+    My Workbooks dashboard page.
     """
     return render_template("modules/SUBMIT/my_sheets.html", module_code=MODULE_CODE)
 
@@ -323,7 +324,7 @@ def get_submission_details(submission_id):
             "site_id": submission.site_id,
             "site_name": site.name if site else "",
             "form_id": submission.form_id,
-            "form_name": form.name if form else "",
+            "form_name": human_sheet_label(form),
             "reporting_period_id": submission.reporting_period_id,
             "period_label": period_label,
             "status": submission.status,

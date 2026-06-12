@@ -25,6 +25,7 @@ from app.modules.APPROV.service import (
 )
 from app.modules.SUBMIT.service import (
     format_period_label,
+    human_sheet_label,
     serialize_submission_value_issue,
     submission_value_issues_map,
 )
@@ -247,7 +248,7 @@ def get_package_summary(package_id):
         submissions_data.append({
             "submission_id": sub.id,
             "form_id": sub.form_id,
-            "form_name": forms[sub.form_id].name if sub.form_id in forms else "Unknown Form",
+            "form_name": human_sheet_label(forms[sub.form_id]) if sub.form_id in forms else "Untitled Sheet",
             "status": sub.status,
             "current_level": sub.current_level,
             "submitted_by": submitter.full_name if submitter else "System",
@@ -371,7 +372,7 @@ def get_submission_details(submission_id):
 
         metadata = {
             "submission_id": submission.id,
-            "form_name": form.name if form else "",
+            "form_name": human_sheet_label(form),
             "site_name": site.name if site else "",
             "period_label": format_period_label(period.year, period.month) if period else "",
             "status": submission.status,

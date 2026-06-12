@@ -1,5 +1,6 @@
 import json
 import calendar
+import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -124,6 +125,59 @@ def _parse_form_metadata(form):
         except Exception:
             pass
     return metadata
+
+
+def _looks_like_internal_code(value):
+    text = (value or "").strip()
+    if not text:
+        return True
+    normalized = re.sub(r"[\s_-]+", "", text).lower()
+    if not normalized:
+        return True
+    if re.fullmatch(r"[a-z]{1,4}\d+[a-z]*(test)?", normalized):
+        return True
+    if re.fullmatch(r"[a-z]*\d+[a-z]*", normalized) and len(normalized) <= 12:
+        return True
+    if re.fullmatch(r"[a-z]{1,4}", normalized) and text == text.lower():
+        return True
+    words = re.findall(r"[A-Za-z]+", text)
+    meaningful_words = [word for word in words if len(word) > 2 and word.lower() != "test"]
+    return bool(re.search(r"\d", text)) and not meaningful_words
+
+
+def human_sheet_label(form):
+    if not form:
+        return "Untitled Sheet"
+
+    metadata = _parse_form_metadata(form)
+    candidates = [
+        metadata.get("display_name"),
+        metadata.get("title"),
+        metadata.get("sheet_name"),
+        metadata.get("sheet_label"),
+        metadata.get("label"),
+        form.name,
+    ]
+    form_code = (form.code or "").strip().lower()
+
+    for candidate in candidates:
+        label = (candidate or "").strip()
+        if not label:
+            continue
+        if form_code and label.lower() == form_code:
+            continue
+        if not _looks_like_internal_code(label):
+            return label
+
+    for section in sorted(
+        [section for section in getattr(form, "sections", []) if not section.is_deleted],
+        key=lambda section: (section.display_order, section.id),
+    ):
+        label = (section.name or "").strip()
+        if label and not _looks_like_internal_code(label):
+            return label
+
+    return "Untitled Sheet"
 
 
 def _fy_months(start_year):
@@ -524,7 +578,7 @@ def get_annual_workbook_options(user_id):
         forms_by_site[str(site.id)] = [
             {
                 "id": form.id,
-                "name": form.name,
+                "name": human_sheet_label(form),
                 "code": form.code,
                 "workflow_id": metadata.get("workflow_id"),
             }
@@ -638,7 +692,7 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
         },
         "selected_form": {
             "id": form.id,
-            "name": form.name,
+            "name": human_sheet_label(form),
             "code": form.code,
             "workflow_id": metadata.get("workflow_id"),
         },
@@ -825,7 +879,7 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
         },
         "form": {
             "id": form.id,
-            "name": form.name,
+            "name": human_sheet_label(form),
             "code": form.code,
         },
         "fields": fields,
@@ -900,7 +954,7 @@ def compose_calculation_results(site_id, fy_start_year, user_id):
                 })
 
     # Sort calculated fields by form name and field display order to keep order deterministic
-    calculated_fields.sort(key=lambda item: (item["form"].name.lower(), item["field"].display_order))
+    calculated_fields.sort(key=lambda item: (human_sheet_label(item["form"]).lower(), item["field"].display_order))
 
     # Serialize fields for workbook sheet columns
     serialized_fields = []
@@ -910,7 +964,7 @@ def compose_calculation_results(site_id, fy_start_year, user_id):
             "field_id": item["field"].id,
             "field_version_id": item["version"].id,
             "field_code": item["field"].field_code,
-            "field_name": f"{item['version'].field_name} ({item['form'].name})",
+            "field_name": f"{item['version'].field_name} ({human_sheet_label(item['form'])})",
             "field_type": "calculated",
             "field_config": item["version"].field_config or {},
             "display_order": item["field"].display_order,
@@ -1234,6 +1288,17 @@ def get_spoc_sheets_buckets(user_id):
             users_cache[uid] = u.full_name if u else f"User {uid}"
         return users_cache[uid]
 
+    def plain_submission_status(status):
+        return {
+            "Approved": "Approved and locked",
+            "Draft": "Draft saved",
+            "Changes Requested": "Needs correction",
+            "Rejected": "Sent back",
+            "Resubmitted": "Sent again for review",
+            "Under Review": "Under review",
+            "Submitted": "Submitted",
+        }.get(status, status or "Unknown")
+
     # Track submission combos (site_id, form_id, reporting_period_id)
     submitted_combos = set()
     
@@ -1249,15 +1314,11 @@ def get_spoc_sheets_buckets(user_id):
         
         period_label = format_period_label(period.year, period.month)
         
-        status_text = sub.status
-        if sub.status in ("Submitted", "Resubmitted", "Under Review") and sub.current_level is not None:
-            status_text = f"{sub.status} (Level {sub.current_level})"
-
         item = {
             "submission_id": sub.id,
             "package_id": sub.package_id,
             "site_id": sub.site_id,
-            "form_name": form.name,
+            "form_name": human_sheet_label(form),
             "form_id": sub.form_id,
             "form_code": form.code,
             "site_name": site.name,
@@ -1266,7 +1327,7 @@ def get_spoc_sheets_buckets(user_id):
             "year": period.year,
             "month": period.month,
             "status": sub.status,
-            "status_text": status_text,
+            "status_text": plain_submission_status(sub.status),
             "last_saved": sub.updated_at or sub.created_at,
             "submitted_at": sub.submitted_at,
             "submitted_by": get_username(sub.submitted_by)
@@ -1295,7 +1356,7 @@ def get_spoc_sheets_buckets(user_id):
                 if combo not in submitted_combos:
                     not_started.append({
                         "form_id": form.id,
-                        "form_name": form.name,
+                        "form_name": human_sheet_label(form),
                         "form_code": form.code,
                         "site_id": site.id,
                         "site_name": site.name,
@@ -1499,7 +1560,7 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
         if not submission:
             skipped.append({
                 "form_id": form.id,
-                "form_name": form.name,
+                "form_name": human_sheet_label(form),
                 "reason": "No draft or filled values to submit.",
             })
             continue
@@ -1507,7 +1568,7 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
         if submission.is_locked or submission.status == "Approved":
             skipped.append({
                 "form_id": form.id,
-                "form_name": form.name,
+                "form_name": human_sheet_label(form),
                 "submission_id": submission.id,
                 "reason": "Already approved or locked.",
             })
@@ -1526,7 +1587,7 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
             except SubmissionValidationError as exc:
                 errors.append({
                     "form_id": form.id,
-                    "form_name": form.name,
+                    "form_name": human_sheet_label(form),
                     "submission_id": submission.id,
                     "error": str(exc),
                     "validation_errors": exc.errors,
@@ -1535,7 +1596,7 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
             except ValueError as exc:
                 errors.append({
                     "form_id": form.id,
-                    "form_name": form.name,
+                    "form_name": human_sheet_label(form),
                     "submission_id": submission.id,
                     "error": str(exc),
                 })
@@ -1543,7 +1604,7 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
 
         included.append({
             "form_id": form.id,
-            "form_name": form.name,
+            "form_name": human_sheet_label(form),
             "submission_id": submission.id,
             "status": submission.status,
             "created": created_from_payload,

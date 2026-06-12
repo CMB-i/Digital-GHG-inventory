@@ -188,8 +188,8 @@
     </div>
     <div>
       <label class="text-xs font-medium text-slate-600" for="create_phone">Phone</label>
-      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="create_phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="9876543210" pattern="[6-9][0-9]{9}" maxlength="10" data-indian-mobile>
-      <p class="mt-1 text-xs text-slate-500">Enter a 10-digit Indian mobile number.</p>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="create_phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="9876543210" pattern="[0-9]{10}" maxlength="10" data-indian-mobile>
+      <p class="mt-1 text-xs text-slate-500">Enter a 10-digit phone number.</p>
     </div>
     <div>
       <label class="text-xs font-medium text-slate-600" for="create_temporary_password">Temporary password</label>
@@ -224,8 +224,8 @@
     </div>
     <div>
       <label class="text-xs font-medium text-slate-600" for="edit_phone">Phone</label>
-      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="edit_phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="9876543210" value="{{ selected_user.phone or '' }}" pattern="[6-9][0-9]{9}" maxlength="10" data-indian-mobile>
-      <p class="mt-1 text-xs text-slate-500">Enter a 10-digit Indian mobile number.</p>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="edit_phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="9876543210" value="{{ selected_user.phone or '' }}" pattern="[0-9]{10}" maxlength="10" data-indian-mobile>
+      <p class="mt-1 text-xs text-slate-500">Enter a 10-digit phone number.</p>
     </div>
     <div class="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
       <p class="text-xs font-medium text-slate-600">Status</p>

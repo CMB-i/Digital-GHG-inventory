@@ -19,6 +19,7 @@ from app.modules.USRMGMT.model import User
 from app.modules.SUBMIT.service import (
     compose_readonly_workbook_context,
     format_period_label,
+    human_sheet_label,
     sync_submission_values_for_status,
     serialize_submission_value_issue,
 )
@@ -108,7 +109,7 @@ def _submission_queue_item(sub, eligibility):
     return {
         "item_type": "submission",
         "submission_id": sub.id,
-        "form_name": form.name if form else "Unknown Form",
+        "form_name": human_sheet_label(form),
         "site_id": sub.site_id,
         "site_name": site.name if site else "Unknown Site",
         "period_id": sub.reporting_period_id,
@@ -140,7 +141,7 @@ def _package_queue_item(package_id, grouped_items):
     form_ids = [item["submission"].form_id for item in grouped_items]
     forms = Form.query.filter(Form.id.in_(form_ids)).all() if form_ids else []
     forms_by_id = {form.id: form for form in forms}
-    form_names = [form.name for form in forms]
+    form_names = [human_sheet_label(form) for form in forms]
 
     start_times = [
         item["submission"].last_status_changed_at
@@ -194,7 +195,7 @@ def _package_queue_item(package_id, grouped_items):
             {
                 "submission_id": item["submission"].id,
                 "form_id": item["submission"].form_id,
-                "form_name": forms_by_id[item["submission"].form_id].name if item["submission"].form_id in forms_by_id else "Unknown Form",
+                "form_name": human_sheet_label(forms_by_id[item["submission"].form_id]) if item["submission"].form_id in forms_by_id else "Untitled Sheet",
                 "status": item["submission"].status,
             }
             for item in grouped_items
@@ -279,7 +280,7 @@ def compose_package_review_data(package_id, user_id):
         sheets.append({
             "submission_id": submission.id,
             "form_id": submission.form_id,
-            "form_name": form.name if form else "Unknown Form",
+            "form_name": human_sheet_label(form),
             "status": submission.status,
             "current_level": submission.current_level,
             "submitted_by": sub_submitter.full_name if sub_submitter else "System",
@@ -288,10 +289,12 @@ def compose_package_review_data(package_id, user_id):
             "sections": workbook_context.get("sections", []),
             "workbook_values": workbook_context.get("workbook_values", {}),
             "rows": workbook_context["rows"],
-            "active_row_key": workbook_context["active_row_key"],
+            "active_row_key": workbook_context.get("active_row_key") or (
+                active_row.get("row_key") if active_row else None
+            ),
             "values": active_row.get("values", {}) if active_row else {},
             "proofs": active_row.get("proofs", {}) if active_row else {},
-            "_sort_name": form.name if form else "",
+            "_sort_name": human_sheet_label(form),
         })
 
     sheets.sort(key=lambda sheet: sheet["_sort_name"].lower())
@@ -609,6 +612,24 @@ def get_actioned_history(user_id):
     from app.modules.SITEMST.model import Site
     from app.modules.PERIOD.model import ReportingPeriod
 
+    def action_label(action):
+        return {
+            "Approve": "Approved",
+            "Request Changes": "Returned for correction",
+            "Reject": "Sent back",
+        }.get(action, action or "Reviewed")
+
+    def status_label(status):
+        return {
+            "Approved": "Approved and locked",
+            "Draft": "Draft saved",
+            "Changes Requested": "Needs correction",
+            "Rejected": "Sent back",
+            "Resubmitted": "Sent again for review",
+            "Under Review": "Under review",
+            "Submitted": "Submitted",
+        }.get(status, status or "Unknown")
+
     history = []
     seen_submissions = set()
     for act in actions:
@@ -627,13 +648,15 @@ def get_actioned_history(user_id):
         history.append({
             "submission_id": sub.id,
             "package_id": sub.package_id,
-            "form_name": form.name if form else "Unknown Form",
+            "form_name": human_sheet_label(form),
             "site_name": site.name if site else "Unknown Site",
             "period_label": format_period_label(period.year, period.month) if period else "Unknown Period",
             "action": act.action,
+            "action_text": action_label(act.action),
             "comment": act.comment,
             "acted_at": act.acted_at,
-            "current_status": sub.status
+            "current_status": sub.status,
+            "current_status_text": status_label(sub.status),
         })
     return history
 
@@ -760,7 +783,7 @@ def approve_submission(submission_id, user_id, comment=None):
             notify_spoc(
                 submission_id=submission_id,
                 event_type="LEVEL_APPROVED",
-                message=f"Your submission for {form.name} ({site.name}) has been approved at Level {submission.current_level}."
+                message=f"Your submission for {human_sheet_label(form)} ({site.name}) has been approved at Level {submission.current_level}."
             )
 
             # Advance level
@@ -811,7 +834,7 @@ def approve_submission(submission_id, user_id, comment=None):
             notify_spoc(
                 submission_id=submission_id,
                 event_type="APPROVED",
-                message=f"Your submission for {form.name} ({site.name}) has been approved."
+                message=f"Your submission for {human_sheet_label(form)} ({site.name}) has been approved."
             )
 
     return submission
@@ -887,7 +910,7 @@ def request_changes_submission(submission_id, user_id, comment):
     notify_spoc(
         submission_id=submission_id,
         event_type="CHANGES_REQUESTED",
-        message=f"Changes requested on your submission for {form.name if form else 'sheet'}. Reason: {comment}"
+        message=f"Changes requested on your submission for {human_sheet_label(form)}. Reason: {comment}"
     )
 
     return submission
@@ -950,7 +973,7 @@ def reject_submission(submission_id, user_id, comment):
     notify_spoc(
         submission_id=submission_id,
         event_type="REJECTED",
-        message=f"Your submission for {form.name if form else 'sheet'} has been rejected. Reason: {comment}"
+        message=f"Your submission for {human_sheet_label(form)} has been rejected. Reason: {comment}"
     )
 
     return submission

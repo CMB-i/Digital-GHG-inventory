@@ -69,7 +69,8 @@ def notify_level_approvers(submission_id):
     site = Site.query.get(submission.site_id)
     form = Form.query.get(submission.form_id)
     site_name = site.name if site else "Unknown Site"
-    form_name = form.name if form else "Unknown Form"
+    from app.modules.SUBMIT.service import human_sheet_label
+    form_name = human_sheet_label(form)
 
     msg = f"Submission from {site_name} for {form_name} is now pending your Level {submission.current_level} review."
 

@@ -1,252 +1,283 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Digital GHG Inventory{% endblock %}
+{% block title %}Home - Digital GHG Inventory{% endblock %}
+
+{% macro status_badge(status, label) %}
+  {% if status == "Approved" %}
+  <span class="status-badge status-badge-success">{{ label }}</span>
+  {% elif status in ("Submitted", "Resubmitted", "Under Review") %}
+  <span class="status-badge status-badge-info">{{ label }}</span>
+  {% elif status in ("Changes Requested", "Rejected") %}
+  <span class="status-badge status-badge-warning">{{ label }}</span>
+  {% else %}
+  <span class="status-badge status-badge-neutral">{{ label }}</span>
+  {% endif %}
+{% endmacro %}
 
 {% block content %}
 <div class="space-y-8">
-  <!-- Top header -->
   <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
     <div>
-      <h1 class="text-3xl font-bold tracking-tight text-slate-900">Dashboard</h1>
-      <p class="mt-1 text-slate-600">Track setup progress, view key metrics, and access inventory worksheets.</p>
+      <h1 class="text-3xl font-bold tracking-tight text-slate-900">Home</h1>
+      <p class="mt-1 text-slate-600">Your reporting work, review queue, and setup readiness.</p>
     </div>
   </div>
 
-  <!-- Stats Grid -->
-  {% if metrics %}
-  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    <!-- Total Sheets -->
-    <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Sheets</span>
-        <div class="rounded-lg bg-indigo-50 p-2 text-indigo-600">
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-        </div>
-      </div>
-      <div class="mt-4">
-        <span class="text-3xl font-bold text-slate-900">{{ metrics.total_sheets }}</span>
-        <p class="mt-1 text-xs text-slate-500">Submissions under management</p>
-      </div>
+  {% if capabilities.can_contribute %}
+  <section class="space-y-4">
+    <div>
+      <h2 class="text-xl font-semibold text-slate-900">My Workbooks</h2>
+      <p class="mt-1 text-sm text-slate-600">Workbooks and sheets assigned to you.</p>
     </div>
 
-    <!-- Approved Sheets -->
-    <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Approved Sheets</span>
-        <div class="rounded-lg bg-emerald-50 p-2 text-emerald-600">
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+    {% if my_work_items %}
+    <div class="grid gap-3">
+      {% for item in my_work_items %}
+      <a href="{{ item.href }}" class="group rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-indigo-300 hover:shadow-md">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p class="text-sm font-semibold text-slate-900">{{ item.site_name }} &mdash; {{ item.period_label }}</p>
+            <h3 class="mt-1 text-lg font-semibold text-slate-900 group-hover:text-indigo-700">{{ item.sheet_name }}</h3>
+            <div class="mt-2">{{ status_badge(item.status, item.status_text) }}</div>
+          </div>
+          <span class="inline-flex w-fit items-center rounded-md bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 group-hover:bg-indigo-100">
+            {{ item.action_label }}
+          </span>
         </div>
-      </div>
-      <div class="mt-4">
-        <span class="text-3xl font-bold text-slate-900">{{ metrics.approved_sheets }}</span>
-        <p class="mt-1 text-xs text-slate-500">finalized and locked data</p>
-      </div>
+      </a>
+      {% endfor %}
     </div>
-
-    <!-- Awaiting Review -->
-    <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Awaiting Review</span>
-        <div class="rounded-lg bg-amber-50 p-2 text-amber-600">
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </div>
-      </div>
-      <div class="mt-4">
-        <span class="text-3xl font-bold text-slate-900">{{ metrics.awaiting_review }}</span>
-        <p class="mt-1 text-xs text-slate-500">Pending approver action</p>
-      </div>
+    {% else %}
+    <div class="rounded-lg border-2 border-dashed border-slate-200 bg-white px-4 py-10 text-center">
+      <h3 class="text-sm font-semibold text-slate-900">No sheets need your attention right now.</h3>
+      <p class="mt-1 text-sm text-slate-500">When a reporting period opens, your assigned workbooks and sheets will appear here.</p>
     </div>
-
-    <!-- Missing Sheets -->
-    <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Missing Sheets</span>
-        <div class="rounded-lg bg-rose-50 p-2 text-rose-600">
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-        </div>
-      </div>
-      <div class="mt-4">
-        <span class="text-3xl font-bold text-rose-600">{{ metrics.missing_sheets }}</span>
-        <p class="mt-1 text-xs text-slate-500">Expected sheets not approved</p>
-      </div>
-    </div>
-  </div>
+    {% endif %}
+  </section>
   {% endif %}
 
-  <!-- Core split: Workspaces & Setup Progress -->
-  <div class="grid gap-6 lg:grid-cols-3">
-    <!-- Workspaces Grid (left col) -->
-    <div class="lg:col-span-2 space-y-6">
-      <div>
-        <h2 class="text-xl font-semibold text-slate-900 mb-3">Your Workspaces</h2>
-        <div class="grid gap-4 md:grid-cols-2">
-          {% for card in dashboard_cards %}
-          <a class="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-indigo-400 hover:shadow-md" href="{{ card.href }}">
-            <h3 class="font-semibold text-slate-800 group-hover:text-indigo-600 transition">{{ card.title }}</h3>
-            <p class="mt-2 text-sm text-slate-600">{{ card.description }}</p>
-          </a>
-          {% else %}
-          <div class="rounded-xl border border-slate-200 bg-white p-5 col-span-2">
-            <h3 class="font-medium text-slate-700">No workspaces visible</h3>
-            <p class="mt-2 text-sm text-slate-500">No permissions have been assigned to your user account yet.</p>
+  {% if capabilities.can_review %}
+  <section class="space-y-4">
+    <div>
+      <h2 class="text-xl font-semibold text-slate-900">Review Queue</h2>
+      <p class="mt-1 text-sm text-slate-600">Monthly packages waiting for your review.</p>
+    </div>
+
+    {% if review_queue %}
+    <div class="grid gap-3">
+      {% for item in review_queue %}
+      <a href="{{ item.href }}" class="group rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-indigo-300 hover:shadow-md">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p class="text-sm font-semibold text-slate-900">{{ item.site_name }} &mdash; {{ item.period_label }}</p>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              {{ status_badge(item.status, item.status_text) }}
+              {% if item.submitted_count %}
+              <span class="text-xs font-medium text-slate-500">Submitted: {{ item.submitted_count }} of {{ item.sheet_count }} sheets</span>
+              {% endif %}
+            </div>
+            {% if item.waiting_on %}
+            <p class="mt-2 text-sm text-slate-600">Waiting on: {{ item.waiting_on }}</p>
+            {% endif %}
           </div>
-          {% endfor %}
+          <span class="inline-flex w-fit items-center rounded-md bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 group-hover:bg-indigo-100">
+            {{ item.action_label }}
+          </span>
         </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="rounded-lg border-2 border-dashed border-slate-200 bg-white px-4 py-10 text-center">
+      <h3 class="text-sm font-semibold text-slate-900">No monthly packages are waiting for your review.</h3>
+      <p class="mt-1 text-sm text-slate-500">Recently reviewed packages are shown below.</p>
+    </div>
+    {% endif %}
+
+    {% if review_history %}
+    <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <h3 class="text-sm font-semibold text-slate-900">Recently Reviewed</h3>
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-600">
+          <thead>
+            <tr class="border-b border-slate-100 text-xs font-semibold uppercase text-slate-400">
+              <th class="py-2">Site</th>
+              <th class="py-2">Reporting Month</th>
+              <th class="py-2">Sheet Name</th>
+              <th class="py-2">Last Action</th>
+              <th class="py-2 text-right">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {% for item in review_history %}
+            <tr>
+              <td class="py-3 font-medium text-slate-900">{{ item.site_name }}</td>
+              <td class="py-3">{{ item.period_label }}</td>
+              <td class="py-3">{{ item.sheet_name }}</td>
+              <td class="py-3 text-xs text-slate-500">{{ item.acted_at | compact_local_datetime }}</td>
+              <td class="py-3 text-right">{{ item.status_text }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if capabilities.can_manage_setup or capabilities.can_view_reports %}
+  <section class="space-y-6">
+    <div>
+      <h2 class="text-xl font-semibold text-slate-900">Setup and Monitoring</h2>
+      <p class="mt-1 text-sm text-slate-600">Readiness, open reporting months, and approved data.</p>
+    </div>
+
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <span class="text-xs font-semibold uppercase text-slate-500">Sheets In Scope</span>
+        <p class="mt-3 text-3xl font-bold text-slate-900">{{ metrics.total_sheets }}</p>
+        <p class="mt-1 text-xs text-slate-500">Sheets visible in your site scope</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <span class="text-xs font-semibold uppercase text-slate-500">Approved And Locked</span>
+        <p class="mt-3 text-3xl font-bold text-slate-900">{{ metrics.approved_sheets }}</p>
+        <p class="mt-1 text-xs text-slate-500">Finalized reporting data</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <span class="text-xs font-semibold uppercase text-slate-500">Under Review</span>
+        <p class="mt-3 text-3xl font-bold text-slate-900">{{ metrics.awaiting_review }}</p>
+        <p class="mt-1 text-xs text-slate-500">Monthly packages or sheets with reviewers</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <span class="text-xs font-semibold uppercase text-slate-500">Needs Attention</span>
+        <p class="mt-3 text-3xl font-bold text-rose-600">{{ metrics.missing_sheets }}</p>
+        <p class="mt-1 text-xs text-slate-500">Sheets not yet approved for open months</p>
+      </div>
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-3">
+      <div class="space-y-6 lg:col-span-2">
+        {% if dashboard_cards %}
+        <div>
+          <h3 class="mb-3 text-lg font-semibold text-slate-900">Workspaces</h3>
+          <div class="grid gap-4 md:grid-cols-2">
+            {% for card in dashboard_cards %}
+            <a class="group rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:border-indigo-400 hover:shadow-md" href="{{ card.href }}">
+              <h4 class="font-semibold text-slate-800 group-hover:text-indigo-700">{{ card.title }}</h4>
+              <p class="mt-2 text-sm text-slate-600">{{ card.description }}</p>
+            </a>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
+        {% if recent_activities %}
+        <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="mb-4">
+            <h3 class="text-lg font-semibold text-slate-900">Recent Activity</h3>
+            <p class="text-xs text-slate-500">Latest sheet activity relevant to your access.</p>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm text-slate-600">
+              <thead>
+                <tr class="border-b border-slate-100 text-xs font-semibold uppercase text-slate-400">
+                  <th class="py-2">Site</th>
+                  <th class="py-2">Sheet Name</th>
+                  <th class="py-2">Last Action</th>
+                  <th class="py-2 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                {% for act in recent_activities %}
+                <tr>
+                  <td class="py-3 font-medium text-slate-900">{{ act.site_name }}</td>
+                  <td class="py-3">{{ act.sheet_name }}</td>
+                  <td class="py-3 text-xs text-slate-500">{{ act.updated_at | compact_local_datetime }}</td>
+                  <td class="py-3 text-right">{{ status_badge(act.status, act.status_text) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% endif %}
       </div>
 
-      <!-- Recent Submissions Log -->
-      {% if recent_activities %}
-      <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      {% if capabilities.can_manage_setup %}
+      <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm h-fit">
         <div class="mb-4">
-          <h2 class="text-lg font-semibold text-slate-900">Recent Activities</h2>
-          <p class="text-xs text-slate-500">Latest actions performed on sheets in your site scope.</p>
+          <h3 class="text-lg font-semibold text-slate-900">Setup Progress</h3>
+          <p class="text-xs text-slate-500">Core readiness for monthly GHG reporting.</p>
         </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-sm text-slate-600">
-            <thead>
-              <tr class="border-b border-slate-100 text-xs font-semibold uppercase text-slate-400">
-                <th class="py-2">Site</th>
-                <th class="py-2">Form</th>
-                <th class="py-2">Last Action</th>
-                <th class="py-2 text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-              {% for act in recent_activities %}
-              <tr>
-                <td class="py-3 font-medium text-slate-900">{{ act.site_name }}</td>
-                <td class="py-3">{{ act.form_name }}</td>
-                <td class="py-3 text-xs text-slate-500">{{ act.updated_at | compact_local_datetime }}</td>
-                <td class="py-3 text-right">
-                  {% if act.status == "Approved" %}
-                  <span class="status-badge status-badge-success">{{ act.status }}</span>
-                  {% elif act.status in ("Submitted", "Resubmitted", "Under Review") %}
-                  <span class="status-badge status-badge-info">{{ act.status_text or act.status }}</span>
-                  {% elif act.status == "Changes Requested" %}
-                  <span class="status-badge status-badge-warning">{{ act.status }}</span>
-                  {% else %}
-                  <span class="status-badge status-badge-neutral">{{ act.status }}</span>
-                  {% endif %}
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+        <div class="divide-y divide-slate-100">
+          {% for item in setup_checklist %}
+          <div class="flex items-center justify-between gap-4 py-3">
+            <span class="text-sm font-medium text-slate-700">{{ item.label }}</span>
+            {% if item.done %}
+            <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">Done</span>
+            {% else %}
+            <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">Pending</span>
+            {% endif %}
+          </div>
+          {% endfor %}
         </div>
       </div>
       {% endif %}
     </div>
 
-    <!-- Setup Checklist Sidebar (right col) -->
-    <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm h-fit">
+    {% if capabilities.can_manage_setup %}
+    <div class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
       <div class="mb-4">
-        <h2 class="text-lg font-semibold text-slate-900">Setup Progress</h2>
-        <p class="text-xs text-slate-500">Core parameters needed for inventory reporting.</p>
+        <h3 class="text-xl font-semibold text-slate-900">Submission Monitor</h3>
+        <p class="mt-1 text-sm text-slate-600">Expected site and sheet combinations that are not yet approved for open reporting months.</p>
       </div>
-      <div class="divide-y divide-slate-100">
-        {% for item in setup_checklist %}
-        <div class="flex items-center justify-between gap-4 py-3">
-          <span class="text-sm font-medium text-slate-700">{{ item.label }}</span>
-          {% if item.done %}
-          <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
-            <svg class="mr-1 h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
-            </svg>
-            Done
-          </span>
-          {% else %}
-          <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">
-            Pending
-          </span>
-          {% endif %}
-        </div>
-        {% endfor %}
+
+      {% if missing_submissions %}
+      <div class="overflow-x-auto mt-4">
+        <table class="w-full text-left text-sm text-slate-600">
+          <thead>
+            <tr class="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-500">
+              <th class="pb-3 pr-4">Site Name</th>
+              <th class="pb-3 pr-4">Sheet Name</th>
+              <th class="pb-3 pr-4">Reporting Month</th>
+              <th class="pb-3 pr-4">Status</th>
+              <th class="pb-3 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {% for sub in missing_submissions %}
+            <tr class="transition-colors hover:bg-slate-50">
+              <td class="py-3 pr-4 font-semibold text-slate-900">{{ sub.site_name }}</td>
+              <td class="py-3 pr-4">{{ sub.form_name }}</td>
+              <td class="py-3 pr-4">{{ sub.period_label }}</td>
+              <td class="py-3 pr-4">{{ status_badge(sub.status, sub.status_text) }}</td>
+              <td class="py-3 text-right">
+                <a href="/module/RPTBLD/" class="inline-flex items-center rounded-md bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">
+                  Open monitor
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-    </div>
-  </div>
-
-  <!-- Missing Submission Tracker Section -->
-  <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-    <div class="mb-4">
-      <h2 class="text-xl font-semibold text-slate-900">Missing Submission Tracker</h2>
-      <p class="mt-1 text-sm text-slate-600">Expected site &times; form combinations that have not been completed for currently active reporting periods.</p>
-    </div>
-
-    {% if missing_submissions %}
-    <div class="overflow-x-auto mt-4">
-      <table class="w-full text-left text-sm text-slate-600">
-        <thead>
-          <tr class="border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-500">
-            <th class="pb-3 pr-4">Site Name</th>
-            <th class="pb-3 pr-4">Applicable Form</th>
-            <th class="pb-3 pr-4">Reporting Period</th>
-            <th class="pb-3 pr-4">Submission Status</th>
-            <th class="pb-3 text-right">Action</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-100">
-          {% for sub in missing_submissions %}
-          <tr class="hover:bg-slate-50 transition-colors">
-            <td class="py-3 pr-4 font-semibold text-slate-900">{{ sub.site_name }}</td>
-            <td class="py-3 pr-4">{{ sub.form_name }}</td>
-            <td class="py-3 pr-4">
-              <span class="inline-flex items-center font-medium text-slate-700">
-                <svg class="mr-1.5 h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                {{ sub.period_label }}
-              </span>
-            </td>
-            <td class="py-3 pr-4">
-              {% if sub.status == "Not Started" %}
-              <span class="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700 border border-rose-100">
-                <span class="mr-1.5 h-1.5 w-1.5 rounded-full bg-rose-500"></span>
-                Not Started
-              </span>
-              {% elif sub.status == "Draft" %}
-              <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700 border border-slate-200">
-                <span class="mr-1.5 h-1.5 w-1.5 rounded-full bg-slate-400"></span>
-                Draft
-              </span>
-              {% elif sub.status == "Changes Requested" %}
-              <span class="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-800 border border-amber-200">
-                <span class="mr-1.5 h-1.5 w-1.5 rounded-full bg-amber-500"></span>
-                Changes Requested
-              </span>
-              {% else %}
-              <span class="status-badge status-badge-neutral">{{ sub.status }}</span>
-              {% endif %}
-            </td>
-            <td class="py-3 text-right">
-              <a href="/module/SUBMIT/" class="inline-flex items-center text-xs font-semibold text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded transition">
-                Go to Sheets
-                <svg class="ml-1 h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                </svg>
-              </a>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="mt-6 flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 py-10 px-4 text-center">
-      <svg class="h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-      <h3 class="mt-2 text-sm font-semibold text-slate-900">All submissions up to date</h3>
-      <p class="mt-1 text-xs text-slate-500">There are no expected submissions marked as missing for open reporting periods.</p>
+      {% else %}
+      <div class="mt-6 rounded-lg border-2 border-dashed border-slate-200 px-4 py-10 text-center">
+        <h4 class="text-sm font-semibold text-slate-900">No setup readiness issues are visible.</h4>
+        <p class="mt-1 text-xs text-slate-500">Open reporting months and assigned sheets will appear here when attention is needed.</p>
+      </div>
+      {% endif %}
     </div>
     {% endif %}
+  </section>
+  {% endif %}
+
+  {% if not capabilities.can_contribute and not capabilities.can_review and not capabilities.can_manage_setup and not capabilities.can_view_reports %}
+  <div class="rounded-lg border-2 border-dashed border-slate-200 bg-white px-4 py-10 text-center">
+    <h2 class="text-sm font-semibold text-slate-900">No workspace is available yet.</h2>
+    <p class="mt-1 text-sm text-slate-500">No permissions have been assigned to your user account yet.</p>
   </div>
+  {% endif %}
 </div>
 {% endblock %}
