@@ -5,44 +5,158 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Digital GHG Inventory{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        borderRadius: {
+          none: '0px',
+          sm: '0px',
+          DEFAULT: '0px',
+          md: '0px',
+          lg: '0px',
+          xl: '0px',
+          '2xl': '0px',
+          '3xl': '0px',
+          full: '9999px',
+        },
+        boxShadow: {
+          sm: 'none',
+          DEFAULT: 'none',
+          md: 'none',
+          lg: 'none',
+          xl: 'none',
+          '2xl': 'none',
+          inner: 'none',
+          none: 'none',
+        },
+        extend: {
+          colors: {
+            navy: {
+              DEFAULT: '#1a3a6b',
+              dark: '#15305a',
+              light: '#dfeaf8'
+            },
+            red: {
+              jsw: '#c8102e',
+              sentback: '#9a1224'
+            },
+            pageBg: '#f0f4f8',
+            sitebarBg: '#e8eff8',
+            calcBg: '#eef3fa',
+            inputBorder: '#c4d4e8',
+            cardBorder: '#d0d8e4',
+            rowBorder: '#dde5ef',
+            slate: {
+              50: '#f0f4f8',      // soft blue-grey page bg
+              100: '#e8eff8',     // sitebar bg / secondary bg
+              200: '#d0d8e4',     // card border
+              300: '#c4d4e8',     // input border
+              400: '#94a3b8',     // muted / faint placeholder
+              500: '#64748b',     // text muted
+              600: '#4b5563',
+              700: '#374151',
+              800: '#1f2937',     // body text
+              900: '#111827',
+            },
+            indigo: {
+              50: '#dfeaf8',      // blue/auto info bg
+              100: '#eef3fa',     // calc/locked bg
+              600: '#1a3a6b',     // primary navy
+              700: '#15305a',     // navy dark
+              800: '#15305a',
+            },
+            blue: {
+              50: '#dfeaf8',
+              100: '#eef3fa',
+              600: '#1a3a6b',
+              700: '#15305a',
+            },
+            emerald: {
+              50: '#def0e2',      // green pale bg
+              700: '#1f6b34',     // approved text
+              800: '#1f6b34',
+            },
+            amber: {
+              50: '#fcf3d7',      // yellow pale bg
+              700: '#8a6a13',     // draft text
+              800: '#8a6a13',
+            }
+          },
+          fontFamily: {
+            sans: ['Arial', 'Helvetica', 'sans-serif'],
+            mono: ['Courier New', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
-<body class="bg-slate-50 text-slate-900">
-  <div class="min-h-screen lg:flex">
-    {% if current_user %}
-    <aside class="bg-white border-r border-slate-200 lg:w-72">
-      <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-        <div>
-          <a href="{{ url_for('dashboard') }}" class="text-lg font-semibold text-slate-900">Digital GHG Inventory</a>
-          <p class="text-xs text-slate-500">{{ current_user.full_name }}</p>
-        </div>
-        {% include "partials/notification_bell.html" %}
+<body class="bg-pageBg text-slate-800 font-sans min-h-screen flex flex-col">
+  {% if current_user %}
+  <!-- Topbar (56px) -->
+  <header class="bg-navy h-[56px] text-white flex items-center justify-between px-6 border-b border-navy-dark z-20 flex-shrink-0">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center">
+        <span class="bg-navy px-3 py-1 font-bold text-lg tracking-wider border-r-4 border-red-jsw text-white">JSW</span>
+        <span class="ml-3 text-xs text-slate-400 font-semibold uppercase tracking-wider hidden sm:inline">GHG & ESG Data Entry Portal</span>
       </div>
-      <nav class="flex min-h-[calc(100vh-73px)] flex-col p-3 text-sm">
-        <div class="grid gap-4">
-        {% for group in nav_items %}
-          <div class="grid gap-1">
-            {% if group["label"] %}
-            <p class="px-3 pt-2 text-[11px] font-semibold uppercase text-slate-400">{{ group["label"] }}</p>
-            {% endif %}
-            {% for item in group["items"] %}
-            <a class="nav-link" href="{{ item.href }}">{{ item.label }}</a>
-            {% endfor %}
-          </div>
-        {% endfor %}
-        </div>
-        <div class="mt-auto border-t border-slate-200 pt-3">
-        <a class="nav-link" href="{{ url_for('auth.logout') }}">Logout</a>
-        </div>
-      </nav>
-    </aside>
+    </div>
+    <div class="flex items-center gap-4">
+      <span class="text-xs text-slate-300 font-semibold">{{ current_user.full_name }}</span>
+      {% include "partials/notification_bell.html" %}
+      <a href="{{ url_for('auth.logout') }}" class="border border-slate-400 hover:border-white text-[11px] px-2.5 py-1 text-slate-200 hover:text-white transition uppercase font-bold tracking-wider">Sign out</a>
+    </div>
+  </header>
+  <!-- Sitebar (40px) -->
+  <div class="bg-sitebarBg border-b border-cardBorder h-10 px-6 flex items-center text-xs text-slate-600 font-semibold z-10 flex-shrink-0 justify-between">
+    <div class="flex items-center gap-2">
+      <span>Digital GHG Inventory</span>
+      <span class="text-slate-400">/</span>
+      <span class="text-slate-800 font-bold uppercase tracking-wider text-[10px]">Workspace</span>
+    </div>
+    <div class="text-[11px] text-slate-500 font-normal">
+      Current Period: <strong class="font-bold text-slate-700">FY 2025-26</strong>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Main Container -->
+  <div class="flex-1 flex flex-row min-h-0">
+    {% if current_user %}
+      {% set has_setup = nav_items | selectattr("label", "equalto", "Setup") | list | length > 0 %}
+      {% set has_ops = nav_items | selectattr("label", "equalto", "Operations") | list | length > 0 %}
+      {% set show_sidebar = has_setup or has_ops %}
+      {% if show_sidebar %}
+      <!-- Admin Sidebar (220px) -->
+      <aside class="bg-navy text-white w-[220px] flex-shrink-0 border-r border-navy-dark min-h-[calc(100vh-56px)] flex flex-col z-10">
+        <nav class="flex-1 p-3 space-y-4 text-xs font-semibold overflow-y-auto">
+          {% for group in nav_items %}
+            <div class="space-y-1">
+              {% if group["label"] %}
+              <p class="px-3 pt-2 text-[10px] uppercase text-slate-400 tracking-wider">{{ group["label"] }}</p>
+              {% endif %}
+              {% for item in group["items"] %}
+                {% set active = request.path == item.href %}
+                <a class="block px-3 py-2 text-slate-200 hover:bg-navy-dark hover:text-white transition border-l-4 {% if active %}border-red-jsw bg-navy-dark text-white font-bold{% else %}border-transparent{% endif %}" href="{{ item.href }}">
+                  {{ item.label }}
+                </a>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </nav>
+      </aside>
+      {% endif %}
     {% endif %}
-    <main class="flex-1">
-      <div class="mx-auto max-w-6xl px-5 py-8">
+
+    <!-- Content Area -->
+    <main class="flex-1 overflow-y-auto bg-pageBg min-w-0">
+      <div class="mx-auto max-w-6xl px-6 py-6">
         {% block content %}{% endblock %}
       </div>
     </main>
   </div>
+
   <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
   <script src="{{ url_for('static', filename='js/phone_input.js') }}"></script>
   <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>

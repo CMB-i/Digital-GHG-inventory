@@ -281,3 +281,281 @@
   background: rgb(15 23 42);
   color: white;
 }
+
+/* ==========================================
+   JSW EXCEL-STYLE PROTECTED THEME OVERRIDES
+   ========================================== */
+
+/* 1. Global typography & resetting */
+* {
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
+code, pre, .font-mono, [class*="font-mono"] {
+  font-family: 'Courier New', Courier, monospace !important;
+}
+
+body {
+  font-size: 14px !important;
+  line-height: 1.45 !important;
+  background-color: #f0f4f8 !important;
+  color: #1f2937 !important;
+}
+
+/* Page titles and section labels */
+h1, .text-2xl, .text-3xl {
+  font-size: 22px !important;
+  font-weight: 700 !important;
+  color: #1a3a6b !important;
+}
+
+/* Section labels */
+.text-\[11px\].uppercase, .text-xs.uppercase, .tracking-wider.uppercase {
+  font-size: 11px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.8px !important;
+  color: #64748b !important;
+}
+
+/* Tabular numbers */
+.tabular-nums, [class*="tabular-nums"], td, th, .font-variant-numeric {
+  font-variant-numeric: tabular-nums !important;
+}
+
+/* 2. Global shape and shadow resets */
+button, input, select, textarea, article, aside, main, div, section, table, tr, td, th, .rounded, .rounded-sm, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-3xl, .rounded-full {
+  border-radius: 0px !important;
+}
+
+/* Box shadow overrides: disable everywhere except the slide-in panel */
+*, *:before, *:after {
+  box-shadow: none !important;
+}
+
+aside.shadow-xl, .shadow-xl {
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* 3. Cards layout: flat white cards with 1px border */
+.bg-white.shadow-sm, .bg-white.shadow, article.bg-white, div.bg-white {
+  background-color: #ffffff !important;
+  border: 1px solid #d0d8e4 !important;
+}
+
+/* Stats/summary cards top accent borders */
+.border-amber-200, .border-amber-200\/80, #stat-action-needed-card {
+  border: 1px solid #d0d8e4 !important;
+  border-top: 3px solid #8a6a13 !important;
+}
+.border-slate-200, .border-slate-200\/80, #stat-not-started-card {
+  border: 1px solid #d0d8e4 !important;
+  border-top: 3px solid #5b6677 !important;
+}
+.border-indigo-200, .border-indigo-200\/80, #stat-under-review-card {
+  border: 1px solid #d0d8e4 !important;
+  border-top: 3px solid #1a3a6b !important;
+}
+.border-emerald-200, .border-emerald-200\/80, #stat-approved-card {
+  border: 1px solid #d0d8e4 !important;
+  border-top: 3px solid #1f6b34 !important;
+}
+
+article {
+  background: #ffffff !important;
+  border: 1px solid #d0d8e4 !important;
+  border-top: 3px solid #1a3a6b !important;
+}
+
+/* 4. Table overrides */
+table {
+  border-collapse: collapse !important;
+  border: 1px solid #d0d8e4 !important;
+}
+
+thead, thead tr, thead th {
+  background-color: #1a3a6b !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  font-size: 11px !important;
+  letter-spacing: 0.5px !important;
+}
+
+thead th {
+  padding: 11px 14px !important;
+  border: 1px solid #15305a !important;
+}
+
+tbody tr {
+  border-bottom: 1px solid #dde5ef !important;
+}
+
+tbody tr:nth-child(even) {
+  background-color: #f8fafc !important;
+}
+
+tbody tr:hover {
+  background-color: #eef3fa !important;
+}
+
+tbody td {
+  padding: 11px 14px !important;
+  color: #1f2937 !important;
+  border: 1px solid #dde5ef !important;
+}
+
+/* Section/Group Headers: navy bar with a 4px red left border */
+.section-header-jsw, [class*="section-header-jsw"] {
+  background-color: #1a3a6b !important;
+  color: #ffffff !important;
+  border-left: 4px solid #c8102e !important;
+  border-top: 1px solid #1a3a6b !important;
+  border-right: 1px solid #1a3a6b !important;
+  border-bottom: 1px solid #1a3a6b !important;
+}
+.section-header-jsw h2, .section-header-jsw span, .section-header-jsw p {
+  color: #ffffff !important;
+}
+
+/* 5. Inputs & cell/field borders */
+input[type="text"], input[type="number"], input[type="email"], input[type="password"], select, textarea {
+  background-color: #ffffff !important;
+  border: 1px solid #c4d4e8 !important;
+  color: #1f2937 !important;
+  padding: 6px 10px !important;
+}
+
+input[type="text"]:focus, input[type="number"]:focus, input[type="email"]:focus, input[type="password"]:focus, select:focus, textarea:focus {
+  outline: 2px solid #1a3a6b !important;
+  outline-offset: -1px !important;
+}
+
+/* Locked & calculated cells */
+input:disabled, select:disabled, textarea:disabled, .bg-slate-100\/50, .bg-slate-100, .bg-slate-50, .bg-blue-50\/20, .bg-emerald-50\/20, .bg-rose-50\/50, td.bg-slate-50, td.bg-slate-100 {
+  background-color: #eef3fa !important;
+  color: #64748b !important;
+  cursor: not-allowed !important;
+}
+
+/* Blank white for empty cells - hide placeholders in tables */
+td input::placeholder {
+  color: transparent !important;
+}
+
+/* 6. Buttons */
+/* Primary Navy Buttons */
+.bg-slate-900, .bg-indigo-600, .bg-blue-600, .action-button-primary, #btn-submit-row {
+  background-color: #1a3a6b !important;
+  color: #ffffff !important;
+  border: 1px solid #1a3a6b !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  font-size: 11px !important;
+  letter-spacing: 0.5px !important;
+  padding: 8px 16px !important;
+}
+.bg-slate-900:hover, .bg-indigo-600:hover, .bg-blue-600:hover, .action-button-primary:hover, #btn-submit-row:hover {
+  background-color: #15305a !important;
+  border-color: #15305a !important;
+}
+
+/* Secondary outline buttons */
+.border-slate-300.bg-white, .border-slate-200.bg-white, .action-button-secondary, #btn-save-row {
+  border: 1px solid #1a3a6b !important;
+  background-color: #ffffff !important;
+  color: #1a3a6b !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  font-size: 11px !important;
+  letter-spacing: 0.5px !important;
+  padding: 8px 16px !important;
+}
+.border-slate-300.bg-white:hover, .border-slate-200.bg-white:hover, .action-button-secondary:hover, #btn-save-row:hover {
+  background-color: #dfeaf8 !important;
+}
+
+/* 7. JSW Status Badges / Chips / Pills (2px exception) */
+.status-badge, .access-chip, .badge-pill, .pill, [class*="status-badge-"] {
+  border-radius: 2px !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+}
+
+/* Red (Sent back / changes requested / rejected) */
+.bg-rose-100, .bg-rose-50, .status-badge-danger, .changes_requested, .bg-amber-50.text-amber-700 {
+  background-color: #fbe3e6 !important;
+  color: #9a1224 !important;
+  border: 2px solid #9a1224 !important;
+}
+
+/* Yellow (Draft) */
+.bg-amber-100, .status-badge-warning, .draft_filled, .bg-blue-50.text-blue-700 {
+  background-color: #fcf3d7 !important;
+  color: #8a6a13 !important;
+  border: 2px solid #8a6a13 !important;
+}
+
+/* Grey (Not started) */
+.bg-slate-100, .status-badge-neutral, .blank_editable, .bg-slate-100.text-slate-600 {
+  background-color: #e9eef4 !important;
+  color: #5b6677 !important;
+  border: 2px solid #5b6677 !important;
+}
+
+/* Green (Submitted/Approved) */
+.bg-emerald-100, .bg-emerald-50, .status-badge-success, .approved_locked, .bg-emerald-50.text-emerald-700 {
+  background-color: #def0e2 !important;
+  color: #1f6b34 !important;
+  border: 2px solid #1f6b34 !important;
+}
+
+/* Blue (Auto/Info / Submitted / Under Review) */
+.bg-blue-100, .bg-indigo-100, .bg-indigo-50, .status-badge-info, .submitted, .bg-indigo-50.text-indigo-700 {
+  background-color: #dfeaf8 !important;
+  color: #1a3a6b !important;
+  border: 2px solid #1a3a6b !important;
+}
+
+/* Purple (Site Admin / Late Entry / custom roles) */
+.bg-violet-100, .bg-violet-50, .late_entry, .bg-violet-50.text-violet-700 {
+  background-color: #ece2f5 !important;
+  color: #5b3a86 !important;
+  border: 2px solid #5b3a86 !important;
+}
+
+/* 8. Dynamic Context Action Buttons (using :has to match mockup actions) */
+#table-action-needed tr:has(.bg-rose-100) a,
+#table-action-needed tr:has(.text-rose-800) a {
+  background-color: #fbe3e6 !important;
+  color: #9a1224 !important;
+  border: 1px solid #9a1224 !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+}
+#table-action-needed tr:has(.bg-rose-100) a:hover,
+#table-action-needed tr:has(.text-rose-800) a:hover {
+  background-color: #f8c9cf !important;
+}
+
+#table-action-needed tr:has(.bg-amber-100) a,
+#table-action-needed tr:has(.text-amber-800) a {
+  background-color: #fcf3d7 !important;
+  color: #8a6a13 !important;
+  border: 1px solid #8a6a13 !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+}
+#table-action-needed tr:has(.bg-amber-100) a:hover,
+#table-action-needed tr:has(.text-amber-800) a:hover {
+  background-color: #fae6b2 !important;
+}
+
+/* Keep indicator circles rounded */
+.compact-status-dot, .h-2.w-2.rounded-full, [class*="h-2 w-2 rounded-full"] {
+  border-radius: 9999px !important;
+}

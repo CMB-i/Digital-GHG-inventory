@@ -1,25 +1,35 @@
 {% extends "base.html" %}
 
-{% block title %}Login - Digital GHG Inventory{% endblock %}
+{% block title %}Sign in - Digital GHG Inventory{% endblock %}
 
 {% block content %}
-<section class="mx-auto max-w-md">
-  <h1 class="text-2xl font-semibold">Login</h1>
-  {% if error %}
-  <div class="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-    {{ error }}
+<div class="flex flex-col items-center justify-center min-h-[70vh]">
+  <div class="w-full max-w-md bg-white border border-cardBorder p-8">
+    <div class="text-center mb-8">
+      <span class="bg-navy px-4 py-1.5 font-bold text-2xl tracking-wider border-r-4 border-red-jsw text-white inline-block">JSW</span>
+      <h1 class="mt-4 text-xl font-bold text-navy uppercase tracking-wider">GHG & ESG Data Entry Portal</h1>
+      <p class="text-xs text-slate-500 mt-1">Sign in to your account</p>
+    </div>
+
+    {% if error %}
+    <div class="mb-6 border-l-4 border-red-jsw bg-red-50 p-4 text-xs text-red-sentback font-medium">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <form class="space-y-5" method="post">
+      <div>
+        <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5" for="email">Email address</label>
+        <input class="w-full border border-inputBorder px-3 py-2.5 text-sm focus:outline-none focus:border-navy focus:ring-1 focus:ring-navy" id="email" name="email" type="email" required autofocus placeholder="Enter your email">
+      </div>
+      <div>
+        <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5" for="password">Password</label>
+        <input class="w-full border border-inputBorder px-3 py-2.5 text-sm focus:outline-none focus:border-navy focus:ring-1 focus:ring-navy" id="password" name="password" type="password" required placeholder="Enter your password">
+      </div>
+      <button class="w-full bg-navy text-white text-xs font-bold uppercase tracking-widest py-3 hover:bg-navy-dark transition duration-150" type="submit">
+        Sign in
+      </button>
+    </form>
   </div>
-  {% endif %}
-  <form class="mt-6 space-y-4" method="post">
-    <div>
-      <label class="block text-sm font-medium" for="email">Email</label>
-      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" id="email" name="email" type="email" required autofocus>
-    </div>
-    <div>
-      <label class="block text-sm font-medium" for="password">Password</label>
-      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2" id="password" name="password" type="password" required>
-    </div>
-    <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Login</button>
-  </form>
-</section>
+</div>
 {% endblock %}
