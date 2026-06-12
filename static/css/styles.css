@@ -1,13 +1,41 @@
+:root,
+body[data-theme="jsw-excel"],
+.theme-jsw-excel {
+  --ghg-navy: #1a3a6b;
+  --ghg-navy-dark: #15305a;
+  --ghg-red: #c8102e;
+  --ghg-page-bg: #f0f4f8;
+  --ghg-sitebar-bg: #e8eff8;
+  --ghg-locked-bg: #eef3fa;
+  --ghg-input-border: #c4d4e8;
+  --ghg-card-border: #d0d8e4;
+  --ghg-row-border: #dde5ef;
+  --ghg-text: #1f2937;
+  --ghg-muted: #64748b;
+  --ghg-faint: #94a3b8;
+  --ghg-info-bg: #dfeaf8;
+  --ghg-success-bg: #def0e2;
+  --ghg-warning-bg: #fcf3d7;
+  --ghg-danger-bg: #fbe3e6;
+  --ghg-neutral-bg: #e9eef4;
+  --ghg-purple-bg: #ece2f5;
+  --ghg-success-text: #1f6b34;
+  --ghg-warning-text: #8a6a13;
+  --ghg-danger-text: #9a1224;
+  --ghg-neutral-text: #5b6677;
+  --ghg-purple-text: #5b3a86;
+}
+
 .nav-link {
   display: block;
-  border-radius: 0.375rem;
+  border-radius: 0;
   padding: 0.5rem 0.75rem;
   color: rgb(51 65 85);
 }
 
 .nav-link:hover {
   background: rgb(241 245 249);
-  color: rgb(15 23 42);
+  color: var(--ghg-navy);
 }
 
 .status-badge {
@@ -57,15 +85,17 @@
 }
 
 .chip-scope-global {
-  border-color: rgb(203 213 225);
-  background: rgb(30 41 59);
-  color: rgb(248 250 252);
+  border-color: var(--ghg-navy);
+  background: var(--ghg-info-bg);
+  color: var(--ghg-navy);
+  font-weight: 600;
 }
 
 .chip-scope-site {
-  border-color: rgb(191 219 254);
-  background: rgb(239 246 255);
-  color: rgb(30 64 175);
+  border-color: var(--ghg-input-border);
+  background: var(--ghg-locked-bg);
+  color: var(--ghg-muted);
+  font-weight: 500;
 }
 
 .chip-entity-config {
@@ -94,9 +124,10 @@
 
 .chip-entity-neutral,
 .chip-no-access {
-  border-color: rgb(226 232 240);
-  background: rgb(248 250 252);
-  color: rgb(100 116 139);
+  border-color: var(--ghg-input-border);
+  background: var(--ghg-neutral-bg);
+  color: var(--ghg-neutral-text);
+  font-weight: 500;
 }
 
 .chip-no-access {
@@ -158,12 +189,13 @@
 .access-meta-global {
   display: inline-flex;
   align-items: center;
-  border-radius: 9999px;
-  background: rgb(30 41 59);
+  border: 1px solid var(--ghg-navy);
+  border-radius: 2px;
+  background: var(--ghg-info-bg);
   padding: 0.125rem 0.5rem;
-  color: white;
+  color: var(--ghg-navy);
   font-size: 0.75rem;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1rem;
 }
 
@@ -189,7 +221,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
-  border-radius: 0.375rem;
+  border-radius: 0;
   padding: 0 0.75rem;
   font-size: 0.875rem;
   font-weight: 500;
@@ -198,12 +230,14 @@
 }
 
 .action-button-primary {
-  background: rgb(15 23 42);
+  background: var(--ghg-navy);
+  border-color: var(--ghg-navy);
   color: white;
 }
 
 .action-button-primary:hover {
-  background: rgb(30 41 59);
+  background: var(--ghg-navy-dark);
+  border-color: var(--ghg-navy-dark);
 }
 
 .action-button-secondary {
@@ -223,18 +257,18 @@
   align-items: center;
   justify-content: center;
   border: 1px solid rgb(203 213 225);
-  border-radius: 0.375rem;
+  border-radius: 0;
   background: white;
   color: rgb(51 65 85);
   font-size: 0.875rem;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
 }
 
 .action-menu-button:hover,
 .action-menu-button[aria-expanded="true"] {
   background: rgb(248 250 252);
-  color: rgb(15 23 42);
+  color: var(--ghg-navy);
 }
 
 .action-menu {
@@ -267,7 +301,7 @@
 
 .action-menu-item:hover {
   background: rgb(248 250 252);
-  color: rgb(15 23 42);
+  color: var(--ghg-navy);
 }
 
 .user-filter:hover {
@@ -276,286 +310,616 @@
   color: rgb(51 65 85);
 }
 
-.user-filter.bg-slate-900:hover {
-  border-color: rgb(15 23 42);
-  background: rgb(15 23 42);
+.user-filter.bg-slate-\39 00:hover {
+  border-color: var(--ghg-navy);
+  background: var(--ghg-navy);
   color: white;
 }
 
 /* ==========================================
-   JSW EXCEL-STYLE PROTECTED THEME OVERRIDES
+   JSW EXCEL-STYLE PROTECTED THEME FOUNDATION
    ========================================== */
 
-/* 1. Global typography & resetting */
-* {
-  font-family: Arial, Helvetica, sans-serif !important;
+body[data-theme="jsw-excel"] {
+  background: var(--ghg-page-bg);
+  color: var(--ghg-text);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
 }
 
-code, pre, .font-mono, [class*="font-mono"] {
-  font-family: 'Courier New', Courier, monospace !important;
+body[data-theme="jsw-excel"] code,
+body[data-theme="jsw-excel"] pre,
+body[data-theme="jsw-excel"] .font-mono,
+body[data-theme="jsw-excel"] [class*="font-mono"] {
+  font-family: "Courier New", Courier, monospace;
 }
 
-body {
-  font-size: 14px !important;
-  line-height: 1.45 !important;
-  background-color: #f0f4f8 !important;
-  color: #1f2937 !important;
+body[data-theme="jsw-excel"] h1 {
+  color: var(--ghg-text);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
-/* Page titles and section labels */
-h1, .text-2xl, .text-3xl {
-  font-size: 22px !important;
-  font-weight: 700 !important;
-  color: #1a3a6b !important;
+body[data-theme="jsw-excel"] .ghg-login-subtitle {
+  color: var(--ghg-muted);
+  font-size: 16px;
+  font-weight: 500;
 }
 
-/* Section labels */
-.text-\[11px\].uppercase, .text-xs.uppercase, .tracking-wider.uppercase {
-  font-size: 11px !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.8px !important;
-  color: #64748b !important;
+/* -- TYPOGRAPHY SCALE ------------------------------------------ */
+body[data-theme="jsw-excel"] .page-title,
+body[data-theme="jsw-excel"] h1 {
+  color: var(--ghg-text);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
 }
 
-/* Tabular numbers */
-.tabular-nums, [class*="tabular-nums"], td, th, .font-variant-numeric {
-  font-variant-numeric: tabular-nums !important;
+body[data-theme="jsw-excel"] h2 {
+  color: var(--ghg-text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
-/* 2. Global shape and shadow resets */
-button, input, select, textarea, article, aside, main, div, section, table, tr, td, th, .rounded, .rounded-sm, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-3xl, .rounded-full {
-  border-radius: 0px !important;
+body[data-theme="jsw-excel"] .section-heading {
+  color: var(--ghg-text);
+  font-size: 15px;
+  font-weight: 600;
 }
 
-/* Box shadow overrides: disable everywhere except the slide-in panel */
-*, *:before, *:after {
-  box-shadow: none !important;
+body[data-theme="jsw-excel"] h3,
+body[data-theme="jsw-excel"] h4 {
+  color: var(--ghg-text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
 }
 
-aside.shadow-xl, .shadow-xl {
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08) !important;
+body[data-theme="jsw-excel"] .card-title {
+  color: var(--ghg-text);
+  font-size: 14px;
+  font-weight: 500;
 }
 
-/* 3. Cards layout: flat white cards with 1px border */
-.bg-white.shadow-sm, .bg-white.shadow, article.bg-white, div.bg-white {
-  background-color: #ffffff !important;
-  border: 1px solid #d0d8e4 !important;
+body[data-theme="jsw-excel"] p,
+body[data-theme="jsw-excel"] li,
+body[data-theme="jsw-excel"] td {
+  font-size: 14px;
 }
 
-/* Stats/summary cards top accent borders */
-.border-amber-200, .border-amber-200\/80, #stat-action-needed-card {
-  border: 1px solid #d0d8e4 !important;
-  border-top: 3px solid #8a6a13 !important;
-}
-.border-slate-200, .border-slate-200\/80, #stat-not-started-card {
-  border: 1px solid #d0d8e4 !important;
-  border-top: 3px solid #5b6677 !important;
-}
-.border-indigo-200, .border-indigo-200\/80, #stat-under-review-card {
-  border: 1px solid #d0d8e4 !important;
-  border-top: 3px solid #1a3a6b !important;
-}
-.border-emerald-200, .border-emerald-200\/80, #stat-approved-card {
-  border: 1px solid #d0d8e4 !important;
-  border-top: 3px solid #1f6b34 !important;
+body[data-theme="jsw-excel"] .data-value,
+body[data-theme="jsw-excel"] tbody td {
+  color: var(--ghg-text);
+  font-size: 14px;
+  font-weight: 400;
 }
 
-article {
-  background: #ffffff !important;
-  border: 1px solid #d0d8e4 !important;
-  border-top: 3px solid #1a3a6b !important;
+body[data-theme="jsw-excel"] .data-value.prominent {
+  color: var(--ghg-text);
+  font-size: 14px;
+  font-weight: 500;
 }
 
-/* 4. Table overrides */
-table {
-  border-collapse: collapse !important;
-  border: 1px solid #d0d8e4 !important;
+body[data-theme="jsw-excel"] .text-context,
+body[data-theme="jsw-excel"] .text-label {
+  color: var(--ghg-muted);
+  font-size: 12px;
+  font-weight: 400;
 }
 
-thead, thead tr, thead th {
-  background-color: #1a3a6b !important;
-  color: #ffffff !important;
-  font-weight: 700 !important;
-  text-transform: uppercase !important;
-  font-size: 11px !important;
-  letter-spacing: 0.5px !important;
+body[data-theme="jsw-excel"] .text-hint,
+body[data-theme="jsw-excel"] .text-timestamp {
+  color: var(--ghg-faint);
+  font-size: 11px;
+  font-weight: 400;
 }
 
-thead th {
-  padding: 11px 14px !important;
-  border: 1px solid #15305a !important;
+body[data-theme="jsw-excel"] .nav-section-label {
+  color: var(--ghg-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  margin: 0;
+  padding: 12px 16px 6px;
+  text-transform: uppercase;
 }
 
-tbody tr {
-  border-bottom: 1px solid #dde5ef !important;
+body[data-theme="jsw-excel"] .nav-item a,
+body[data-theme="jsw-excel"] .nav-link {
+  font-size: 13px;
+  font-weight: 400;
 }
 
-tbody tr:nth-child(even) {
-  background-color: #f8fafc !important;
+body[data-theme="jsw-excel"] .nav-item.active a,
+body[data-theme="jsw-excel"] .nav-link.active {
+  color: var(--ghg-navy);
+  font-weight: 500;
 }
 
-tbody tr:hover {
-  background-color: #eef3fa !important;
+body[data-theme="jsw-excel"] .ghg-sidebar .nav-link.active {
+  background: #15305a;
+  border-left-color: var(--ghg-red);
+  border-left-width: 4px;
+  border-radius: 0;
+  box-shadow: none;
+  color: #ffffff;
+  font-weight: 600;
 }
 
-tbody td {
-  padding: 11px 14px !important;
-  color: #1f2937 !important;
-  border: 1px solid #dde5ef !important;
+body[data-theme="jsw-excel"] .ghg-sidebar .nav-link {
+  border-left-width: 4px;
+  padding: 10px 16px;
 }
 
-/* Section/Group Headers: navy bar with a 4px red left border */
-.section-header-jsw, [class*="section-header-jsw"] {
-  background-color: #1a3a6b !important;
-  color: #ffffff !important;
-  border-left: 4px solid #c8102e !important;
-  border-top: 1px solid #1a3a6b !important;
-  border-right: 1px solid #1a3a6b !important;
-  border-bottom: 1px solid #1a3a6b !important;
-}
-.section-header-jsw h2, .section-header-jsw span, .section-header-jsw p {
-  color: #ffffff !important;
+body[data-theme="jsw-excel"] .ghg-sidebar .nav-link:not(.active) {
+  background: transparent;
+  border-left-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: #dbeafe;
+  font-size: 14px;
+  font-weight: 400;
 }
 
-/* 5. Inputs & cell/field borders */
-input[type="text"], input[type="number"], input[type="email"], input[type="password"], select, textarea {
-  background-color: #ffffff !important;
-  border: 1px solid #c4d4e8 !important;
-  color: #1f2937 !important;
-  padding: 6px 10px !important;
+body[data-theme="jsw-excel"] .ghg-sidebar .nav-link:hover {
+  background: #15305a;
+  color: #ffffff;
 }
 
-input[type="text"]:focus, input[type="number"]:focus, input[type="email"]:focus, input[type="password"]:focus, select:focus, textarea:focus {
-  outline: 2px solid #1a3a6b !important;
-  outline-offset: -1px !important;
+body[data-theme="jsw-excel"] .ghg-sidebar .nav-link.active:hover {
+  background: #15305a;
+  color: #ffffff;
 }
 
-/* Locked & calculated cells */
-input:disabled, select:disabled, textarea:disabled, .bg-slate-100\/50, .bg-slate-100, .bg-slate-50, .bg-blue-50\/20, .bg-emerald-50\/20, .bg-rose-50\/50, td.bg-slate-50, td.bg-slate-100 {
-  background-color: #eef3fa !important;
-  color: #64748b !important;
-  cursor: not-allowed !important;
+body[data-theme="jsw-excel"] .ghg-sidebar nav {
+  padding: 12px 0;
 }
 
-/* Blank white for empty cells - hide placeholders in tables */
-td input::placeholder {
-  color: transparent !important;
+body[data-theme="jsw-excel"] .ghg-sidebar nav > div {
+  margin-top: 0;
+  margin-bottom: 14px;
 }
 
-/* 6. Buttons */
-/* Primary Navy Buttons */
-.bg-slate-900, .bg-indigo-600, .bg-blue-600, .action-button-primary, #btn-submit-row {
-  background-color: #1a3a6b !important;
-  color: #ffffff !important;
-  border: 1px solid #1a3a6b !important;
-  font-weight: 700 !important;
-  text-transform: uppercase !important;
-  font-size: 11px !important;
-  letter-spacing: 0.5px !important;
-  padding: 8px 16px !important;
-}
-.bg-slate-900:hover, .bg-indigo-600:hover, .bg-blue-600:hover, .action-button-primary:hover, #btn-submit-row:hover {
-  background-color: #15305a !important;
-  border-color: #15305a !important;
+body[data-theme="jsw-excel"] .uppercase.tracking-wider,
+body[data-theme="jsw-excel"] .uppercase.tracking-wide {
+  letter-spacing: 0.8px;
 }
 
-/* Secondary outline buttons */
-.border-slate-300.bg-white, .border-slate-200.bg-white, .action-button-secondary, #btn-save-row {
-  border: 1px solid #1a3a6b !important;
-  background-color: #ffffff !important;
-  color: #1a3a6b !important;
-  font-weight: 700 !important;
-  text-transform: uppercase !important;
-  font-size: 11px !important;
-  letter-spacing: 0.5px !important;
-  padding: 8px 16px !important;
-}
-.border-slate-300.bg-white:hover, .border-slate-200.bg-white:hover, .action-button-secondary:hover, #btn-save-row:hover {
-  background-color: #dfeaf8 !important;
+body[data-theme="jsw-excel"] td,
+body[data-theme="jsw-excel"] th,
+body[data-theme="jsw-excel"] .tabular-nums,
+body[data-theme="jsw-excel"] [class*="tabular-nums"] {
+  font-variant-numeric: tabular-nums;
 }
 
-/* 7. JSW Status Badges / Chips / Pills (2px exception) */
-.status-badge, .access-chip, .badge-pill, .pill, [class*="status-badge-"] {
-  border-radius: 2px !important;
-  padding: 4px 8px !important;
-  font-size: 11px !important;
-  font-weight: 700 !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.5px !important;
-  display: inline-flex !important;
-  align-items: center !important;
+.ghg-page-shell {
+  min-height: 100vh;
+  background: var(--ghg-page-bg);
+  color: var(--ghg-text);
 }
 
-/* Red (Sent back / changes requested / rejected) */
-.bg-rose-100, .bg-rose-50, .status-badge-danger, .changes_requested, .bg-amber-50.text-amber-700 {
-  background-color: #fbe3e6 !important;
-  color: #9a1224 !important;
-  border: 2px solid #9a1224 !important;
+.ghg-topbar {
+  background: var(--ghg-navy);
+  border-bottom: 1px solid var(--ghg-navy-dark);
+  color: #fff;
+  box-shadow: none;
 }
 
-/* Yellow (Draft) */
-.bg-amber-100, .status-badge-warning, .draft_filled, .bg-blue-50.text-blue-700 {
-  background-color: #fcf3d7 !important;
-  color: #8a6a13 !important;
-  border: 2px solid #8a6a13 !important;
+.ghg-sitebar {
+  background: var(--ghg-sitebar-bg);
+  border-bottom: 1px solid var(--ghg-card-border);
+  color: var(--ghg-muted);
+  box-shadow: none;
 }
 
-/* Grey (Not started) */
-.bg-slate-100, .status-badge-neutral, .blank_editable, .bg-slate-100.text-slate-600 {
-  background-color: #e9eef4 !important;
-  color: #5b6677 !important;
-  border: 2px solid #5b6677 !important;
+.ghg-sidebar {
+  background: var(--ghg-navy);
+  border-right: 1px solid var(--ghg-navy-dark);
+  color: #fff;
+  box-shadow: none;
 }
 
-/* Green (Submitted/Approved) */
-.bg-emerald-100, .bg-emerald-50, .status-badge-success, .approved_locked, .bg-emerald-50.text-emerald-700 {
-  background-color: #def0e2 !important;
-  color: #1f6b34 !important;
-  border: 2px solid #1f6b34 !important;
+.ghg-card {
+  background: #fff;
+  border: 1px solid var(--ghg-card-border);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 16px 20px;
 }
 
-/* Blue (Auto/Info / Submitted / Under Review) */
-.bg-blue-100, .bg-indigo-100, .bg-indigo-50, .status-badge-info, .submitted, .bg-indigo-50.text-indigo-700 {
-  background-color: #dfeaf8 !important;
-  color: #1a3a6b !important;
-  border: 2px solid #1a3a6b !important;
+.ghg-section-header,
+.section-header-jsw {
+  background: var(--ghg-navy);
+  border: 1px solid var(--ghg-navy);
+  border-left: 4px solid var(--ghg-red);
+  color: #fff;
 }
 
-/* Purple (Site Admin / Late Entry / custom roles) */
-.bg-violet-100, .bg-violet-50, .late_entry, .bg-violet-50.text-violet-700 {
-  background-color: #ece2f5 !important;
-  color: #5b3a86 !important;
-  border: 2px solid #5b3a86 !important;
+.ghg-section-header h2,
+.ghg-section-header p,
+.ghg-section-header span,
+.section-header-jsw h2,
+.section-header-jsw p,
+.section-header-jsw span {
+  color: #fff;
 }
 
-/* 8. Dynamic Context Action Buttons (using :has to match mockup actions) */
-#table-action-needed tr:has(.bg-rose-100) a,
-#table-action-needed tr:has(.text-rose-800) a {
-  background-color: #fbe3e6 !important;
-  color: #9a1224 !important;
-  border: 1px solid #9a1224 !important;
-  font-weight: 700 !important;
-  font-size: 11px !important;
-}
-#table-action-needed tr:has(.bg-rose-100) a:hover,
-#table-action-needed tr:has(.text-rose-800) a:hover {
-  background-color: #f8c9cf !important;
+.ghg-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--ghg-card-border);
 }
 
-#table-action-needed tr:has(.bg-amber-100) a,
-#table-action-needed tr:has(.text-amber-800) a {
-  background-color: #fcf3d7 !important;
-  color: #8a6a13 !important;
-  border: 1px solid #8a6a13 !important;
-  font-weight: 700 !important;
-  font-size: 11px !important;
-}
-#table-action-needed tr:has(.bg-amber-100) a:hover,
-#table-action-needed tr:has(.text-amber-800) a:hover {
-  background-color: #fae6b2 !important;
+.ghg-table thead th {
+  background: var(--ghg-navy);
+  border: 1px solid var(--ghg-navy-dark);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  padding: 10px 14px;
+  text-transform: uppercase;
 }
 
-/* Keep indicator circles rounded */
-.compact-status-dot, .h-2.w-2.rounded-full, [class*="h-2 w-2 rounded-full"] {
-  border-radius: 9999px !important;
+.ghg-table tbody td {
+  border: 1px solid var(--ghg-row-border);
+  color: var(--ghg-text);
+  padding: 10px 14px;
+}
+
+.ghg-table tbody tr {
+  min-height: 48px;
+}
+
+.ghg-table tbody tr:nth-child(even) {
+  background: #f8fafc;
+}
+
+.ghg-table tbody tr:hover {
+  background: var(--ghg-locked-bg);
+}
+
+.ghg-input {
+  background: #fff;
+  border: 1px solid var(--ghg-input-border);
+  border-radius: 0;
+  color: var(--ghg-text);
+  min-height: 40px;
+}
+
+.ghg-input:focus {
+  border-color: var(--ghg-navy);
+  outline: 2px solid var(--ghg-navy);
+  outline-offset: -1px;
+}
+
+.ghg-input:disabled,
+.ghg-input[readonly] {
+  background: var(--ghg-locked-bg);
+  color: var(--ghg-muted);
+}
+
+.ghg-btn-primary,
+.ghg-btn-secondary {
+  border-radius: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-transform: none;
+}
+
+.ghg-btn-primary {
+  background: var(--ghg-navy);
+  border: 1px solid var(--ghg-navy);
+  color: #fff;
+}
+
+.ghg-btn-primary:hover {
+  background: var(--ghg-navy-dark);
+  border-color: var(--ghg-navy-dark);
+}
+
+.ghg-btn-secondary {
+  background: #fff;
+  border: 1px solid var(--ghg-navy);
+  color: var(--ghg-navy);
+}
+
+.ghg-btn-secondary:hover {
+  background: var(--ghg-info-bg);
+}
+
+/* -- BUTTONS ---------------------------------------------------- */
+body[data-theme="jsw-excel"] .btn {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 6px;
+  letter-spacing: 0.2px;
+  padding: 8px 16px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+body[data-theme="jsw-excel"] button,
+body[data-theme="jsw-excel"] a.btn {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+body[data-theme="jsw-excel"] .btn-primary {
+  background: var(--ghg-navy);
+  border-color: var(--ghg-navy);
+  color: #fff;
+}
+
+body[data-theme="jsw-excel"] .btn-primary:hover {
+  background: var(--ghg-navy-dark);
+  border-color: var(--ghg-navy-dark);
+}
+
+body[data-theme="jsw-excel"] .btn-outline {
+  background: #fff;
+  border-color: var(--ghg-navy);
+  color: var(--ghg-navy);
+}
+
+body[data-theme="jsw-excel"] .btn-outline:hover {
+  background: var(--ghg-info-bg);
+}
+
+body[data-theme="jsw-excel"] .btn-neutral {
+  background: #fff;
+  border-color: var(--ghg-input-border);
+  color: #475569;
+}
+
+body[data-theme="jsw-excel"] .btn-neutral:hover {
+  background: #f1f5f9;
+}
+
+body[data-theme="jsw-excel"] .btn-danger {
+  background: #fff;
+  border-color: var(--ghg-danger-text);
+  color: var(--ghg-danger-text);
+}
+
+body[data-theme="jsw-excel"] .btn-danger:hover {
+  background: var(--ghg-danger-bg);
+}
+
+body[data-theme="jsw-excel"] .btn-sm {
+  font-size: 12px;
+  padding: 5px 12px;
+}
+
+.ghg-status,
+.status-badge {
+  border-radius: 2px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  line-height: 1rem;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+.ghg-status-danger,
+.status-badge-danger {
+  background: var(--ghg-danger-bg);
+  border-color: var(--ghg-danger-text);
+  color: var(--ghg-danger-text);
+}
+
+.ghg-status-warning,
+.status-badge-warning {
+  background: var(--ghg-warning-bg);
+  border-color: var(--ghg-warning-text);
+  color: var(--ghg-warning-text);
+}
+
+.ghg-status-neutral,
+.status-badge-neutral {
+  background: var(--ghg-neutral-bg);
+  border-color: var(--ghg-neutral-text);
+  color: var(--ghg-neutral-text);
+}
+
+.ghg-status-success,
+.status-badge-success {
+  background: var(--ghg-success-bg);
+  border-color: var(--ghg-success-text);
+  color: var(--ghg-success-text);
+}
+
+.ghg-status-info,
+.status-badge-info {
+  background: var(--ghg-info-bg);
+  border-color: var(--ghg-navy);
+  color: var(--ghg-navy);
+}
+
+.ghg-status-purple {
+  background: var(--ghg-purple-bg);
+  border-color: var(--ghg-purple-text);
+  color: var(--ghg-purple-text);
+}
+
+/* Compatibility layer for existing Tailwind-heavy templates. Keep narrow and scoped. */
+body[data-theme="jsw-excel"] .shadow-sm,
+body[data-theme="jsw-excel"] .shadow,
+body[data-theme="jsw-excel"] .shadow-md {
+  box-shadow: none;
+}
+
+body[data-theme="jsw-excel"] .rounded,
+body[data-theme="jsw-excel"] .rounded-sm,
+body[data-theme="jsw-excel"] .rounded-md,
+body[data-theme="jsw-excel"] .rounded-lg,
+body[data-theme="jsw-excel"] .rounded-xl,
+body[data-theme="jsw-excel"] .rounded-2xl,
+body[data-theme="jsw-excel"] .rounded-3xl {
+  border-radius: 0;
+}
+
+body[data-theme="jsw-excel"] .rounded-full {
+  border-radius: 2px;
+}
+
+body[data-theme="jsw-excel"] .compact-status-dot,
+body[data-theme="jsw-excel"] .h-2.w-2.rounded-full,
+body[data-theme="jsw-excel"] [class*="h-2 w-2 rounded-full"] {
+  border-radius: 9999px;
+}
+
+body[data-theme="jsw-excel"] .bg-white.shadow-sm,
+body[data-theme="jsw-excel"] .bg-white.shadow,
+body[data-theme="jsw-excel"] article.bg-white,
+body[data-theme="jsw-excel"] section.bg-white {
+  background: #fff;
+  border: 1px solid var(--ghg-card-border);
+}
+
+body[data-theme="jsw-excel"] table.min-w-full,
+body[data-theme="jsw-excel"] table.w-full {
+  border-collapse: collapse;
+  border: 1px solid var(--ghg-card-border);
+}
+
+body[data-theme="jsw-excel"] table.min-w-full thead th,
+body[data-theme="jsw-excel"] table.w-full thead th {
+  background: var(--ghg-navy);
+  border: 1px solid var(--ghg-navy-dark);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  padding: 10px 14px;
+  text-transform: uppercase;
+}
+
+body[data-theme="jsw-excel"] table.min-w-full tbody td,
+body[data-theme="jsw-excel"] table.w-full tbody td {
+  border: 1px solid var(--ghg-row-border);
+  color: var(--ghg-text);
+  padding: 10px 14px;
+}
+
+body[data-theme="jsw-excel"] table.min-w-full tbody tr,
+body[data-theme="jsw-excel"] table.w-full tbody tr {
+  min-height: 48px;
+}
+
+body[data-theme="jsw-excel"] table.min-w-full tbody tr:nth-child(even),
+body[data-theme="jsw-excel"] table.w-full tbody tr:nth-child(even) {
+  background: #f8fafc;
+}
+
+body[data-theme="jsw-excel"] table.min-w-full tbody tr:hover,
+body[data-theme="jsw-excel"] table.w-full tbody tr:hover {
+  background: var(--ghg-locked-bg);
+}
+
+body[data-theme="jsw-excel"] input[type="text"],
+body[data-theme="jsw-excel"] input[type="number"],
+body[data-theme="jsw-excel"] input[type="email"],
+body[data-theme="jsw-excel"] input[type="password"],
+body[data-theme="jsw-excel"] input[type="tel"],
+body[data-theme="jsw-excel"] select,
+body[data-theme="jsw-excel"] textarea {
+  background: #fff;
+  border: 1px solid var(--ghg-input-border);
+  border-radius: 0;
+  color: var(--ghg-text);
+  min-height: 40px;
+}
+
+body[data-theme="jsw-excel"] input:disabled,
+body[data-theme="jsw-excel"] select:disabled,
+body[data-theme="jsw-excel"] textarea:disabled,
+body[data-theme="jsw-excel"] input[readonly],
+body[data-theme="jsw-excel"] textarea[readonly],
+body[data-theme="jsw-excel"] td.bg-slate-50,
+body[data-theme="jsw-excel"] td.bg-slate-100 {
+  background: var(--ghg-locked-bg);
+  color: var(--ghg-muted);
+}
+
+body[data-theme="jsw-excel"] td input::placeholder {
+  color: transparent;
+}
+
+body[data-theme="jsw-excel"] .bg-slate-\39 00,
+body[data-theme="jsw-excel"] .bg-indigo-600,
+body[data-theme="jsw-excel"] .bg-blue-600,
+body[data-theme="jsw-excel"] .action-button-primary,
+body[data-theme="jsw-excel"] #btn-submit-row {
+  background: var(--ghg-navy);
+  border: 1px solid var(--ghg-navy);
+  color: #fff;
+}
+
+body[data-theme="jsw-excel"] .bg-slate-\39 00:hover,
+body[data-theme="jsw-excel"] .bg-indigo-600:hover,
+body[data-theme="jsw-excel"] .bg-blue-600:hover,
+body[data-theme="jsw-excel"] .action-button-primary:hover,
+body[data-theme="jsw-excel"] #btn-submit-row:hover {
+  background: var(--ghg-navy-dark);
+  border-color: var(--ghg-navy-dark);
+}
+
+body[data-theme="jsw-excel"] .action-button-secondary,
+body[data-theme="jsw-excel"] #btn-save-row {
+  background: #fff;
+  border: 1px solid var(--ghg-navy);
+  color: var(--ghg-navy);
+}
+
+body[data-theme="jsw-excel"] .bg-rose-100,
+body[data-theme="jsw-excel"] .bg-rose-50,
+body[data-theme="jsw-excel"] .changes_requested {
+  background: var(--ghg-danger-bg);
+  color: var(--ghg-danger-text);
+  border-color: var(--ghg-danger-text);
+}
+
+body[data-theme="jsw-excel"] .bg-amber-100,
+body[data-theme="jsw-excel"] .draft_filled {
+  background: var(--ghg-warning-bg);
+  color: var(--ghg-warning-text);
+  border-color: var(--ghg-warning-text);
+}
+
+body[data-theme="jsw-excel"] .bg-emerald-100,
+body[data-theme="jsw-excel"] .approved_locked {
+  background: var(--ghg-success-bg);
+  color: var(--ghg-success-text);
+  border-color: var(--ghg-success-text);
+}
+
+body[data-theme="jsw-excel"] .bg-indigo-100,
+body[data-theme="jsw-excel"] .bg-blue-100,
+body[data-theme="jsw-excel"] .submitted {
+  background: var(--ghg-info-bg);
+  color: var(--ghg-navy);
+  border-color: var(--ghg-navy);
+}
+
+.ghg-line-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
