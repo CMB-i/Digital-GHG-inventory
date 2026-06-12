@@ -13,8 +13,8 @@ document.addEventListener("DOMContentLoaded", function () {
   const tableWrap = document.getElementById("workbook-table-wrap");
   const tableHead = document.getElementById("workbook-head");
   const tableBody = document.getElementById("workbook-body");
-  const btnSave = document.getElementById("btn-save-row");
-  const btnSubmit = document.getElementById("btn-submit-row");
+  const btnSave = document.getElementById("btn-save-draft");
+  const btnSubmit = document.getElementById("btn-submit-sheet");
   const cellDetailModal = document.getElementById("cell-detail-modal");
   const cellDetailContext = document.getElementById("cell-detail-context");
   const cellDetailValue = document.getElementById("cell-detail-value");
@@ -23,6 +23,9 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnCloseCellDetail = document.getElementById("btn-close-cell-detail");
   const btnCancelCellDetail = document.getElementById("btn-cancel-cell-detail");
   const initialParams = new URLSearchParams(window.location.search);
+
+  let autosaveTimeout = null;
+  let lastSavedTime = null;
 
   function paramInt(name) {
     const value = parseInt(initialParams.get(name), 10);
@@ -38,6 +41,8 @@ document.addEventListener("DOMContentLoaded", function () {
     requestedFormId: paramInt("form_id"),
     requestedMonth: paramInt("month"),
     workbook: null,
+    calculationResults: null,
+    dashboardData: null,
     selectedRowKey: null,
     dirtyRows: new Set(),
     dirtyWorkbookFields: new Set()
@@ -47,6 +52,14 @@ document.addEventListener("DOMContentLoaded", function () {
     const now = new Date();
     const month = now.getMonth() + 1;
     return month >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  }
+
+  function fyForMonth(year, month) {
+    return month >= 4 ? year : year - 1;
+  }
+
+  function fyLabel(startYear) {
+    return `FY ${startYear}-${String(startYear + 1).slice(-2)}`;
   }
 
   function escapeHtml(value) {
@@ -90,7 +103,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function showAlert(message, kind = "info") {
-    alertEl.className = "rounded-xl border p-4 text-sm font-semibold";
+    alertEl.className = "rounded-xl border p-4 text-sm font-semibold mb-4";
     if (kind === "error") {
       alertEl.classList.add("border-rose-200", "bg-rose-50", "text-rose-700");
     } else if (kind === "success") {
@@ -142,6 +155,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function setEmpty(title, body) {
     tableWrap.classList.add("hidden");
+    document.getElementById("calculated-results-section").classList.add("hidden");
     emptyTitleEl.textContent = title;
     emptyBodyEl.textContent = body;
     emptyEl.classList.remove("hidden");
@@ -189,6 +203,35 @@ document.addEventListener("DOMContentLoaded", function () {
     return state.options.forms_by_site[String(state.selectedSiteId)] || [];
   }
 
+  function getFormStatusColor(formId) {
+    if (!state.dashboardData) return "#5b6677"; // Grey default
+    const siteId = state.selectedSiteId;
+    const fy = state.selectedFy;
+    
+    const actionNeeded = (state.dashboardData.action_needed || []).filter(row => 
+      String(row.form_id) === String(formId) && 
+      String(row.site_id) === String(siteId) && 
+      fyForMonth(row.year, row.month) === fy
+    );
+    
+    const submitted = (state.dashboardData.submitted || []).filter(row => 
+      String(row.form_id) === String(formId) && 
+      String(row.site_id) === String(siteId) && 
+      fyForMonth(row.year, row.month) === fy
+    );
+
+    if (actionNeeded.some(row => row.status === "Changes Requested" || row.status === "Rejected" || row.status === "Changes requested")) {
+      return "#9a1224"; // Red sent back
+    }
+    if (actionNeeded.some(row => row.status === "Draft")) {
+      return "#8a6a13"; // Amber draft
+    }
+    if (submitted.length > 0) {
+      return "#1f6b34"; // Green submitted
+    }
+    return "#5b6677"; // Grey not started
+  }
+
   function renderFormTabs() {
     const forms = formsForSelectedSite();
     formTabs.innerHTML = "";
@@ -201,12 +244,17 @@ document.addEventListener("DOMContentLoaded", function () {
       const button = document.createElement("button");
       button.type = "button";
       const active = String(form.id) === String(state.selectedFormId);
-      button.className = `rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+      button.className = `border px-3 py-1.5 text-xs font-bold transition flex items-center gap-1.5 ${
         active
-          ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+          ? "border-navy bg-navy text-white"
           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
       }`;
-      button.textContent = form.name;
+      
+      // Add status dot
+      const dotColor = getFormStatusColor(form.id);
+      const dot = `<span class="w-2 h-2 rounded-full inline-block" style="background-color: ${dotColor};"></span>`;
+      
+      button.innerHTML = `${dot}<span>${escapeHtml(form.name)}</span>`;
       button.onclick = function () {
         state.selectedFormId = form.id;
         loadWorkbook().catch(error => showAlert(error.message, "error"));
@@ -219,9 +267,9 @@ document.addEventListener("DOMContentLoaded", function () {
       const calcButton = document.createElement("button");
       calcButton.type = "button";
       const calcActive = state.selectedFormId === "calc_results";
-      calcButton.className = `rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+      calcButton.className = `border px-3 py-1.5 text-xs font-bold transition ${
         calcActive
-          ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+          ? "border-navy bg-navy text-white"
           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
       }`;
       calcButton.textContent = "Calculation Results";
@@ -233,10 +281,61 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
+  function checkRequiredFields() {
+    const btnSubmitEl = document.getElementById("btn-submit-sheet");
+    const tooltip = document.getElementById("submit-tooltip");
+    const tooltipList = document.getElementById("submit-tooltip-list");
+    if (!btnSubmitEl || !state.workbook) return;
+
+    const row = selectedRow();
+    if (!row || !(row.editability && row.editability.editable)) {
+      btnSubmitEl.disabled = true;
+      if (tooltip) tooltip.classList.add("hidden");
+      return;
+    }
+
+    const missingFields = [];
+    const fields = state.workbook.fields || [];
+    
+    fields.forEach(field => {
+      const isNonMonthly = window.WorkbookSheet.isFieldNonMonthly(field, state.workbook);
+      const isRequired = field.field_config && field.field_config.is_required;
+      const fieldType = String(field.field_type || "").trim().toLowerCase();
+      
+      if (isRequired && !isNonMonthly && fieldType !== "calculated") {
+        const val = fieldValue(row, field);
+        if (val === "" || val === null || val === undefined) {
+          missingFields.push(field.field_name);
+        }
+      }
+    });
+
+    if (missingFields.length > 0) {
+      btnSubmitEl.disabled = true;
+      if (tooltipList) {
+        tooltipList.innerHTML = missingFields.map(name => `<li><strong>${escapeHtml(name)}</strong> is required</li>`).join("");
+      }
+      if (tooltip) tooltip.classList.remove("hidden");
+    } else {
+      btnSubmitEl.disabled = false;
+      if (tooltipList) {
+        tooltipList.innerHTML = "<li>All required fields filled</li>";
+      }
+      if (tooltip) tooltip.classList.add("hidden");
+    }
+  }
+
   function renderHeader() {
     const site = state.options.sites.find(item => String(item.id) === String(state.selectedSiteId));
     siteNameEl.textContent = site ? site.name : "Select a site";
     fyLabelEl.textContent = `FY ${state.selectedFy}-${String(state.selectedFy + 1).slice(-2)}`;
+
+    // Set Sheet specific label for Submit button
+    const btnSubmitEl = document.getElementById("btn-submit-sheet");
+    const sheetName = state.workbook ? state.workbook.selected_form.name : "Sheet";
+    if (btnSubmitEl) {
+      btnSubmitEl.textContent = `Submit ${sheetName}`;
+    }
 
     if (state.selectedFormId === "calc_results") {
       selectedStatusEl.textContent = "Calculation Results";
@@ -270,8 +369,50 @@ document.addEventListener("DOMContentLoaded", function () {
 
     lastSavedEl.textContent = row.last_saved ? `Last saved ${formatDateTime(row.last_saved)}` : row.editability.reason;
     btnSave.disabled = !(row.editability && row.editability.editable) && state.dirtyWorkbookFields.size === 0;
-    btnSubmit.disabled = !(row.editability && row.editability.editable);
+    
+    checkRequiredFields();
   }
+
+  function triggerAutosave() {
+    if (autosaveTimeout) clearTimeout(autosaveTimeout);
+    
+    const dot = document.getElementById("save-status-dot");
+    const text = document.getElementById("save-status-text");
+    if (dot && text) {
+      dot.className = "h-2 w-2 rounded-full bg-amber-500 animate-pulse";
+      text.textContent = "Saving...";
+    }
+    
+    autosaveTimeout = setTimeout(async function () {
+      await saveSelectedRow();
+      lastSavedTime = new Date();
+      updateLastSavedText();
+    }, 2000);
+  }
+
+  function updateLastSavedText() {
+    const dot = document.getElementById("save-status-dot");
+    const text = document.getElementById("save-status-text");
+    if (!dot || !text) return;
+    if (!lastSavedTime) {
+      dot.className = "h-2 w-2 rounded-full bg-slate-300";
+      text.textContent = "Your changes save automatically";
+      return;
+    }
+    
+    const diffMs = new Date() - lastSavedTime;
+    const diffMins = Math.floor(diffMs / 60000);
+    
+    dot.className = "h-2 w-2 rounded-full bg-emerald-500";
+    if (diffMins < 1) {
+      text.textContent = "Last saved just now";
+    } else {
+      text.textContent = `Last saved ${diffMins} min${diffMins === 1 ? "" : "s"} ago`;
+    }
+  }
+
+  // Update save status text every 30 seconds
+  setInterval(updateLastSavedText, 30000);
 
   function renderTable() {
     if (!state.workbook) {
@@ -311,10 +452,136 @@ document.addEventListener("DOMContentLoaded", function () {
         renderTable();
         renderHeader();
       },
-      onCellChange,
-      onWorkbookValueChange,
+      onCellChange: function(e) {
+        onCellChange(e);
+        triggerAutosave();
+      },
+      onWorkbookValueChange: function(e) {
+        onWorkbookValueChange(e);
+        triggerAutosave();
+      },
       onCellOpen: openCellDetail
     });
+
+    // Check sent back badge
+    const needsCorrectionRow = rows.find(row => 
+      row.submission_status === "Changes Requested" || row.submission_status === "Rejected"
+    );
+    const sentBackBadge = document.getElementById("sent-back-badge");
+    if (sentBackBadge) {
+      if (needsCorrectionRow) {
+        sentBackBadge.classList.remove("hidden");
+        sentBackBadge.onclick = function() {
+          const rowEl = tableBody.querySelector(`tr[data-row-key="${rowKey(needsCorrectionRow)}"]`);
+          if (rowEl) {
+            rowEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            rowEl.classList.add("ring-4", "ring-rose-400");
+            setTimeout(() => rowEl.classList.remove("ring-4", "ring-rose-400"), 2000);
+          }
+        };
+      } else {
+        sentBackBadge.classList.add("hidden");
+      }
+    }
+  }
+
+  function statusClass(row) {
+    const status = row.submission_status || row.status || row.period_status || "Unavailable";
+    if (status === "Approved") return "bg-emerald-100 text-emerald-700 border-emerald-200";
+    if (status === "Changes Requested") return "bg-amber-100 text-amber-700 border-amber-200";
+    if (["Submitted", "Resubmitted", "Under Review"].includes(status)) return "bg-indigo-100 text-indigo-700 border-indigo-200";
+    if (row.editable) return "bg-blue-100 text-blue-700 border-blue-200";
+    return "bg-slate-100 text-slate-600 border-slate-200";
+  }
+
+  function renderCalculatedResultsSection(calcData) {
+    const calcSection = document.getElementById("calculated-results-section");
+    const calcHead = document.getElementById("calc-head-tr");
+    const calcBody = document.getElementById("calc-body-rows");
+    if (!calcSection || !calcHead || !calcBody || !state.workbook) return;
+
+    const currentFormId = state.workbook.selected_form.id;
+    const calcFields = (calcData.fields || []).filter(f => String(f.form_id) === String(currentFormId));
+    
+    if (calcFields.length === 0 || state.selectedFormId === "calc_results") {
+      calcSection.classList.add("hidden");
+      return;
+    }
+
+    calcSection.classList.remove("hidden");
+
+    calcHead.innerHTML = `
+      <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white">Month</th>
+      <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white">Status</th>
+      ${calcFields.map(field => `
+        <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white">
+          <div class="font-bold">${escapeHtml(field.field_name.split(" (")[0])}</div>
+          ${field.field_config && field.field_config.unit ? `<div class="text-[10px] text-slate-300 font-semibold normal-case">${escapeHtml(field.field_config.unit)}</div>` : ""}
+        </th>
+      `).join("")}
+    `;
+
+    const rows = calcData.rows || [];
+    calcBody.innerHTML = rows.map(row => {
+      const isApproved = row.submission_status === "Approved" || row.is_locked;
+      const rowClass = row.is_active_period 
+        ? "bg-[#dfeaf8] font-semibold" 
+        : isApproved 
+          ? "bg-[#eef3fa]/50 opacity-85 text-slate-500"
+          : "bg-slate-50";
+
+      return `
+        <tr class="${rowClass} border-b border-slate-200">
+          <td class="border border-slate-300 px-3 py-2.5 font-bold text-slate-900 bg-inherit">${escapeHtml(row.label || row.period_label)}</td>
+          <td class="border border-slate-300 px-3 py-2.5 bg-inherit">
+            <div class="flex items-center gap-2">
+              <span class="inline-flex whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold ${statusClass(row)}">${escapeHtml(row.submission_status || "Not Started")}</span>
+              <span class="text-slate-400 text-sm">🔒</span>
+            </div>
+          </td>
+          ${calcFields.map(field => {
+            const cell = row.values ? row.values[field.field_code] : null;
+            if (!cell) {
+              return `<td class="border border-slate-300 px-3 py-2.5 text-slate-400 italic bg-slate-100/50">—</td>`;
+            }
+            if (cell.status === "not_configured") {
+              return `<td class="border border-slate-300 px-3 py-2.5 text-slate-400 italic bg-slate-100/50">Not configured</td>`;
+            }
+            if (cell.status === "missing_input") {
+              const warningText = Array.isArray(cell.warnings) ? cell.warnings.join(" | ") : "Missing input";
+              return `
+                <td class="border border-slate-300 px-3 py-2.5 text-slate-500 bg-slate-100/50">
+                  <div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 px-2 py-1">${escapeHtml(warningText)}</div>
+                </td>
+              `;
+            }
+            if (cell.status === "evaluation_error") {
+              const warningText = Array.isArray(cell.warnings) ? cell.warnings.join(" | ") : "Error";
+              return `
+                <td class="border border-slate-300 px-3 py-2.5 text-rose-700 bg-rose-50/50">
+                  <div class="text-[11px] font-semibold">${escapeHtml(warningText)}</div>
+                </td>
+              `;
+            }
+            
+            const val = cell.reportable_value !== null ? cell.reportable_value : cell.preview_value;
+            const displayVal = val !== null ? val : "—";
+            const badge = cell.status === "calculable"
+              ? `<span class="inline-flex items-center rounded bg-emerald-50 px-1 py-0.5 text-[9px] font-bold text-emerald-600 border border-emerald-100">Approved</span>`
+              : `<span class="inline-flex items-center rounded bg-blue-50 px-1 py-0.5 text-[9px] font-bold text-blue-600 border border-blue-100">Preview</span>`;
+              
+            return `
+              <td class="border border-slate-300 px-3 py-2.5 font-semibold text-slate-900 bg-slate-50">
+                <div class="flex items-center justify-between gap-2">
+                  <span>${escapeHtml(displayVal)}</span>
+                  ${badge}
+                </div>
+              </td>
+            `;
+          }).join("")}
+        </tr>
+      `;
+    }).join("");
   }
 
   function renderIssueList(issues) {
@@ -349,7 +616,6 @@ document.addEventListener("DOMContentLoaded", function () {
     const row = state.workbook.rows.find(item => rowKey(item) === input.dataset.rowKey);
     if (!row || !(row.editability && row.editability.editable)) return;
 
-    // Ignore change events from non-monthly fields
     const field = state.workbook.fields.find(f => f.field_code === input.dataset.fieldCode);
     if (field && window.WorkbookSheet.isFieldNonMonthly(field, state.workbook)) return;
 
@@ -378,9 +644,14 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   async function loadOptions() {
-    const response = await fetch("/module/SUBMIT/api/annual-workbook/options");
-    if (!response.ok) throw new Error("Could not load assigned sites and sheets.");
-    state.options = await response.json();
+    const [optsRes, sheetsRes] = await Promise.all([
+      fetch("/module/SUBMIT/api/annual-workbook/options"),
+      fetch("/module/SUBMIT/api/sheets")
+    ]);
+    if (!optsRes.ok) throw new Error("Could not load assigned sites and sheets.");
+    state.options = await optsRes.json();
+    state.dashboardData = sheetsRes.ok ? await sheetsRes.json() : null;
+
     const requestedSite = state.options.sites.find(site => parseInt(site.id) === state.requestedSiteId);
     state.selectedSiteId = requestedSite
       ? requestedSite.id
@@ -400,6 +671,7 @@ document.addEventListener("DOMContentLoaded", function () {
     hideAlert();
     const previousRowKey = state.selectedRowKey;
     state.workbook = null;
+    state.calculationResults = null;
     state.dirtyRows.clear();
     state.dirtyWorkbookFields.clear();
     renderFormTabs();
@@ -418,37 +690,40 @@ document.addEventListener("DOMContentLoaded", function () {
       state.selectedFormId = forms[0] ? forms[0].id : "calc_results";
     }
 
-    let url = "";
+    let wbUrl = "";
+    let calcUrl = `/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${state.selectedSiteId}&fy=${state.selectedFy}`;
+    
     if (state.selectedFormId === "calc_results") {
-      const params = new URLSearchParams({
-        site_id: state.selectedSiteId,
-        fy: state.selectedFy
-      });
-      url = `/module/SUBMIT/api/annual-workbook/calculation-results?${params.toString()}`;
+      wbUrl = calcUrl;
     } else {
-      const params = new URLSearchParams({
-        site_id: state.selectedSiteId,
-        form_id: state.selectedFormId,
-        fy: state.selectedFy
-      });
-      url = `/module/SUBMIT/api/annual-workbook?${params.toString()}`;
+      wbUrl = `/module/SUBMIT/api/annual-workbook?site_id=${state.selectedSiteId}&form_id=${state.selectedFormId}&fy=${state.selectedFy}`;
     }
 
-    const response = await fetch(url);
-    const data = await parseJsonResponse(response, "Could not load annual workbook.");
-    if (!response.ok) throw new Error(data.error || "Could not load annual workbook.");
+    const [wbRes, calcRes] = await Promise.all([
+      fetch(wbUrl),
+      fetch(calcUrl)
+    ]);
+    
+    const wbData = await parseJsonResponse(wbRes, "Could not load annual workbook.");
+    if (!wbRes.ok) throw new Error(wbData.error || "Could not load annual workbook.");
 
-    state.workbook = data;
+    state.workbook = wbData;
+    state.calculationResults = calcRes.ok ? await calcRes.json() : null;
+
     const requestedRow = state.requestedMonth
-      ? data.rows.find(row => parseInt(row.month) === state.requestedMonth)
+      ? wbData.rows.find(row => parseInt(row.month) === state.requestedMonth)
       : null;
     const previousRow = previousRowKey
-      ? data.rows.find(row => rowKey(row) === previousRowKey)
+      ? wbData.rows.find(row => rowKey(row) === previousRowKey)
       : null;
     state.selectedRowKey = requestedRow
       ? rowKey(requestedRow)
-      : (previousRow ? rowKey(previousRow) : (data.rows[0] ? rowKey(data.rows[0]) : null));
+      : (previousRow ? rowKey(previousRow) : (wbData.rows[0] ? rowKey(wbData.rows[0]) : null));
+    
     renderTable();
+    if (state.calculationResults) {
+      renderCalculatedResultsSection(state.calculationResults);
+    }
     renderHeader();
     scrollSelectedRowIntoView();
   }
@@ -470,8 +745,6 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!shouldSaveMonthly && !shouldSaveWorkbookValues) return;
 
     try {
-      btnSave.disabled = true;
-      btnSave.textContent = "Saving...";
       if (shouldSaveWorkbookValues) {
         const values = {};
         state.dirtyWorkbookFields.forEach(fieldCode => {
@@ -513,11 +786,11 @@ document.addEventListener("DOMContentLoaded", function () {
               reporting_period_id: row.period_id
             })
           });
-          const createData = await parseJsonResponse(createResponse, "Could not create draft for this month.");
+          const createData = await parseJsonResponse(createResponse, "Could not create draft.");
           if (createResponse.status === 409 && createData.existing_id) {
             submissionId = createData.existing_id;
           } else if (!createResponse.ok) {
-            throw new Error(createData.error || "Could not create draft for this month.");
+            throw new Error(createData.error || "Could not create draft.");
           } else {
             submissionId = createData.data.submission_id;
           }
@@ -539,14 +812,19 @@ document.addEventListener("DOMContentLoaded", function () {
         row.values = saveData.data && saveData.data.values ? saveData.data.values : row.values;
         state.dirtyRows.delete(rowKey(row));
       }
+      
+      // Reload calculations results to update calculated section
+      const calcUrl = `/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${state.selectedSiteId}&fy=${state.selectedFy}`;
+      const calcRes = await fetch(calcUrl);
+      state.calculationResults = calcRes.ok ? await calcRes.json() : null;
+
       renderTable();
+      if (state.calculationResults) {
+        renderCalculatedResultsSection(state.calculationResults);
+      }
       renderHeader();
-      showAlert("Workbook draft saved.", "success");
     } catch (error) {
       showAlert(error.message, "error");
-    } finally {
-      btnSave.textContent = "Save draft";
-      renderHeader();
     }
   }
 
@@ -582,13 +860,82 @@ document.addEventListener("DOMContentLoaded", function () {
       }
       const included = data.data && data.data.included_submissions ? data.data.included_submissions.length : 0;
       showAlert(`Workbook package submitted for approval. ${included} sheet${included === 1 ? "" : "s"} included.`, "success");
+      
+      // Update sheets status dots data
+      const sheetsRes = await fetch("/module/SUBMIT/api/sheets");
+      state.dashboardData = sheetsRes.ok ? await sheetsRes.json() : null;
+      
       await loadWorkbook();
     } catch (error) {
       showAlert(error.message, "error");
     } finally {
-      btnSubmit.textContent = "Submit selected month package";
+      const sheetName = state.workbook ? state.workbook.selected_form.name : "Sheet";
+      btnSubmit.textContent = `Submit ${sheetName}`;
       renderHeader();
     }
+  }
+
+  // Handle hidden file uploader programmatical changes
+  const inlineUploader = document.getElementById("inline-file-uploader");
+  if (inlineUploader) {
+    inlineUploader.addEventListener("change", async function () {
+      const file = inlineUploader.files[0];
+      if (!file || !state.workbook) return;
+
+      const rowKeyVal = inlineUploader.dataset.targetRowKey;
+      const fieldCode = inlineUploader.dataset.targetFieldCode;
+      const row = state.workbook.rows.find(r => rowKey(r) === rowKeyVal);
+      if (!row) return;
+
+      try {
+        showAlert("Uploading proof document...", "info");
+        
+        let submissionId = row.submission_id;
+        if (!submissionId) {
+          if (!row.period_id) {
+            throw new Error("A reporting period must exist before a document can be uploaded.");
+          }
+          const createResponse = await fetch("/module/SUBMIT/api/submissions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              site_id: state.workbook.site.id,
+              form_id: state.workbook.selected_form.id,
+              reporting_period_id: row.period_id
+            })
+          });
+          const createData = await parseJsonResponse(createResponse, "Could not create draft.");
+          if (createResponse.status === 409 && createData.existing_id) {
+            submissionId = createData.existing_id;
+          } else if (!createResponse.ok) {
+            throw new Error(createData.error || "Could not create draft.");
+          } else {
+            submissionId = createData.data.submission_id;
+          }
+          row.submission_id = submissionId;
+          row.submission_status = "Draft";
+        }
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const uploadResponse = await fetch(`/module/SUBMIT/api/submissions/${submissionId}/proof/${fieldCode}`, {
+          method: "POST",
+          body: formData
+        });
+        const uploadData = await parseJsonResponse(uploadResponse, "Could not upload file.");
+        if (!uploadResponse.ok) {
+          throw new Error(uploadData.error || "Could not upload file.");
+        }
+
+        showAlert("Proof uploaded successfully.", "success");
+        
+        // Refresh workbook data
+        await loadWorkbook();
+      } catch (error) {
+        showAlert(error.message, "error");
+      }
+    });
   }
 
   siteSelect.addEventListener("change", function () {
@@ -604,7 +951,10 @@ document.addEventListener("DOMContentLoaded", function () {
     loadWorkbook().catch(error => showAlert(error.message, "error"));
   });
 
-  btnSave.addEventListener("click", saveSelectedRow);
+  btnSave.addEventListener("click", async function() {
+    await saveSelectedRow();
+    showAlert("Workbook draft saved.", "success");
+  });
   btnSubmit.addEventListener("click", submitSelectedRow);
   [btnCloseCellDetail, btnCancelCellDetail].forEach(button => {
     if (button) button.addEventListener("click", closeCellDetail);
