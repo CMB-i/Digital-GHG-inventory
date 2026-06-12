@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Notifications - Digital GHG Inventory{% endblock %}
 {% block content %}
-<section class="space-y-6">
+<section class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-semibold text-slate-900">Notifications</h1>
+      <h1 class="page-title">Notifications</h1>
       <p class="mt-1 text-sm text-slate-500">View and manage your in-app workflow notifications.</p>
     </div>
     {% if notifications %}
-    <button id="btn-page-mark-all-read" class="text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition-colors">
+    <button id="btn-page-mark-all-read" class="text-xs font-medium text-slate-500 underline-offset-2 hover:text-indigo-700 hover:underline transition-colors">
       Mark all as read
     </button>
     {% endif %}
@@ -21,26 +21,30 @@
   {% else %}
     <div class="bg-white border border-slate-200 rounded-lg divide-y divide-slate-100 overflow-hidden shadow-sm">
       {% for n in notifications %}
+      {% set event_type = (n.event_type or "") | lower %}
+      {% if "approved" in event_type %}
+        {% set accent_class = "bg-emerald-700" %}
+      {% elif "reject" in event_type or "sent" in event_type or "change" in event_type or "correction" in event_type %}
+        {% set accent_class = "bg-red-jsw" %}
+      {% else %}
+        {% set accent_class = "bg-indigo-600" %}
+      {% endif %}
       <div class="p-4 flex items-start justify-between hover:bg-slate-50/50 transition-colors {% if not n.is_read %}bg-indigo-50/20{% endif %}" id="notification-row-{{ n.id }}">
         <div class="flex items-start space-x-3 pr-4 flex-1">
-          {% if not n.is_read %}
-          <span class="mt-2 h-2 w-2 rounded-full bg-indigo-600 flex-shrink-0" id="notification-dot-{{ n.id }}" title="Unread"></span>
-          {% else %}
-          <span class="mt-2 h-2 w-2 rounded-full bg-transparent flex-shrink-0"></span>
-          {% endif %}
+          <span class="mt-2 h-2 w-2 rounded-full {{ accent_class }} flex-shrink-0 {% if n.is_read %}opacity-40{% endif %}" id="notification-dot-{{ n.id }}" title="{{ n.event_type }}"></span>
           <div class="space-y-1 flex-1">
-            <p class="text-sm text-slate-800">
+            <p class="data-value">
               <a href="{{ n.link_url }}" class="hover:text-indigo-600 font-medium transition-colors page-notification-link" data-id="{{ n.id }}" data-url="{{ n.link_url }}">
                 {{ n.message }}
               </a>
             </p>
-            <p class="text-xs text-slate-400">
+            <p class="text-timestamp whitespace-nowrap">
               {{ n.created_at | local_datetime }}
             </p>
           </div>
         </div>
         {% if not n.is_read %}
-        <button class="btn-page-mark-read text-xs text-indigo-600 hover:text-indigo-800 font-semibold transition-colors ml-4 flex-shrink-0" data-id="{{ n.id }}" id="notification-btn-{{ n.id }}">
+        <button class="btn-page-mark-read text-xs text-indigo-600 hover:text-indigo-800 font-normal transition-colors ml-4 flex-shrink-0" data-id="{{ n.id }}" id="notification-btn-{{ n.id }}">
           Mark as read
         </button>
         {% endif %}
@@ -68,7 +72,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     // Update UI locally
                     const dot = document.getElementById(`notification-dot-${id}`);
                     if (dot) {
-                        dot.className = "mt-2 h-2 w-2 rounded-full bg-transparent flex-shrink-0";
+                        dot.classList.add("opacity-40");
                     }
                     const row = document.getElementById(`notification-row-${id}`);
                     if (row) {

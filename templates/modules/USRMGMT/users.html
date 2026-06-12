@@ -2,9 +2,9 @@
 {% block title %}Users - Digital GHG Inventory{% endblock %}
 
 {% block content %}
-<section class="space-y-6">
+<section class="space-y-4">
   <div>
-    <h1 class="text-2xl font-semibold">Users</h1>
+    <h1 class="page-title">Users</h1>
     <p class="mt-2 text-sm text-slate-600">Identity records only. Permissions are assigned in Access Matrix.</p>
   </div>
 
@@ -39,7 +39,7 @@
       <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="temporary_password" name="temporary_password" type="password" required>
     </div>
     <div class="flex items-end">
-      <button class="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white" type="submit">Create User</button>
+      <button class="btn btn-primary w-full justify-center" type="submit">Create User</button>
     </div>
   </form>
 
@@ -48,7 +48,6 @@
       <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
         <tr>
           <th class="px-4 py-3">User</th>
-          <th class="px-4 py-3">Phone</th>
           <th class="px-4 py-3">Active</th>
           <th class="px-4 py-3">Last login</th>
           <th class="px-4 py-3">Actions</th>
@@ -62,20 +61,11 @@
               <input class="rounded-md border border-slate-300 px-3 py-2" name="full_name" value="{{ user.full_name }}" required>
               <input class="rounded-md border border-slate-300 px-3 py-2" name="email" type="email" value="{{ user.email }}" required>
               <input type="hidden" name="phone" value="{{ user.phone or '' }}">
-              <button class="md:col-span-2 rounded-md border border-slate-300 px-3 py-2 text-xs font-medium" type="submit">Save details</button>
+              <button class="btn btn-outline btn-sm md:col-span-2 justify-center" type="submit">Save details</button>
             </form>
           </td>
           <td class="px-4 py-3 align-top">
-            <form class="space-y-2" method="post" action="{{ url_for('usrmgmt.edit', user_id=user.id) }}">
-              <input type="hidden" name="full_name" value="{{ user.full_name }}">
-              <input type="hidden" name="email" value="{{ user.email }}">
-              <input class="w-48 rounded-md border border-slate-300 px-3 py-2" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="9876543210" value="{{ user.phone or '' }}" pattern="[0-9]{10}" maxlength="10" data-indian-mobile>
-              <p class="text-xs text-slate-500">Enter a 10-digit phone number.</p>
-              <button class="block rounded-md border border-slate-300 px-3 py-2 text-xs font-medium" type="submit">Save phone</button>
-            </form>
-          </td>
-          <td class="px-4 py-3 align-top">
-            <span class="inline-flex rounded-full px-2 py-1 text-xs font-medium {% if user.is_active %}bg-emerald-50 text-emerald-700{% else %}bg-slate-100 text-slate-600{% endif %}">
+            <span class="inline-flex rounded-full px-2 py-1 text-sm font-normal {% if user.is_active %}bg-emerald-50 text-emerald-700{% else %}bg-slate-100 text-slate-600{% endif %}">
               {{ "Active" if user.is_active else "Inactive" }}
             </span>
           </td>
@@ -84,11 +74,11 @@
             <div class="space-y-2">
               <form class="flex gap-2" method="post" action="{{ url_for('usrmgmt.password', user_id=user.id) }}">
                 <input class="w-44 rounded-md border border-slate-300 px-3 py-2" name="temporary_password" type="password" placeholder="New temp password" required>
-                <button class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium" type="submit">Set</button>
+                <button class="btn btn-neutral btn-sm" type="submit">Set</button>
               </form>
               <form method="post" action="{{ url_for('usrmgmt.toggle_active', user_id=user.id) }}">
                 <input type="hidden" name="is_active" value="{{ 'false' if user.is_active else 'true' }}">
-                <button class="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium" type="submit">
+                <button class="btn btn-sm {% if user.is_active %}btn-danger{% else %}btn-outline{% endif %}" type="submit">
                   {{ "Deactivate" if user.is_active else "Activate" }}
                 </button>
               </form>

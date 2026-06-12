@@ -265,39 +265,41 @@ document.addEventListener("DOMContentLoaded", function () {
           let statusBadge = "";
           const status = form.latest_version_status || "Draft";
           if (status === "Published") {
-            statusBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 uppercase">Published</span>';
+            statusBadge = '<span class="status-badge status-badge-success">Published</span>';
           } else if (status === "Archived") {
-            statusBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-800 uppercase">Archived</span>';
+            statusBadge = '<span class="status-badge status-badge-neutral">Archived</span>';
           } else {
-            statusBadge = '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 uppercase">Draft</span>';
+            statusBadge = '<span class="status-badge status-badge-warning">Draft</span>';
           }
 
           let workflowBadge = "";
           if (form.workflow_id) {
-            workflowBadge = '<span class="inline-flex items-center ml-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-150 uppercase">Workflow: Assigned</span>';
+            workflowBadge = '<span class="text-context text-emerald-700">Workflow assigned</span>';
           } else {
-            workflowBadge = '<span class="inline-flex items-center ml-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-150 uppercase">Workflow: Not assigned</span>';
+            workflowBadge = '<span class="text-context text-rose-700">Workflow not assigned</span>';
           }
 
           // Actions
           let actions = [];
           if (status === "Draft" && form.latest_version_id) {
-            actions.push(`<button onclick="editFormDetails(${form.id})" class="text-indigo-600 hover:text-indigo-900 font-bold hover:underline mr-3">Edit Details</button>`);
-            actions.push(`<button onclick="editFormLayout(${form.id}, ${form.latest_version_id})" class="text-indigo-600 hover:text-indigo-900 font-bold hover:underline mr-3">Edit Layout</button>`);
+            actions.push(`<button onclick="editFormDetails(${form.id})" class="text-label text-indigo-600 hover:text-indigo-900 hover:underline mr-3">Edit Details</button>`);
+            actions.push(`<button onclick="editFormLayout(${form.id}, ${form.latest_version_id})" class="btn btn-outline btn-sm mr-3">Edit Layout</button>`);
           } else if (status === "Published") {
-            actions.push(`<button onclick="createNewDraft(${form.id})" class="text-indigo-600 hover:text-indigo-900 font-bold hover:underline mr-3">New Draft Version</button>`);
+            actions.push(`<button onclick="createNewDraft(${form.id})" class="btn btn-outline btn-sm mr-3">New Draft Version</button>`);
           }
           
           if (form.latest_version_id) {
-            actions.push(`<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="text-slate-600 hover:text-slate-900 font-bold hover:underline">Preview</button>`);
+            actions.push(`<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="text-label hover:text-slate-900 hover:underline">Preview</button>`);
           }
 
           tr.innerHTML = `
-            <td class="px-6 py-4 font-bold text-slate-800">${form.display_name || form.name}</td>
-            <td class="px-6 py-4 font-mono text-slate-500">${form.gri_code || "—"}</td>
+            <td class="px-6 py-4 card-title">${form.display_name || form.name}</td>
+            <td class="px-6 py-4 font-mono text-context">${form.gri_code || "—"}</td>
             <td class="px-6 py-4 text-slate-500 truncate max-w-xs" title="${sitesText}">${sitesText}</td>
             <td class="px-6 py-4 text-slate-500">${form.frequency || "Monthly"}</td>
-            <td class="px-6 py-4 flex flex-wrap items-center gap-1">${statusBadge} ${workflowBadge}</td>
+            <td class="px-6 py-4">
+              <div class="flex flex-col gap-1">${statusBadge} ${workflowBadge}</div>
+            </td>
             <td class="px-6 py-4 text-slate-500 font-semibold">v${form.latest_version_num || 1}</td>
             <td class="px-6 py-4 text-right whitespace-nowrap">${actions.join("")}</td>
           `;
@@ -580,12 +582,12 @@ document.addEventListener("DOMContentLoaded", function () {
       saveStatusText.textContent = "Unsaved changes *";
       saveStatusText.className = "text-xs text-amber-600 font-bold animate-pulse";
       btnSaveLayout.disabled = false;
-      btnSaveLayout.className = "inline-flex items-center justify-center px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm transition";
+      btnSaveLayout.className = "btn btn-primary btn-sm";
     } else {
       saveStatusText.textContent = "All changes saved";
       saveStatusText.className = "text-xs text-slate-400 font-medium";
       btnSaveLayout.disabled = true;
-      btnSaveLayout.className = "inline-flex items-center justify-center px-4 py-1.5 bg-slate-100 text-slate-400 text-xs font-bold rounded-lg cursor-not-allowed";
+      btnSaveLayout.className = "btn btn-neutral btn-sm cursor-not-allowed";
     }
   }
 

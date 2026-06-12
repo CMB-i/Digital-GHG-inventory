@@ -25,6 +25,20 @@ document.addEventListener("DOMContentLoaded", () => {
         return date.toLocaleDateString("en-IN", { day: 'numeric', month: 'short' });
     }
 
+    function accentClass(eventType) {
+        const normalized = String(eventType || "").toLowerCase();
+        if (normalized.includes("approved")) return "bg-emerald-700";
+        if (
+            normalized.includes("reject") ||
+            normalized.includes("sent") ||
+            normalized.includes("change") ||
+            normalized.includes("correction")
+        ) {
+            return "bg-red-jsw";
+        }
+        return "bg-indigo-600";
+    }
+
     // Update unread count badge
     async function updateNotificationBell() {
         try {
@@ -82,10 +96,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     row.dataset.url = n.link_url;
 
                     row.innerHTML = `
-                        <span class="mt-1.5 h-1.5 w-1.5 rounded-full ${!n.is_read ? 'bg-indigo-600' : 'bg-transparent'} flex-shrink-0"></span>
+                        <span class="mt-1.5 h-1.5 w-1.5 rounded-full ${accentClass(n.event_type)} ${n.is_read ? 'opacity-40' : ''} flex-shrink-0"></span>
                         <div class="flex-1 space-y-0.5 min-w-0">
-                            <p class="text-slate-700 leading-normal ${!n.is_read ? 'font-medium' : ''}">${n.message}</p>
-                            <p class="text-[10px] text-slate-400">${formatTime(n.created_at)}</p>
+                            <p class="ghg-line-clamp-2 text-slate-700 leading-normal ${!n.is_read ? 'font-medium' : ''}">${n.message}</p>
+                            <p class="whitespace-nowrap text-xs text-slate-400">${formatTime(n.created_at)}</p>
                         </div>
                     `;
 
