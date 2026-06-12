@@ -31,8 +31,8 @@
     </div>
     <div>
       <label class="text-xs font-medium text-slate-600" for="phone">Phone</label>
-      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="9876543210" pattern="[6-9][0-9]{9}" maxlength="10" data-indian-mobile>
-      <p class="mt-1 text-xs text-slate-500">Enter a 10-digit Indian mobile number.</p>
+      <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="9876543210" pattern="[0-9]{10}" maxlength="10" data-indian-mobile>
+      <p class="mt-1 text-xs text-slate-500">Enter a 10-digit phone number.</p>
     </div>
     <div>
       <label class="text-xs font-medium text-slate-600" for="temporary_password">Temporary password</label>
@@ -69,8 +69,8 @@
             <form class="space-y-2" method="post" action="{{ url_for('usrmgmt.edit', user_id=user.id) }}">
               <input type="hidden" name="full_name" value="{{ user.full_name }}">
               <input type="hidden" name="email" value="{{ user.email }}">
-              <input class="w-48 rounded-md border border-slate-300 px-3 py-2" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="9876543210" value="{{ user.phone or '' }}" pattern="[6-9][0-9]{9}" maxlength="10" data-indian-mobile>
-              <p class="text-xs text-slate-500">Enter a 10-digit Indian mobile number.</p>
+              <input class="w-48 rounded-md border border-slate-300 px-3 py-2" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="9876543210" value="{{ user.phone or '' }}" pattern="[0-9]{10}" maxlength="10" data-indian-mobile>
+              <p class="text-xs text-slate-500">Enter a 10-digit phone number.</p>
               <button class="block rounded-md border border-slate-300 px-3 py-2 text-xs font-medium" type="submit">Save phone</button>
             </form>
           </td>

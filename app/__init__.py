@@ -105,7 +105,7 @@ def create_app(config_class=Config):
         from app.modules.RPTBLD.service import _get_user_allowed_sites, get_missing_submissions
         from app.modules.FORMBLD.model import Form
         from app.modules.APPROV.service import get_approver_queue, get_actioned_history
-        from app.modules.SUBMIT.service import get_spoc_sheets_buckets
+        from app.modules.SUBMIT.service import get_spoc_sheets_buckets, human_sheet_label
 
         capabilities = build_user_capabilities(user)
         allowed_site_ids, is_global = _get_user_allowed_sites(user.id, "submission")
@@ -157,7 +157,7 @@ def create_app(config_class=Config):
             recent_submissions = recent_query.order_by(Submission.updated_at.desc()).limit(5).all()
 
         sites_map = {s.id: s.name for s in Site.query.filter_by(is_deleted=False).all()}
-        forms_map = {f.id: f.name for f in Form.query.filter_by(is_deleted=False).all()}
+        forms_map = {f.id: human_sheet_label(f) for f in Form.query.filter_by(is_deleted=False).all()}
 
         recent_activities = []
         for sub in recent_submissions:
@@ -181,7 +181,7 @@ def create_app(config_class=Config):
         if capabilities["can_contribute"]:
             sheet_buckets = get_spoc_sheets_buckets(user.id)
             my_work_items.extend(
-                dashboard_sheet_item(item, "Fix issue" if item["status"] == "Changes Requested" else "Continue sheet")
+                dashboard_sheet_item(item, "Continue workbook")
                 for item in sheet_buckets.get("action_needed", [])
             )
             my_work_items.extend(
@@ -366,7 +366,7 @@ def build_nav_items(user):
             "label": None,
             "items": [
                 {
-                    "label": "My Work",
+                    "label": "My Workbooks",
                     "href": "/module/SUBMIT/",
                     "visible": capabilities["can_contribute"],
                 },
@@ -396,22 +396,22 @@ def build_nav_items(user):
                     "visible": capabilities["can_manage_setup"] and user_can(user, "site", "view"),
                 },
                 {
-                    "label": "Workbook Formats",
+                    "label": "Workbook Builder",
                     "href": "/module/FORMBLD/",
                     "visible": capabilities["can_manage_setup"] and user_can(user, "form", "manage_forms"),
                 },
                 {
-                    "label": "Constants & Lookup Tables",
+                    "label": "Value Sets",
                     "href": "/module/VALSET/",
                     "visible": capabilities["can_manage_setup"] and user_can(user, "value_set", "view"),
                 },
                 {
-                    "label": "Automatic Calculations",
+                    "label": "Formula Builder",
                     "href": "/module/FRMULA/",
                     "visible": capabilities["can_manage_setup"] and user_can(user, "formula", "view"),
                 },
                 {
-                    "label": "Approval Paths",
+                    "label": "Workflow Paths",
                     "href": "/module/WFLWBLD/",
                     "visible": capabilities["can_manage_setup"] and user_can(user, "workflow", "view"),
                 },
@@ -421,7 +421,7 @@ def build_nav_items(user):
             "label": "Operations",
             "items": [
                 {
-                    "label": "Reporting Calendar",
+                    "label": "Reporting Periods",
                     "href": "/module/PERIOD/",
                     "visible": capabilities["can_manage_setup"] and user_can(user, "period", "view"),
                 },
@@ -462,15 +462,15 @@ def build_dashboard_cards(user):
             "visible": capabilities["can_manage_setup"] and user_can(user, "site", "view"),
         },
         {
-            "title": "Workbook Formats",
+            "title": "Workbook Builder",
             "href": "/module/FORMBLD/",
-            "description": "Build reusable sheet structures for site reporting.",
+            "description": "Build reusable workbook and sheet structures for site reporting.",
             "visible": capabilities["can_manage_setup"] and user_can(user, "form", "manage_forms"),
         },
         {
-            "title": "Approval Paths",
+            "title": "Workflow Paths",
             "href": "/module/WFLWBLD/",
-            "description": "Decide who reviews and approves each site monthly package.",
+            "description": "Configure who reviews and approves each site monthly package.",
             "visible": capabilities["can_manage_setup"] and user_can(user, "workflow", "view"),
         },
         {
@@ -498,11 +498,11 @@ def build_setup_checklist():
             ReportingPeriod.query.filter_by(is_deleted=False, status="OPEN").count() > 0,
         ),
         (
-            "Constants and lookup tables approved",
+            "Value Sets approved",
             ValueSetVersion.query.filter_by(status="Approved").count() > 0,
         ),
         (
-            "Automatic calculations published",
+            "Formula Builder rules published",
             FormulaVersion.query.filter(FormulaVersion.published_at.is_not(None)).count() > 0,
         ),
         (
@@ -510,7 +510,7 @@ def build_setup_checklist():
             FormVersion.query.filter(FormVersion.published_at.is_not(None)).count() > 0,
         ),
         (
-            "Approval paths assigned",
+            "Workflow Paths assigned",
             WorkflowLevelApprover.query.filter_by(is_deleted=False).count() > 0,
         ),
         (

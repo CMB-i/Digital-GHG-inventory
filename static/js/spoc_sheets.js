@@ -237,7 +237,7 @@ document.addEventListener("DOMContentLoaded", function () {
           </dl>
         </div>
         <a href="${workbookUrl(summary, summary.firstFormId)}" class="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-bold text-white shadow-sm hover:bg-slate-800">
-          Open Workbook
+          Open workbook
         </a>
       </article>
     `).join("");
