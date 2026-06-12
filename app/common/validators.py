@@ -2,7 +2,7 @@ import re
 
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-PHONE_RE = re.compile(r"^[0-9]{10}$")
+INDIAN_MOBILE_RE = re.compile(r"^[6-9][0-9]{9}$")
 SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9 .,'_-]+$")
 CODE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -38,8 +38,8 @@ def validate_phone(value):
     if not phone:
         return None
 
-    if not PHONE_RE.fullmatch(phone):
-        raise ValidationError("Enter a valid 10-digit phone number.")
+    if not INDIAN_MOBILE_RE.fullmatch(phone):
+        raise ValidationError("Enter a valid 10-digit Indian mobile number.")
     return phone
 
 
