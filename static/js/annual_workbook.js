@@ -24,6 +24,13 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnCancelCellDetail = document.getElementById("btn-cancel-cell-detail");
   const initialParams = new URLSearchParams(window.location.search);
 
+  const currentMonthEl = document.getElementById("workbook-current-month");
+
+  function getMonthName(m) {
+    const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return months[parseInt(m, 10)] || "";
+  }
+
   let autosaveTimeout = null;
   let lastSavedTime = null;
 
@@ -244,7 +251,7 @@ document.addEventListener("DOMContentLoaded", function () {
       const button = document.createElement("button");
       button.type = "button";
       const active = String(form.id) === String(state.selectedFormId);
-      button.className = `border px-3 py-1.5 text-xs font-bold transition flex items-center gap-1.5 ${
+      button.className = `border px-3 py-1.5 text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
         active
           ? "border-navy bg-navy text-white"
           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
@@ -267,7 +274,7 @@ document.addEventListener("DOMContentLoaded", function () {
       const calcButton = document.createElement("button");
       calcButton.type = "button";
       const calcActive = state.selectedFormId === "calc_results";
-      calcButton.className = `border px-3 py-1.5 text-xs font-bold transition ${
+      calcButton.className = `border px-3 py-1.5 text-xs font-bold transition whitespace-nowrap ${
         calcActive
           ? "border-navy bg-navy text-white"
           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
@@ -330,6 +337,20 @@ document.addEventListener("DOMContentLoaded", function () {
     siteNameEl.textContent = site ? site.name : "Select a site";
     fyLabelEl.textContent = `FY ${state.selectedFy}-${String(state.selectedFy + 1).slice(-2)}`;
 
+    // Set current month badge
+    if (currentMonthEl) {
+      const activeRow = state.workbook && state.workbook.rows
+        ? state.workbook.rows.find(row => row.is_active_period)
+        : null;
+      if (activeRow) {
+        const mName = activeRow.label || getMonthName(activeRow.month);
+        currentMonthEl.textContent = `CURRENT MONTH : ${mName.toUpperCase()}`;
+        currentMonthEl.classList.remove("hidden");
+      } else {
+        currentMonthEl.classList.add("hidden");
+      }
+    }
+
     // Set Sheet specific label for Submit button
     const btnSubmitEl = document.getElementById("btn-submit-sheet");
     const sheetName = state.workbook ? state.workbook.selected_form.name : "Sheet";
@@ -338,8 +359,10 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (state.selectedFormId === "calc_results") {
-      selectedStatusEl.textContent = "Calculation Results";
-      selectedStatusEl.className = "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 border border-slate-200";
+      if (selectedStatusEl) {
+        selectedStatusEl.textContent = "Calculation Results";
+        selectedStatusEl.className = "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 border border-slate-200";
+      }
       lastSavedEl.textContent = "Read-only calculation dashboard for this financial year.";
       btnSave.disabled = true;
       btnSubmit.disabled = true;
@@ -348,8 +371,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const row = selectedRow();
     if (!row) {
-      selectedStatusEl.textContent = "No month selected";
-      selectedStatusEl.className = "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600";
+      if (selectedStatusEl) {
+        selectedStatusEl.textContent = "No month selected";
+        selectedStatusEl.className = "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600";
+      }
       lastSavedEl.textContent = "Select a month row to save or submit.";
       btnSave.disabled = state.dirtyWorkbookFields.size === 0;
       btnSubmit.disabled = true;
@@ -357,14 +382,16 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     const status = row.submission_status || row.status || row.period_status || "Not Started";
-    selectedStatusEl.textContent = `${row.label}: ${status}`;
-    selectedStatusEl.className = "rounded-full px-2.5 py-1 text-xs font-semibold ";
-    if (status === "Approved") {
-      selectedStatusEl.classList.add("bg-emerald-100", "text-emerald-700");
-    } else if (row.editability && row.editability.editable) {
-      selectedStatusEl.classList.add("bg-blue-100", "text-blue-700");
-    } else {
-      selectedStatusEl.classList.add("bg-slate-100", "text-slate-600");
+    if (selectedStatusEl) {
+      selectedStatusEl.textContent = `${row.label}: ${status}`;
+      selectedStatusEl.className = "rounded-full px-2.5 py-1 text-xs font-semibold ";
+      if (status === "Approved") {
+        selectedStatusEl.classList.add("bg-emerald-100", "text-emerald-700");
+      } else if (row.editability && row.editability.editable) {
+        selectedStatusEl.classList.add("bg-blue-100", "text-blue-700");
+      } else {
+        selectedStatusEl.classList.add("bg-slate-100", "text-slate-600");
+      }
     }
 
     lastSavedEl.textContent = row.last_saved ? `Last saved ${formatDateTime(row.last_saved)}` : row.editability.reason;
@@ -510,10 +537,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
     calcSection.classList.remove("hidden");
 
+    const getMonthName = (m) => {
+      const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return months[parseInt(m, 10)] || "";
+    };
+
     calcHead.innerHTML = `
-      <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white">Month</th>
+      <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white w-[100px] min-w-[100px] max-w-[100px]">Month</th>
       ${calcFields.map(field => `
-        <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white">
+        <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white min-w-[180px]">
           <div class="font-bold">${escapeHtml(field.field_name.split(" (")[0])}</div>
           ${field.field_config && field.field_config.unit ? `<div class="text-[10px] text-slate-300 font-semibold normal-case">${escapeHtml(field.field_config.unit)}</div>` : ""}
         </th>
@@ -532,7 +564,9 @@ document.addEventListener("DOMContentLoaded", function () {
       const status = row.submission_status || row.status || row.period_status || "Not Started";
       let monthBgClass = "";
       let lockSuffix = "";
-      if (status === "Approved") {
+      if (row.is_active_period) {
+        monthBgClass = "bg-white text-[#1a3a6b] border-l-[3px] border-l-[#1a3a6b]";
+      } else if (status === "Approved") {
         monthBgClass = "bg-[#e6f4ea] text-[#137333] border-l-4 border-l-[#137333]";
         lockSuffix = " 🔒";
       } else if (row.is_locked || status === "Locked") {
@@ -556,19 +590,19 @@ document.addEventListener("DOMContentLoaded", function () {
 
       return `
         <tr class="${rowClass} border-b border-slate-200">
-          <td class="border border-slate-300 px-3 py-2.5 font-bold ${monthBgClass}">${escapeHtml(row.label || row.period_label)}${lockSuffix}</td>
+          <td class="w-[100px] min-w-[100px] max-w-[100px] border border-slate-300 px-3 py-2.5 font-bold ${monthBgClass}">${escapeHtml(row.label || getMonthName(row.month) || row.period_label)}${lockSuffix}</td>
           ${calcFields.map(field => {
             const cell = row.values ? row.values[field.field_code] : null;
             if (!cell) {
-              return `<td class="border border-slate-300 px-3 py-2.5 text-slate-400 italic bg-slate-100/50">—</td>`;
+              return `<td class="border border-slate-300 px-3 py-2.5 text-slate-400 italic bg-slate-100/50 min-w-[180px]">—</td>`;
             }
             if (cell.status === "not_configured") {
-              return `<td class="border border-slate-300 px-3 py-2.5 text-slate-400 italic bg-slate-100/50">Not configured</td>`;
+              return `<td class="border border-slate-300 px-3 py-2.5 text-slate-400 italic bg-slate-100/50 min-w-[180px]">Not configured</td>`;
             }
             if (cell.status === "missing_input") {
               const warningText = Array.isArray(cell.warnings) ? cell.warnings.join(" | ") : "Missing input";
               return `
-                <td class="border border-slate-300 px-3 py-2.5 text-slate-500 bg-slate-100/50">
+                <td class="border border-slate-300 px-3 py-2.5 text-slate-500 bg-slate-100/50 min-w-[180px]">
                   <div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 px-2 py-1">${escapeHtml(warningText)}</div>
                 </td>
               `;
@@ -576,7 +610,7 @@ document.addEventListener("DOMContentLoaded", function () {
             if (cell.status === "evaluation_error") {
               const warningText = Array.isArray(cell.warnings) ? cell.warnings.join(" | ") : "Error";
               return `
-                <td class="border border-slate-300 px-3 py-2.5 text-rose-700 bg-rose-50/50">
+                <td class="border border-slate-300 px-3 py-2.5 text-rose-700 bg-rose-50/50 min-w-[180px]">
                   <div class="text-[11px] font-semibold">${escapeHtml(warningText)}</div>
                 </td>
               `;
@@ -589,7 +623,7 @@ document.addEventListener("DOMContentLoaded", function () {
               : `<span class="inline-flex items-center rounded bg-blue-50 px-1 py-0.5 text-[9px] font-bold text-blue-600 border border-blue-100">Preview</span>`;
               
             return `
-              <td class="border border-slate-300 px-3 py-2.5 font-semibold text-slate-900 bg-slate-50">
+              <td class="border border-slate-300 px-3 py-2.5 font-semibold text-slate-900 bg-slate-50 min-w-[180px]">
                 <div class="flex items-center justify-between gap-2">
                   <span>${escapeHtml(displayVal)}</span>
                   ${badge}

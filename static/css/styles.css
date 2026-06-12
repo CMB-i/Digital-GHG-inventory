@@ -894,11 +894,16 @@ body[data-theme="jsw-excel"] .changes_requested {
   border-color: var(--ghg-danger-text);
 }
 
-body[data-theme="jsw-excel"] .bg-amber-100,
-body[data-theme="jsw-excel"] .draft_filled {
+body[data-theme="jsw-excel"] .bg-amber-100 {
   background: var(--ghg-warning-bg);
   color: var(--ghg-warning-text);
   border-color: var(--ghg-warning-text);
+}
+
+body[data-theme="jsw-excel"] .draft_filled {
+  background: var(--ghg-info-bg);
+  color: var(--ghg-navy);
+  border-color: var(--ghg-navy);
 }
 
 body[data-theme="jsw-excel"] .bg-emerald-100,
@@ -961,4 +966,27 @@ body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] > div.rela
 
 body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] div.px-2.py-2 {
   padding: 14px 12px !important;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap table,
+body[data-theme="jsw-excel"] #calculated-results-section table {
+  table-layout: fixed !important;
+  width: 100% !important;
+}
+
+/* Dark blue border around the active reporting row */
+body[data-theme="jsw-excel"] #workbook-table-wrap tr.active-reporting-row td,
+body[data-theme="jsw-excel"] #calculated-results-section tr.active-reporting-row td {
+  border-top: 3px solid var(--ghg-navy) !important;
+  border-bottom: 3px solid var(--ghg-navy) !important;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap tr.active-reporting-row td:first-child,
+body[data-theme="jsw-excel"] #calculated-results-section tr.active-reporting-row td:first-child {
+  border-left: 3px solid var(--ghg-navy) !important;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap tr.active-reporting-row td:last-child,
+body[data-theme="jsw-excel"] #calculated-results-section tr.active-reporting-row td:last-child {
+  border-right: 3px solid var(--ghg-navy) !important;
 }

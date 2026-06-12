@@ -17,6 +17,11 @@
       .replace(/'/g, "&#039;");
   }
 
+  function getMonthName(month) {
+    const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return months[parseInt(month, 10)] || "";
+  }
+
   function rowKey(row) {
     return row.row_key || `${row.year || "row"}-${row.month || row.submission_id || "0"}`;
   }
@@ -398,7 +403,7 @@
     }
 
     return `
-      <td class="min-w-[180px] border px-3 py-3 align-middle bg-slate-50/50">
+      <td class="w-[140px] min-w-[140px] max-w-[140px] border px-3 py-3 align-middle bg-slate-50/50">
         ${content}
       </td>
     `;
@@ -555,25 +560,30 @@
       ).length;
     };
 
-    if (hasSections && monthlyGroups.length > 0) {
-      const activeGroups = monthlyGroups.filter(g => getGroupColspan(g) > 0);
+    const activeGroups = hasSections ? monthlyGroups.filter(g => getGroupColspan(g) > 0) : [];
+    const hasVisibleGroups = activeGroups.some(g => g.name.toLowerCase() !== "ungrouped");
+
+    if (hasSections && monthlyGroups.length > 0 && hasVisibleGroups) {
       headEl.innerHTML = `
         <tr>
-          <th rowspan="2" class="sticky left-0 z-20 min-w-[120px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Month</th>
-          ${activeGroups.map((group) => `
-            <th colspan="${getGroupColspan(group)}" class="border border-slate-200 bg-slate-100 px-3 py-1.5 text-center font-extrabold text-slate-700 tracking-wide uppercase text-xs">
-              ${escapeHtml(group.name)}
-            </th>
-          `).join("")}
-          ${!isCalcMode ? '<th rowspan="2" class="min-w-[180px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Remarks & Proof</th>' : ""}
+          <th rowspan="2" class="sticky left-0 z-20 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Month</th>
+          ${activeGroups.map((group) => {
+            const isUngrouped = group.name.toLowerCase() === "ungrouped";
+            return `
+              <th colspan="${getGroupColspan(group)}" class="${isUngrouped ? "bg-transparent border-0" : "border border-slate-200 bg-slate-100 font-extrabold text-slate-700"} px-3 py-1.5 text-center tracking-wide uppercase text-xs">
+                ${isUngrouped ? "" : escapeHtml(group.name)}
+              </th>
+            `;
+          }).join("")}
+          ${!isCalcMode ? '<th rowspan="2" class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Remarks & Proof</th>' : ""}
         </tr>
         <tr>
           ${displayFields.map((field) => `
-            <th class="min-w-[190px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">
-              <div class="font-bold text-slate-600">${escapeHtml(field.field_name)}</div>
-              <div class="mt-0.5 text-[10px] normal-case text-slate-400">
+            <th class="min-w-[180px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">
+              <div class="font-bold">${escapeHtml(field.field_name)}</div>
+              <div class="mt-0.5 text-[10px] normal-case text-slate-300">
                 ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
-                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-500">*</span>' : ""}
+                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
               </div>
             </th>
           `).join("")}
@@ -582,17 +592,17 @@
     } else {
       headEl.innerHTML = `
         <tr>
-          <th class="sticky left-0 z-20 min-w-[120px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Month</th>
+          <th class="sticky left-0 z-20 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Month</th>
           ${displayFields.map((field) => `
-            <th class="min-w-[190px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">
-              <div class="font-bold text-slate-600">${escapeHtml(field.field_name)}</div>
-              <div class="mt-0.5 text-[10px] normal-case text-slate-400">
+            <th class="min-w-[180px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">
+              <div class="font-bold">${escapeHtml(field.field_name)}</div>
+              <div class="mt-0.5 text-[10px] normal-case text-slate-300">
                 ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
-                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-500">*</span>' : ""}
+                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
               </div>
             </th>
           `).join("")}
-          ${!isCalcMode ? '<th class="min-w-[180px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Remarks & Proof</th>' : ""}
+          ${!isCalcMode ? '<th class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Remarks & Proof</th>' : ""}
         </tr>
       `;
     }
@@ -607,7 +617,7 @@
 
       let rowClass = selected ? "bg-indigo-50/60" : "bg-white hover:bg-slate-50/60";
       if (row.is_active_period) {
-        rowClass = "bg-[#dfeaf8] font-semibold";
+        rowClass = "bg-[#dfeaf8] font-semibold active-reporting-row";
       } else if (row.submission_status === "Approved" || row.is_locked) {
         rowClass = "bg-[#eef3fa]/50 opacity-85 text-slate-500";
       }
@@ -615,7 +625,9 @@
       const rowState = getRowStatusState(row);
       let monthBgClass = "";
       let lockSuffix = "";
-      if (rowState === "approved") {
+      if (row.is_active_period) {
+        monthBgClass = "bg-white text-[#1a3a6b] border-l-[3px] border-l-[#1a3a6b]";
+      } else if (rowState === "approved") {
         monthBgClass = "bg-[#e6f4ea] text-[#137333] border-l-4 border-l-[#137333]";
         lockSuffix = " 🔒";
       } else if (rowState === "locked") {
@@ -637,16 +649,14 @@
 
       tbodyHtml += `
         <tr data-row-key="${escapeHtml(key)}" class="${rowClass} transition border-b border-slate-200">
-          <td class="sticky left-0 z-10 border border-slate-200 px-3 py-3 align-middle ${monthBgClass}">
-            <div class="font-bold">${escapeHtml(row.label || row.period_label || "Row")}${lockSuffix}</div>
+          <td class="sticky left-0 z-10 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 px-3 py-3 align-middle ${monthBgClass}">
+            <div class="font-bold">${escapeHtml(row.label || getMonthName(row.month) || row.period_label || "Row")}${lockSuffix}</div>
             <div class="text-xs opacity-80">${escapeHtml(row.period_label || row.sheet_name || "")}</div>
           </td>
           ${displayFields.map((field) => renderCell(row, field, options)).join("")}
           ${!isCalcMode ? renderRemarksCell(row, fileField, options) : ""}
         </tr>
       `;
-
-
     }
 
     bodyEl.innerHTML = tbodyHtml + (isCalcMode ? "" : nonMonthlyGroups.map((group) => renderWorkbookValueSection(group, {

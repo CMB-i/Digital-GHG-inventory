@@ -177,6 +177,10 @@ def human_sheet_label(form):
         if label and not _looks_like_internal_code(label):
             return label
 
+    if form.code:
+        return form.code.strip()
+    if form.name:
+        return form.name.strip()
     return "Untitled Sheet"
 
 
