@@ -208,35 +208,21 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     workbookCards.innerHTML = summaries.map((summary) => `
-      <article class="flex min-h-[220px] flex-col justify-between rounded-2xl border border-indigo-100 bg-gradient-to-br from-white to-indigo-50/50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      <article class="flex min-h-[168px] flex-col justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50/30">
         <div>
           <div class="flex items-start justify-between gap-3">
             <div>
-              <h3 class="text-lg font-bold text-slate-900">${summary.name}</h3>
-              <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">${summary.code || "Site"}</p>
+              <h3 class="text-sm font-semibold text-slate-900">${summary.name}</h3>
             </div>
-            <span class="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-bold text-indigo-700">${fyLabel(currentFy)}</span>
+            <span class="status-badge status-badge-info">${fyLabel(currentFy)}</span>
           </div>
-          <dl class="mt-5 grid grid-cols-2 gap-3 text-sm">
-            <div class="rounded-xl border border-slate-200 bg-white/80 p-3">
-              <dt class="text-xs font-semibold text-slate-400">Assigned sheets</dt>
-              <dd class="mt-1 text-xl font-bold text-slate-900">${summary.assignedForms}</dd>
-            </div>
-            <div class="rounded-xl border border-amber-100 bg-amber-50/70 p-3">
-              <dt class="text-xs font-semibold text-amber-600">Action needed</dt>
-              <dd class="mt-1 text-xl font-bold text-amber-800">${summary.actionNeeded}</dd>
-            </div>
-            <div class="rounded-xl border border-blue-100 bg-blue-50/70 p-3">
-              <dt class="text-xs font-semibold text-blue-600">Under review</dt>
-              <dd class="mt-1 text-xl font-bold text-blue-800">${summary.underReview}</dd>
-            </div>
-            <div class="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
-              <dt class="text-xs font-semibold text-emerald-600">Completed</dt>
-              <dd class="mt-1 text-xl font-bold text-emerald-800">${summary.approved}</dd>
-            </div>
-          </dl>
+          <p class="mt-4 text-[13px] text-slate-500">
+            ${summary.assignedForms} assigned ·
+            <span class="${summary.actionNeeded > 0 ? 'font-semibold text-amber-700' : 'text-slate-500'}">${summary.actionNeeded} action needed</span> ·
+            ${summary.approved} completed
+          </p>
         </div>
-        <a href="${workbookUrl(summary, summary.firstFormId)}" class="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-bold text-white shadow-sm hover:bg-slate-800">
+        <a href="${workbookUrl(summary, summary.firstFormId)}" class="btn btn-outline btn-sm mt-5 justify-center">
           Open workbook
         </a>
       </article>
@@ -276,7 +262,7 @@ document.addEventListener("DOMContentLoaded", function () {
         </td>
         <td class="px-6 py-4 text-xs text-slate-500">${formatDate(row.last_saved)}</td>
         <td class="px-6 py-4 text-right">
-          <a href="${workbookUrl(row)}" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm hover:shadow transition-all">
+          <a href="${workbookUrl(row)}" class="btn btn-primary btn-sm">
             Open workbook
           </a>
         </td>
@@ -308,7 +294,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <td class="px-6 py-4 font-medium text-slate-700">${row.period_label}</td>
         <td class="px-6 py-4 text-xs font-medium text-slate-500">${formatShortDate(row.deadline)}</td>
         <td class="px-6 py-4 text-right">
-          <a href="${workbookUrl(row)}" class="inline-flex items-center px-3 py-1.5 bg-white border border-slate-300 hover:border-indigo-500 hover:text-indigo-600 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition-all">
+          <a href="${workbookUrl(row)}" class="btn btn-outline btn-sm">
             Open workbook
           </a>
         </td>
@@ -353,7 +339,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <td class="px-6 py-4 text-xs font-medium text-slate-600">${row.submitted_by}</td>
         <td class="px-6 py-4 text-xs text-slate-500">${formatDate(row.submitted_at)}</td>
         <td class="px-6 py-4 text-right">
-          <a href="${submittedViewUrl(row)}" class="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all">
+          <a href="${submittedViewUrl(row)}" class="btn btn-neutral btn-sm">
             View submitted sheet
           </a>
         </td>
