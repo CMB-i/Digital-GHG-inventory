@@ -84,6 +84,17 @@
     return meta.label;
   }
 
+  function getRowStatusState(row) {
+    const status = row.submission_status || row.status || row.period_status || "Not Started";
+    if (status === "Approved") return "approved";
+    if (row.is_locked || status === "Locked") return "locked";
+    if (["Submitted", "Resubmitted", "Under Review"].includes(status)) return "submitted";
+    if (status === "Changes Requested" || status === "Rejected") return "changes_requested";
+    if (status === "Draft") return "draft";
+    if (!row.period_id || row.period_status === "LOCKED") return "not_open";
+    return "not_started";
+  }
+
   function formatReadonlyValue(field, row) {
     const cell = cellObject(row, field);
     const proof = proofFor(row, field);
@@ -447,7 +458,7 @@
         : "Context values";
     return `
       <tr class="bg-slate-50/70">
-        <td colspan="${Math.max(3, (options.monthlyColumnCount || 0) + 2)}" class="border border-slate-200 px-4 py-4">
+        <td colspan="${options.totalColumns || 3}" class="border border-slate-200 px-4 py-4">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <div class="text-sm font-bold text-slate-900">${escapeHtml(group.name)}</div>
@@ -565,7 +576,6 @@
       headEl.innerHTML = `
         <tr>
           <th rowspan="2" class="sticky left-0 z-20 min-w-[120px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Month</th>
-          <th rowspan="2" class="min-w-[140px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Status</th>
           ${activeGroups.map((group) => `
             <th colspan="${getGroupColspan(group)}" class="border border-slate-200 bg-slate-100 px-3 py-1.5 text-center font-extrabold text-slate-700 tracking-wide uppercase text-xs">
               ${escapeHtml(group.name)}
@@ -589,7 +599,6 @@
       headEl.innerHTML = `
         <tr>
           <th class="sticky left-0 z-20 min-w-[120px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Month</th>
-          <th class="min-w-[140px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Status</th>
           ${displayFields.map((field) => `
             <th class="min-w-[190px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">
               <div class="font-bold text-slate-600">${escapeHtml(field.field_name)}</div>
@@ -619,18 +628,32 @@
         rowClass = "bg-[#eef3fa]/50 opacity-85 text-slate-500";
       }
 
+      const rowState = getRowStatusState(row);
+      let monthBgClass = "";
+      let lockSuffix = "";
+      if (rowState === "approved") {
+        monthBgClass = "bg-[#e6f4ea] text-[#137333] border-l-4 border-l-[#137333]";
+        lockSuffix = " 🔒";
+      } else if (rowState === "locked") {
+        monthBgClass = "bg-[#f1f3f4] text-[#5f6368] border-l-4 border-l-[#5f6368]";
+        lockSuffix = " 🔒";
+      } else if (rowState === "submitted") {
+        monthBgClass = "bg-[#e8f0fe] text-[#1a73e8] border-l-4 border-l-[#1a73e8]";
+      } else if (rowState === "changes_requested") {
+        monthBgClass = "bg-[#fce8e6] text-[#c5221f] border-l-4 border-l-[#c5221f]";
+      } else if (rowState === "draft") {
+        monthBgClass = "bg-[#fef7e0] text-[#b06000] border-l-4 border-l-[#b06000]";
+      } else if (rowState === "not_open") {
+        monthBgClass = "bg-[#f8f9fa] text-[#70757a] opacity-60 border-l-4 border-l-[#70757a]";
+      } else {
+        monthBgClass = "bg-white text-[#3c4043] border-l-4 border-l-slate-300";
+      }
+
       tbodyHtml += `
         <tr data-row-key="${escapeHtml(key)}" class="${rowClass} transition border-b border-slate-200">
-          <td class="sticky left-0 z-10 border border-slate-200 bg-inherit px-3 py-3 align-middle">
-            <div class="font-bold text-slate-900">${escapeHtml(row.label || row.period_label || "Row")}</div>
-            <div class="text-xs text-slate-500">${escapeHtml(row.period_label || row.sheet_name || "")}</div>
-          </td>
-          <td class="border border-slate-200 px-3 py-3 align-middle bg-inherit">
-            <div class="flex items-center gap-2">
-              <span class="inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(row)}">${escapeHtml(status)}</span>
-              ${row.is_locked || row.submission_status === "Approved" ? '<span class="text-slate-500 text-sm" title="Locked">🔒</span>' : ""}
-            </div>
-            ${row.reason ? `<div class="mt-1 max-w-[180px] text-xs text-slate-400">${escapeHtml(row.reason)}</div>` : ""}
+          <td class="sticky left-0 z-10 border border-slate-200 px-3 py-3 align-middle ${monthBgClass}">
+            <div class="font-bold">${escapeHtml(row.label || row.period_label || "Row")}${lockSuffix}</div>
+            <div class="text-xs opacity-80">${escapeHtml(row.period_label || row.sheet_name || "")}</div>
           </td>
           ${displayFields.map((field) => renderCell(row, field, options)).join("")}
           ${!isCalcMode ? renderRemarksCell(row, fileField, options) : ""}
@@ -642,7 +665,7 @@
         if (warnings.length > 0) {
           tbodyHtml += `
             <tr class="bg-[#fcf3d7] border-b border-amber-200">
-              <td colspan="${displayFields.length + 3}" class="px-6 py-2 text-xs text-[#8a6a13] font-semibold">
+              <td colspan="${displayFields.length + 2}" class="px-6 py-2 text-xs text-[#8a6a13] font-semibold">
                 <div class="flex items-center gap-2">
                   <span class="text-sm">⚠️</span>
                   <span>${warnings.join(" | ")}</span>
@@ -656,7 +679,7 @@
 
     bodyEl.innerHTML = tbodyHtml + (isCalcMode ? "" : nonMonthlyGroups.map((group) => renderWorkbookValueSection(group, {
       ...options,
-      monthlyColumnCount: displayFields.length + (fileField ? 1 : 0),
+      totalColumns: displayFields.length + 2,
     })).join(""));
 
     // Event Bindings

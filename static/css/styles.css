@@ -923,3 +923,42 @@ body[data-theme="jsw-excel"] .submitted {
   line-clamp: 2;
   overflow: hidden;
 }
+
+/* Excel-Style Table Grid Cells: zero padding & borderless full-cell text box inputs */
+body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] {
+  padding: 0 !important;
+  vertical-align: middle;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] input[type="text"],
+body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] input[type="number"],
+body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] select {
+  border: 0 !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 48px !important;
+  padding: 12px 12px !important;
+  box-shadow: none !important;
+  outline: none !important;
+  margin: 0 !important;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] input[type="text"]:focus,
+body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] input[type="number"]:focus,
+body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] select:focus {
+  background: #ffffff !important;
+  outline: 2px solid var(--ghg-navy) !important;
+  outline-offset: -2px;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] > div.relative {
+  width: 100%;
+  height: 100%;
+  min-height: 48px;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] div.px-2.py-2 {
+  padding: 14px 12px !important;
+}

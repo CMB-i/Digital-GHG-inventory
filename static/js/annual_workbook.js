@@ -512,7 +512,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
     calcHead.innerHTML = `
       <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white">Month</th>
-      <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white">Status</th>
       ${calcFields.map(field => `
         <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white">
           <div class="font-bold">${escapeHtml(field.field_name.split(" (")[0])}</div>
@@ -530,15 +529,30 @@ document.addEventListener("DOMContentLoaded", function () {
           ? "bg-[#eef3fa]/50 opacity-85 text-slate-500"
           : "bg-slate-50";
 
+      const status = row.submission_status || row.status || row.period_status || "Not Started";
+      let monthBgClass = "";
+      let lockSuffix = "";
+      if (status === "Approved") {
+        monthBgClass = "bg-[#e6f4ea] text-[#137333] border-l-4 border-l-[#137333]";
+        lockSuffix = " 🔒";
+      } else if (row.is_locked || status === "Locked") {
+        monthBgClass = "bg-[#f1f3f4] text-[#5f6368] border-l-4 border-l-[#5f6368]";
+        lockSuffix = " 🔒";
+      } else if (["Submitted", "Resubmitted", "Under Review"].includes(status)) {
+        monthBgClass = "bg-[#e8f0fe] text-[#1a73e8] border-l-4 border-l-[#1a73e8]";
+      } else if (status === "Changes Requested" || status === "Rejected") {
+        monthBgClass = "bg-[#fce8e6] text-[#c5221f] border-l-4 border-l-[#c5221f]";
+      } else if (status === "Draft") {
+        monthBgClass = "bg-[#fef7e0] text-[#b06000] border-l-4 border-l-[#b06000]";
+      } else if (!row.period_id || row.period_status === "LOCKED") {
+        monthBgClass = "bg-[#f8f9fa] text-[#70757a] opacity-60 border-l-4 border-l-[#70757a]";
+      } else {
+        monthBgClass = "bg-white text-[#3c4043] border-l-4 border-l-slate-300";
+      }
+
       return `
         <tr class="${rowClass} border-b border-slate-200">
-          <td class="border border-slate-300 px-3 py-2.5 font-bold text-slate-900 bg-inherit">${escapeHtml(row.label || row.period_label)}</td>
-          <td class="border border-slate-300 px-3 py-2.5 bg-inherit">
-            <div class="flex items-center gap-2">
-              <span class="inline-flex whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold ${statusClass(row)}">${escapeHtml(row.submission_status || "Not Started")}</span>
-              <span class="text-slate-400 text-sm">🔒</span>
-            </div>
-          </td>
+          <td class="border border-slate-300 px-3 py-2.5 font-bold ${monthBgClass}">${escapeHtml(row.label || row.period_label)}${lockSuffix}</td>
           ${calcFields.map(field => {
             const cell = row.values ? row.values[field.field_code] : null;
             if (!cell) {
