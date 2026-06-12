@@ -32,7 +32,7 @@ TRANSITION_ACTION = {
 
 STATUS_LABELS = {
     "OPEN": "Open",
-    "SUBMISSION_CLOSED": "Submission Closed",
+    "SUBMISSION_CLOSED": "Closed",
     "LOCKED": "Locked",
     "REOPENED": "Reopened",
 }
@@ -118,6 +118,28 @@ def create_period(site_id, year, month, deadline, actor_id):
     )
     db.session.add(period)
     return period
+
+
+def bulk_open_month(year, month, actor_id, site_ids):
+    """Create OPEN periods for sites that do not yet have one for year/month."""
+    created = []
+    for site_id in site_ids:
+        existing = ReportingPeriod.query.filter_by(
+            site_id=site_id, year=year, month=month, is_deleted=False
+        ).first()
+        if existing:
+            continue
+        period = ReportingPeriod(
+            site_id=site_id,
+            year=year,
+            month=month,
+            status="OPEN",
+            deadline=None,
+            created_by=actor_id,
+        )
+        db.session.add(period)
+        created.append(period)
+    return created
 
 
 def transition_period(period_id, target_status, actor_id, reopen_reason=None):
