@@ -601,18 +601,7 @@ document.addEventListener("DOMContentLoaded", function () {
       `;
     }).join("");
 
-    // Hover Month column cells to show/hide Status Legend in Calc results
-    const legend = document.getElementById("status-legend");
-    if (legend) {
-      calcBody.querySelectorAll("tr td:first-child").forEach((td) => {
-        td.addEventListener("mouseenter", function () {
-          legend.classList.remove("hidden");
-        });
-        td.addEventListener("mouseleave", function () {
-          legend.classList.add("hidden");
-        });
-      });
-    }
+
   }
 
   function renderIssueList(issues) {

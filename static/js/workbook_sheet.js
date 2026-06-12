@@ -694,18 +694,7 @@
       });
     });
 
-    // Hover Month column cells to show/hide Status Legend
-    const legend = document.getElementById("status-legend");
-    if (legend) {
-      bodyEl.querySelectorAll("tr td:first-child").forEach((td) => {
-        td.addEventListener("mouseenter", function () {
-          legend.classList.remove("hidden");
-        });
-        td.addEventListener("mouseleave", function () {
-          legend.classList.add("hidden");
-        });
-      });
-    }
+
 
     bodyEl.querySelectorAll("input[data-field-code], select[data-field-code], textarea[data-field-code]").forEach((input) => {
       input.addEventListener("input", options.onCellChange || function () {});
