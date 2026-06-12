@@ -539,11 +539,15 @@ document.addEventListener("DOMContentLoaded", function () {
         monthBgClass = "bg-[#f1f3f4] text-[#5f6368] border-l-4 border-l-[#5f6368]";
         lockSuffix = " 🔒";
       } else if (["Submitted", "Resubmitted", "Under Review"].includes(status)) {
-        monthBgClass = "bg-[#e8f0fe] text-[#1a73e8] border-l-4 border-l-[#1a73e8]";
-      } else if (status === "Changes Requested" || status === "Rejected") {
-        monthBgClass = "bg-[#fce8e6] text-[#c5221f] border-l-4 border-l-[#c5221f]";
+        monthBgClass = "bg-[#f3e8ff] text-[#7000af] border-l-4 border-l-[#7000af]";
+      } else if (status === "Changes Requested" || status === "Rejected" || status === "Changes requested") {
+        if (status === "Rejected") {
+          monthBgClass = "bg-[#fff7ed] text-[#ea580c] border-l-4 border-l-[#ea580c]";
+        } else {
+          monthBgClass = "bg-[#fce8e6] text-[#c5221f] border-l-4 border-l-[#c5221f]";
+        }
       } else if (status === "Draft") {
-        monthBgClass = "bg-[#fef7e0] text-[#b06000] border-l-4 border-l-[#b06000]";
+        monthBgClass = "bg-[#e6fffa] text-[#007a78] border-l-4 border-l-[#007a78]";
       } else if (!row.period_id || row.period_status === "LOCKED") {
         monthBgClass = "bg-[#f8f9fa] text-[#70757a] opacity-60 border-l-4 border-l-[#70757a]";
       } else {
@@ -596,6 +600,19 @@ document.addEventListener("DOMContentLoaded", function () {
         </tr>
       `;
     }).join("");
+
+    // Hover Month column cells to show/hide Status Legend in Calc results
+    const legend = document.getElementById("status-legend");
+    if (legend) {
+      calcBody.querySelectorAll("tr td:first-child").forEach((td) => {
+        td.addEventListener("mouseenter", function () {
+          legend.classList.remove("hidden");
+        });
+        td.addEventListener("mouseleave", function () {
+          legend.classList.add("hidden");
+        });
+      });
+    }
   }
 
   function renderIssueList(issues) {

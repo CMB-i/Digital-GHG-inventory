@@ -89,7 +89,8 @@
     if (status === "Approved") return "approved";
     if (row.is_locked || status === "Locked") return "locked";
     if (["Submitted", "Resubmitted", "Under Review"].includes(status)) return "submitted";
-    if (status === "Changes Requested" || status === "Rejected") return "changes_requested";
+    if (status === "Rejected") return "rejected";
+    if (status === "Changes Requested" || status === "Changes requested") return "changes_requested";
     if (status === "Draft") return "draft";
     if (!row.period_id || row.period_status === "LOCKED") return "not_open";
     return "not_started";
@@ -638,11 +639,13 @@
         monthBgClass = "bg-[#f1f3f4] text-[#5f6368] border-l-4 border-l-[#5f6368]";
         lockSuffix = " 🔒";
       } else if (rowState === "submitted") {
-        monthBgClass = "bg-[#e8f0fe] text-[#1a73e8] border-l-4 border-l-[#1a73e8]";
+        monthBgClass = "bg-[#f3e8ff] text-[#7000af] border-l-4 border-l-[#7000af]";
       } else if (rowState === "changes_requested") {
         monthBgClass = "bg-[#fce8e6] text-[#c5221f] border-l-4 border-l-[#c5221f]";
+      } else if (rowState === "rejected") {
+        monthBgClass = "bg-[#fff7ed] text-[#ea580c] border-l-4 border-l-[#ea580c]";
       } else if (rowState === "draft") {
-        monthBgClass = "bg-[#fef7e0] text-[#b06000] border-l-4 border-l-[#b06000]";
+        monthBgClass = "bg-[#e6fffa] text-[#007a78] border-l-4 border-l-[#007a78]";
       } else if (rowState === "not_open") {
         monthBgClass = "bg-[#f8f9fa] text-[#70757a] opacity-60 border-l-4 border-l-[#70757a]";
       } else {
@@ -690,6 +693,19 @@
         if (typeof options.onRowSelect === "function") options.onRowSelect(tr.dataset.rowKey);
       });
     });
+
+    // Hover Month column cells to show/hide Status Legend
+    const legend = document.getElementById("status-legend");
+    if (legend) {
+      bodyEl.querySelectorAll("tr td:first-child").forEach((td) => {
+        td.addEventListener("mouseenter", function () {
+          legend.classList.remove("hidden");
+        });
+        td.addEventListener("mouseleave", function () {
+          legend.classList.add("hidden");
+        });
+      });
+    }
 
     bodyEl.querySelectorAll("input[data-field-code], select[data-field-code], textarea[data-field-code]").forEach((input) => {
       input.addEventListener("input", options.onCellChange || function () {});
