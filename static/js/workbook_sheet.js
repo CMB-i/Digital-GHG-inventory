@@ -403,7 +403,7 @@
     }
 
     return `
-      <td class="w-[140px] min-w-[140px] max-w-[140px] border px-3 py-3 align-middle bg-slate-50/50">
+      <td class="w-[140px] min-w-[140px] max-w-[140px] border align-middle bg-slate-50/50">
         ${content}
       </td>
     `;
@@ -575,7 +575,7 @@
               </th>
             `;
           }).join("")}
-          ${!isCalcMode ? '<th rowspan="2" class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Remarks & Proof</th>' : ""}
+          ${!isCalcMode ? '<th rowspan="2" class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
         <tr>
           ${displayFields.map((field) => `
@@ -602,7 +602,7 @@
               </div>
             </th>
           `).join("")}
-          ${!isCalcMode ? '<th class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Remarks & Proof</th>' : ""}
+          ${!isCalcMode ? '<th class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
       `;
     }
@@ -617,7 +617,7 @@
 
       let rowClass = selected ? "bg-indigo-50/60" : "bg-white hover:bg-slate-50/60";
       if (row.is_active_period) {
-        rowClass = "bg-[#dfeaf8] font-semibold active-reporting-row";
+        rowClass = "bg-white font-semibold active-reporting-row";
       } else if (row.submission_status === "Approved" || row.is_locked) {
         rowClass = "bg-[#eef3fa]/50 opacity-85 text-slate-500";
       }
@@ -626,32 +626,32 @@
       let monthBgClass = "";
       let lockSuffix = "";
       if (row.is_active_period) {
-        monthBgClass = "bg-white text-[#1a3a6b] border-l-[3px] border-l-[#1a3a6b]";
+        monthBgClass = "bg-white text-[#1f2937] border-l-[3px] border-l-[#1a3a6b]";
       } else if (rowState === "approved") {
-        monthBgClass = "bg-[#e6f4ea] text-[#137333] border-l-4 border-l-[#137333]";
+        monthBgClass = "bg-[#e6f4ea] text-[#1f2937] border-l-4 border-l-[#137333]";
         lockSuffix = " 🔒";
       } else if (rowState === "locked") {
-        monthBgClass = "bg-[#f1f3f4] text-[#5f6368] border-l-4 border-l-[#5f6368]";
+        monthBgClass = "bg-[#f1f3f4] text-[#1f2937] border-l-4 border-l-[#5f6368]";
         lockSuffix = " 🔒";
       } else if (rowState === "submitted") {
-        monthBgClass = "bg-[#f3e8ff] text-[#7000af] border-l-4 border-l-[#7000af]";
+        monthBgClass = "bg-[#f3e8ff] text-[#1f2937] border-l-4 border-l-[#7000af]";
       } else if (rowState === "changes_requested") {
-        monthBgClass = "bg-[#fce8e6] text-[#c5221f] border-l-4 border-l-[#c5221f]";
+        monthBgClass = "bg-[#fce8e6] text-[#1f2937] border-l-4 border-l-[#c5221f]";
       } else if (rowState === "rejected") {
-        monthBgClass = "bg-[#fff7ed] text-[#ea580c] border-l-4 border-l-[#ea580c]";
+        monthBgClass = "bg-[#fff7ed] text-[#1f2937] border-l-4 border-l-[#ea580c]";
       } else if (rowState === "draft") {
-        monthBgClass = "bg-[#e6fffa] text-[#007a78] border-l-4 border-l-[#007a78]";
+        monthBgClass = "bg-[#e6fffa] text-[#1f2937] border-l-4 border-l-[#007a78]";
       } else if (rowState === "not_open") {
-        monthBgClass = "bg-[#f8f9fa] text-[#70757a] opacity-60 border-l-4 border-l-[#70757a]";
+        monthBgClass = "bg-[#f8f9fa] text-[#1f2937] opacity-60 border-l-4 border-l-[#70757a]";
       } else {
-        monthBgClass = "bg-white text-[#3c4043] border-l-4 border-l-slate-300";
+        monthBgClass = "bg-white text-[#1f2937] border-l-4 border-l-slate-300";
       }
 
       tbodyHtml += `
         <tr data-row-key="${escapeHtml(key)}" class="${rowClass} transition border-b border-slate-200">
-          <td class="sticky left-0 z-10 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 px-3 py-3 align-middle ${monthBgClass}">
-            <div class="font-bold">${escapeHtml(row.label || getMonthName(row.month) || row.period_label || "Row")}${lockSuffix}</div>
-            <div class="text-xs opacity-80">${escapeHtml(row.period_label || row.sheet_name || "")}</div>
+          <td class="sticky left-0 z-10 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 align-middle month-cell ${monthBgClass}">
+            <div>${escapeHtml(row.label || getMonthName(row.month) || row.period_label || "Row")}${lockSuffix}</div>
+            <div>${escapeHtml(row.period_label || row.sheet_name || "")}</div>
           </td>
           ${displayFields.map((field) => renderCell(row, field, options)).join("")}
           ${!isCalcMode ? renderRemarksCell(row, fileField, options) : ""}

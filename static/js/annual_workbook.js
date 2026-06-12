@@ -211,7 +211,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function getFormStatusColor(formId) {
-    if (!state.dashboardData) return "#5b6677"; // Grey default
+    if (!state.dashboardData) return null;
     const siteId = state.selectedSiteId;
     const fy = state.selectedFy;
     
@@ -220,23 +220,14 @@ document.addEventListener("DOMContentLoaded", function () {
       String(row.site_id) === String(siteId) && 
       fyForMonth(row.year, row.month) === fy
     );
-    
-    const submitted = (state.dashboardData.submitted || []).filter(row => 
-      String(row.form_id) === String(formId) && 
-      String(row.site_id) === String(siteId) && 
-      fyForMonth(row.year, row.month) === fy
-    );
 
     if (actionNeeded.some(row => row.status === "Changes Requested" || row.status === "Rejected" || row.status === "Changes requested")) {
-      return "#9a1224"; // Red sent back
+      return "#c8102e"; // Red sent back
     }
     if (actionNeeded.some(row => row.status === "Draft")) {
       return "#8a6a13"; // Amber draft
     }
-    if (submitted.length > 0) {
-      return "#1f6b34"; // Green submitted
-    }
-    return "#5b6677"; // Grey not started
+    return null;
   }
 
   function renderFormTabs() {
@@ -251,15 +242,15 @@ document.addEventListener("DOMContentLoaded", function () {
       const button = document.createElement("button");
       button.type = "button";
       const active = String(form.id) === String(state.selectedFormId);
-      button.className = `border px-3 py-1.5 text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
-        active
-          ? "border-navy bg-navy text-white"
-          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+      button.className = `workbook-tab whitespace-nowrap flex items-center gap-1.5 ${
+        active ? "workbook-tab-active" : "workbook-tab-inactive"
       }`;
       
-      // Add status dot
+      // Add status dot (size 8px, only show on draft/sent back)
       const dotColor = getFormStatusColor(form.id);
-      const dot = `<span class="w-2 h-2 rounded-full inline-block" style="background-color: ${dotColor};"></span>`;
+      const dot = dotColor
+        ? `<span class="w-[8px] h-[8px] rounded-full inline-block flex-shrink-0" style="background-color: ${dotColor};"></span>`
+        : "";
       
       button.innerHTML = `${dot}<span>${escapeHtml(form.name)}</span>`;
       button.onclick = function () {
@@ -274,10 +265,8 @@ document.addEventListener("DOMContentLoaded", function () {
       const calcButton = document.createElement("button");
       calcButton.type = "button";
       const calcActive = state.selectedFormId === "calc_results";
-      calcButton.className = `border px-3 py-1.5 text-xs font-bold transition whitespace-nowrap ${
-        calcActive
-          ? "border-navy bg-navy text-white"
-          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+      calcButton.className = `workbook-tab whitespace-nowrap ${
+        calcActive ? "workbook-tab-active" : "workbook-tab-inactive"
       }`;
       calcButton.textContent = "Calculation Results";
       calcButton.onclick = function () {
@@ -344,7 +333,7 @@ document.addEventListener("DOMContentLoaded", function () {
         : null;
       if (activeRow) {
         const mName = activeRow.label || getMonthName(activeRow.month);
-        currentMonthEl.textContent = `CURRENT MONTH : ${mName.toUpperCase()}`;
+        currentMonthEl.textContent = `CURRENT MONTH: ${mName.toUpperCase()}`;
         currentMonthEl.classList.remove("hidden");
       } else {
         currentMonthEl.classList.add("hidden");
@@ -556,7 +545,7 @@ document.addEventListener("DOMContentLoaded", function () {
     calcBody.innerHTML = rows.map(row => {
       const isApproved = row.submission_status === "Approved" || row.is_locked;
       const rowClass = row.is_active_period 
-        ? "bg-[#dfeaf8] font-semibold" 
+        ? "bg-white font-semibold active-reporting-row" 
         : isApproved 
           ? "bg-[#eef3fa]/50 opacity-85 text-slate-500"
           : "bg-slate-50";
@@ -565,32 +554,32 @@ document.addEventListener("DOMContentLoaded", function () {
       let monthBgClass = "";
       let lockSuffix = "";
       if (row.is_active_period) {
-        monthBgClass = "bg-white text-[#1a3a6b] border-l-[3px] border-l-[#1a3a6b]";
+        monthBgClass = "bg-white text-[#1f2937] border-l-[3px] border-l-[#1a3a6b]";
       } else if (status === "Approved") {
-        monthBgClass = "bg-[#e6f4ea] text-[#137333] border-l-4 border-l-[#137333]";
+        monthBgClass = "bg-[#e6f4ea] text-[#1f2937] border-l-4 border-l-[#137333]";
         lockSuffix = " 🔒";
       } else if (row.is_locked || status === "Locked") {
-        monthBgClass = "bg-[#f1f3f4] text-[#5f6368] border-l-4 border-l-[#5f6368]";
+        monthBgClass = "bg-[#f1f3f4] text-[#1f2937] border-l-4 border-l-[#5f6368]";
         lockSuffix = " 🔒";
       } else if (["Submitted", "Resubmitted", "Under Review"].includes(status)) {
-        monthBgClass = "bg-[#f3e8ff] text-[#7000af] border-l-4 border-l-[#7000af]";
+        monthBgClass = "bg-[#f3e8ff] text-[#1f2937] border-l-4 border-l-[#7000af]";
       } else if (status === "Changes Requested" || status === "Rejected" || status === "Changes requested") {
         if (status === "Rejected") {
-          monthBgClass = "bg-[#fff7ed] text-[#ea580c] border-l-4 border-l-[#ea580c]";
+          monthBgClass = "bg-[#fff7ed] text-[#1f2937] border-l-4 border-l-[#ea580c]";
         } else {
-          monthBgClass = "bg-[#fce8e6] text-[#c5221f] border-l-4 border-l-[#c5221f]";
+          monthBgClass = "bg-[#fce8e6] text-[#1f2937] border-l-4 border-l-[#c5221f]";
         }
       } else if (status === "Draft") {
-        monthBgClass = "bg-[#e6fffa] text-[#007a78] border-l-4 border-l-[#007a78]";
+        monthBgClass = "bg-[#e6fffa] text-[#1f2937] border-l-4 border-l-[#007a78]";
       } else if (!row.period_id || row.period_status === "LOCKED") {
-        monthBgClass = "bg-[#f8f9fa] text-[#70757a] opacity-60 border-l-4 border-l-[#70757a]";
+        monthBgClass = "bg-[#f8f9fa] text-[#1f2937] opacity-60 border-l-4 border-l-[#70757a]";
       } else {
-        monthBgClass = "bg-white text-[#3c4043] border-l-4 border-l-slate-300";
+        monthBgClass = "bg-white text-[#1f2937] border-l-4 border-l-slate-300";
       }
 
       return `
         <tr class="${rowClass} border-b border-slate-200">
-          <td class="w-[100px] min-w-[100px] max-w-[100px] border border-slate-300 px-3 py-2.5 font-bold ${monthBgClass}">${escapeHtml(row.label || getMonthName(row.month) || row.period_label)}${lockSuffix}</td>
+          <td class="w-[100px] min-w-[100px] max-w-[100px] border border-slate-300 month-cell ${monthBgClass}">${escapeHtml(row.label || getMonthName(row.month) || row.period_label)}${lockSuffix}</td>
           ${calcFields.map(field => {
             const cell = row.values ? row.values[field.field_code] : null;
             if (!cell) {

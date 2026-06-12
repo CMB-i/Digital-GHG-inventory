@@ -929,9 +929,9 @@ body[data-theme="jsw-excel"] .submitted {
   overflow: hidden;
 }
 
-/* Excel-Style Table Grid Cells: zero padding & borderless full-cell text box inputs */
+/* Excel-Style Table Grid Cells: borderless full-cell text box inputs and uniform padding */
 body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] {
-  padding: 0 !important;
+  padding: 10px 14px !important;
   vertical-align: middle;
 }
 
@@ -942,12 +942,14 @@ body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] select {
   background: transparent !important;
   border-radius: 0 !important;
   width: 100% !important;
-  height: 100% !important;
-  min-height: 48px !important;
-  padding: 12px 12px !important;
+  height: auto !important;
+  min-height: unset !important;
+  padding: 0 !important;
   box-shadow: none !important;
   outline: none !important;
   margin: 0 !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
 }
 
 body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] input[type="text"]:focus,
@@ -960,12 +962,12 @@ body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] select:foc
 
 body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] > div.relative {
   width: 100%;
-  height: 100%;
-  min-height: 48px;
+  height: auto;
+  min-height: unset;
 }
 
 body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] div.px-2.py-2 {
-  padding: 14px 12px !important;
+  padding: 0 !important;
 }
 
 body[data-theme="jsw-excel"] #workbook-table-wrap table,
@@ -974,19 +976,89 @@ body[data-theme="jsw-excel"] #calculated-results-section table {
   width: 100% !important;
 }
 
-/* Dark blue border around the active reporting row */
-body[data-theme="jsw-excel"] #workbook-table-wrap tr.active-reporting-row td,
-body[data-theme="jsw-excel"] #calculated-results-section tr.active-reporting-row td {
-  border-top: 3px solid var(--ghg-navy) !important;
-  border-bottom: 3px solid var(--ghg-navy) !important;
+/* Active reporting row month cell left border only */
+body[data-theme="jsw-excel"] #workbook-table-wrap tr.active-reporting-row td.month-cell,
+body[data-theme="jsw-excel"] #calculated-results-section tr.active-reporting-row td.month-cell {
+  border-left: 3px solid #1a3a6b !important;
 }
 
-body[data-theme="jsw-excel"] #workbook-table-wrap tr.active-reporting-row td:first-child,
-body[data-theme="jsw-excel"] #calculated-results-section tr.active-reporting-row td:first-child {
-  border-left: 3px solid var(--ghg-navy) !important;
+body[data-theme="jsw-excel"] #workbook-table-wrap tr.active-reporting-row,
+body[data-theme="jsw-excel"] #calculated-results-section tr.active-reporting-row {
+  background: #ffffff !important;
 }
 
-body[data-theme="jsw-excel"] #workbook-table-wrap tr.active-reporting-row td:last-child,
-body[data-theme="jsw-excel"] #calculated-results-section tr.active-reporting-row td:last-child {
-  border-right: 3px solid var(--ghg-navy) !important;
+/* Month text color override for all months */
+body[data-theme="jsw-excel"] #workbook-table-wrap td.month-cell,
+body[data-theme="jsw-excel"] #workbook-table-wrap td.month-cell div,
+body[data-theme="jsw-excel"] #calculated-results-section td.month-cell,
+body[data-theme="jsw-excel"] #calculated-results-section td.month-cell div {
+  color: #1f2937 !important;
+}
+
+/* Workbook Sheet Tabs Style */
+body[data-theme="jsw-excel"] #form-tabs {
+  border-bottom: 1px solid #d0d8e4;
+  padding-bottom: 0px;
+  display: flex;
+  align-items: flex-end;
+}
+
+body[data-theme="jsw-excel"] .workbook-tab {
+  padding: 8px 16px;
+  font-size: 13px;
+  transition: all 0.15s ease-in-out;
+  cursor: pointer;
+  border-left: none !important;
+  border-right: none !important;
+  border-top: none !important;
+  outline: none !important;
+  border-radius: 0 !important;
+}
+
+body[data-theme="jsw-excel"] .workbook-tab-active {
+  background: #ffffff !important;
+  border-bottom: 3px solid #1a3a6b !important;
+  color: #1a3a6b !important;
+  font-weight: 600 !important;
+}
+
+body[data-theme="jsw-excel"] .workbook-tab-inactive {
+  background: transparent !important;
+  color: #64748b !important;
+  border-bottom: 1px solid #d0d8e4 !important;
+  font-weight: 400 !important;
+}
+
+body[data-theme="jsw-excel"] .workbook-tab-inactive:hover {
+  color: #1a3a6b !important;
+  border-bottom: 1px solid #1a3a6b !important;
+}
+
+/* Uniform tbody cells styling */
+body[data-theme="jsw-excel"] #workbook-table-wrap tbody td,
+body[data-theme="jsw-excel"] #calculated-results-section tbody td {
+  padding: 10px 14px !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap tbody td input,
+body[data-theme="jsw-excel"] #workbook-table-wrap tbody td select,
+body[data-theme="jsw-excel"] #calculated-results-section tbody td input {
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  padding: 0 !important;
+  height: auto !important;
+  min-height: unset !important;
+}
+
+/* Info bar CURRENT MONTH badge styling */
+body[data-theme="jsw-excel"] #workbook-current-month {
+  background: #dfeaf8 !important;
+  color: #1a3a6b !important;
+  border: 1px solid #c4d4e8 !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  padding: 3px 8px !important;
+  border-radius: 0 !important;
 }
