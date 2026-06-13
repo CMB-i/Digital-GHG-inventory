@@ -31,6 +31,12 @@ document.addEventListener("DOMContentLoaded", function () {
     return months[parseInt(m, 10)] || "";
   }
 
+  function getFullMonthYear(month, year) {
+    const months = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const name = months[parseInt(month, 10)] || "";
+    return year ? `${name} ${year}` : name;
+  }
+
   let autosaveTimeout = null;
   let lastSavedTime = null;
 
@@ -173,6 +179,14 @@ document.addEventListener("DOMContentLoaded", function () {
   function hasOpenWorkbookPeriod() {
     if (!state.workbook || !Array.isArray(state.workbook.rows)) return false;
     return state.workbook.rows.some(row => row.period_status === "OPEN" || row.period_status === "REOPENED");
+  }
+
+  function openPeriodLabels() {
+    if (!state.workbook || !Array.isArray(state.workbook.rows)) return [];
+    return state.workbook.rows
+      .filter(row => row.period_status === "OPEN" || row.period_status === "REOPENED" || (row.editability && row.editability.editable))
+      .map(row => row.period_label || getFullMonthYear(row.month, row.year))
+      .filter(Boolean);
   }
 
   function renderFyOptions() {
@@ -328,12 +342,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Set current month badge
     if (currentMonthEl) {
-      const activeRow = state.workbook && state.workbook.rows
-        ? state.workbook.rows.find(row => row.is_active_period)
-        : null;
-      if (activeRow) {
-        const mName = activeRow.label || getMonthName(activeRow.month);
-        currentMonthEl.textContent = "OPEN FOR ENTRY";
+      const labels = openPeriodLabels();
+      if (state.workbook && Array.isArray(state.workbook.rows)) {
+        if (labels.length === 1) {
+          currentMonthEl.textContent = `${labels[0]} open for entry`;
+        } else if (labels.length > 1) {
+          currentMonthEl.textContent = `Open periods: ${labels.join(", ")}`;
+        } else {
+          currentMonthEl.textContent = "No period currently open for entry";
+        }
         currentMonthEl.classList.remove("hidden");
       } else {
         currentMonthEl.classList.add("hidden");
@@ -666,6 +683,13 @@ document.addEventListener("DOMContentLoaded", function () {
     row.values[input.dataset.fieldCode] = input.type === "checkbox" ? input.checked : input.value;
     state.selectedRowKey = input.dataset.rowKey;
     state.dirtyRows.add(input.dataset.rowKey);
+    const cell = input.closest("td[data-field-code]");
+    if (cell) {
+      const rawValue = input.type === "checkbox" ? input.checked : input.value;
+      const visualState = rawValue === "" || rawValue === null || rawValue === undefined ? "blank_editable" : "draft_filled";
+      cell.dataset.cellState = visualState;
+      cell.title = `${visualState === "draft_filled" ? "Draft saved" : "Blank editable"}${cell.dataset.hasIssues === "true" ? " · Issue/comment exists" : ""}`;
+    }
     renderHeader();
   }
 

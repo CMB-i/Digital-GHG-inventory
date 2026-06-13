@@ -51,11 +51,33 @@ def get_formula_compatible_fields(form_version_id):
 from datetime import datetime, timezone
 from app.database import db
 from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion, FormSection
-from app.modules.VALSET.model import ValueSetVersion
 from app.modules.FRMULA.model import FormulaVersion
 
 ALLOWED_SECTION_LAYOUT_TYPES = {"monthly_table", "annual_table", "reference_table"}
 ALLOWED_FIELD_FREQUENCIES = {"monthly", "annual", "static"}
+
+
+def local_dropdown_options(field_config):
+    options = (field_config or {}).get("options")
+    if not isinstance(options, list):
+        return []
+
+    normalized = []
+    for option in options:
+        if isinstance(option, dict):
+            value = (
+                option.get("entry_label")
+                or option.get("label")
+                or option.get("name")
+                or option.get("entry_code")
+                or option.get("code")
+                or option.get("value")
+            )
+        else:
+            value = option
+        if value is not None and str(value).strip():
+            normalized.append(str(value).strip())
+    return normalized
 
 def list_forms():
     return Form.query.filter_by(is_deleted=False).all()
@@ -338,14 +360,10 @@ def publish_form_version(form_version_id, user_id):
     for fv, f in fields:
         field_config = fv.field_config or {}
         
-        # 1. Check dropdown references Approved value sets
+        # 1. Check dropdown has local field-level options
         if fv.field_type == "dropdown":
-            vs_ver_id = field_config.get("value_set_version_id")
-            if not vs_ver_id:
-                raise ValueError(f"Dropdown field '{f.field_code}' must reference a value set version.")
-            vs_ver = ValueSetVersion.query.get(vs_ver_id)
-            if not vs_ver or vs_ver.status != "Approved":
-                raise ValueError(f"Dropdown field '{f.field_code}' references a non-approved value set version.")
+            if not local_dropdown_options(field_config):
+                raise ValueError(f'Dropdown field "{fv.field_name}" must have at least one option.')
                 
         # 2. Check calculated fields reference published formulas
         elif fv.field_type == "calculated":
