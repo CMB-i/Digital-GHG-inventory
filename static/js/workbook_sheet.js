@@ -17,6 +17,17 @@
       .replace(/'/g, "&#039;");
   }
 
+  function getMonthName(month) {
+    const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return months[parseInt(month, 10)] || "";
+  }
+
+  function getFullMonthYear(month, year) {
+    const full = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const name = full[parseInt(month, 10)] || "";
+    return year ? name + " " + year : name;
+  }
+
   function rowKey(row) {
     return row.row_key || `${row.year || "row"}-${row.month || row.submission_id || "0"}`;
   }
@@ -79,17 +90,21 @@
     return null;
   }
 
-  function cellStateBadge(state) {
-    const meta = CELL_STATE_META[state] || {
-      label: state || "Unknown",
-      className: "bg-slate-100 text-slate-600 border-slate-200",
-    };
-    return `<span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${meta.className}">${escapeHtml(meta.label)}</span>`;
-  }
-
   function cellStateLabel(state) {
     const meta = CELL_STATE_META[state] || { label: state || "Unknown" };
     return meta.label;
+  }
+
+  function getRowStatusState(row) {
+    const status = row.submission_status || row.status || row.period_status || "Not Started";
+    if (status === "Approved") return "approved";
+    if (row.is_locked || status === "Locked") return "locked";
+    if (["Submitted", "Resubmitted", "Under Review"].includes(status)) return "submitted";
+    if (status === "Rejected") return "rejected";
+    if (status === "Changes Requested" || status === "Changes requested") return "changes_requested";
+    if (status === "Draft") return "draft";
+    if (!row.period_id || row.period_status !== "OPEN") return "not_open";
+    return "not_started";
   }
 
   function formatReadonlyValue(field, row) {
@@ -154,6 +169,7 @@
     return false;
   }
 
+  // annual setup fields are read-only monthly grid fields edited below
   function isEditableWorkbookField(field, options) {
     if (normalizedFrequency(field) !== "annual") return false;
     const fieldType = normalizedFieldType(field);
@@ -322,16 +338,17 @@
       return `<td class="border px-3 py-3 bg-slate-50 text-slate-400 text-xs text-center italic">—</td>`;
     }
 
-    const editable = options.mode === "entry" && row.editable && !cellLocked(row, field);
+    const rowLocked = row.is_locked || row.submission_status === "Approved";
+    const editable = options.mode === "entry" && row.editable && !cellLocked(row, field) && !rowLocked;
     const fieldType = normalizedFieldType(field);
     const disabled = !editable || fieldType === "calculated" || fieldType === "file";
     const state = cellState(row, field);
     const proof = proofFor(row, field);
     const issues = cellIssues(row, field);
     const valueId = submissionValueId(row, field);
-    const locked = cellLocked(row, field);
     const openHandler = options.onCellOpen || options.onIssueClick;
     const canOpen = typeof openHandler === "function";
+
     let stateClass = {
       blank_editable: "bg-white border-slate-200",
       draft_filled: "bg-blue-50/50 border-blue-100",
@@ -344,20 +361,56 @@
     const interactiveClass = canOpen && options.mode !== "entry"
       ? "cursor-pointer hover:ring-2 hover:ring-indigo-200"
       : "";
-    const stateTitle = `${cellStateLabel(state)}${locked ? " · Locked" : ""}${issues.length ? ` · ${issues.length} issue${issues.length === 1 ? "" : "s"}` : ""}`;
+    const stateTitle = `${cellStateLabel(state)}${rowLocked ? " · Locked" : ""}${issues.length ? ` · ${issues.length} issue${issues.length === 1 ? "" : "s"}` : ""}`;
 
     return `
       <td class="min-w-[180px] border align-top ${stateClass} ${interactiveClass}" data-submission-value-id="${valueId ? escapeHtml(valueId) : ""}" data-field-code="${escapeHtml(field.field_code)}" title="${escapeHtml(stateTitle)}">
         <div class="relative min-h-[48px]">
           ${issues.length ? '<span class="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" data-cell-open="true" title="Cell has issues/comments"></span>' : ""}
-          ${locked ? '<span class="absolute bottom-1 right-1 rounded-sm bg-emerald-100 px-1 text-[9px] font-bold text-emerald-700" title="Locked">LOCK</span>' : ""}
           ${proof && fieldType !== "file" ? '<span class="absolute bottom-1 left-1 h-1.5 w-1.5 rounded-full bg-indigo-500" title="Proof attached"></span>' : ""}
-          <div class="${issues.length || locked ? "pr-5" : "pr-2"}">
-            ${options.mode === "entry"
+          <div class="${issues.length || rowLocked ? "pr-5" : "pr-2"}">
+            ${editable
               ? renderEditableControl(field, row, disabled, options)
-              : `<div class="px-2 py-2 text-sm text-slate-800">${formatReadonlyValue(field, row)}</div>`}
+              : `<div class="px-2 py-2 text-sm text-slate-800 font-medium">${formatReadonlyValue(field, row)}</div>`}
           </div>
         </div>
+      </td>
+    `;
+  }
+
+  function renderRemarksCell(row, fileField, options) {
+    const key = rowKey(row);
+    const proof = fileField ? proofFor(row, fileField) : null;
+    const rowLocked = row.is_locked || row.submission_status === "Approved";
+
+    let content = "";
+    if (fileField) {
+      if (proof && proof.storage_key) {
+        content = `
+          <div class="flex flex-col gap-1.5">
+            <div class="flex items-center gap-1.5 text-xs text-emerald-700 font-bold">
+              <span>✓ Proof</span>
+              ${!rowLocked ? `<a href="#" class="text-indigo-600 hover:text-indigo-800 hover:underline trigger-upload" data-row-key="${escapeHtml(key)}" data-field-code="${escapeHtml(fileField.field_code)}">Replace</a>` : ""}
+            </div>
+            <a href="/module/SUBMIT/submissions/download/${encodeURIComponent(proof.storage_key)}" class="text-[11px] text-slate-500 truncate max-w-[150px] font-semibold hover:underline" title="${escapeHtml(proof.original_name)}">
+              ${escapeHtml(proof.original_name)}
+            </a>
+          </div>
+        `;
+      } else {
+        content = rowLocked
+          ? '<span class="text-slate-400 italic">No proof</span>'
+          : `<button type="button" class="text-indigo-600 hover:text-indigo-800 font-bold text-xs flex items-center gap-1 trigger-upload" data-row-key="${escapeHtml(key)}" data-field-code="${escapeHtml(fileField.field_code)}">
+              <span>📤 Upload</span>
+             </button>`;
+      }
+    } else {
+      content = '<span class="text-slate-400">—</span>';
+    }
+
+    return `
+      <td class="w-[140px] min-w-[140px] max-w-[140px] border align-middle bg-slate-50/50">
+        ${content}
       </td>
     `;
   }
@@ -417,7 +470,7 @@
         : "Context values";
     return `
       <tr class="bg-slate-50/70">
-        <td colspan="${Math.max(3, (options.monthlyColumnCount || 0) + 2)}" class="border border-slate-200 px-4 py-4">
+        <td colspan="${options.totalColumns || 3}" class="border border-slate-200 px-4 py-4">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <div class="text-sm font-bold text-slate-900">${escapeHtml(group.name)}</div>
@@ -441,6 +494,8 @@
     return "bg-slate-100 text-slate-600 border-slate-200";
   }
 
+
+
   function render(options) {
     const fields = options.fields || [];
     const rows = options.rows || [];
@@ -453,7 +508,6 @@
     let groups = [];
 
     if (hasSections) {
-      // Group fields by section
       options.sections.forEach(section => {
         const sectionFields = fields.filter(f => f.section_id === section.id);
         if (sectionFields.length > 0) {
@@ -466,7 +520,6 @@
         }
       });
 
-      // Find any fields not in any of the active sections
       const sectionIds = new Set(options.sections.map(s => s.id));
       const ungroupedFields = fields.filter(f => !f.section_id || !sectionIds.has(f.section_id));
       if (ungroupedFields.length > 0) {
@@ -499,25 +552,44 @@
       }))
       .filter(group => group.fields.length > 0);
 
-    if (hasSections && monthlyGroups.length > 0) {
+    // Redesign Spoc month table around display fields (excluding file/calc in entry modes)
+    const isCalcMode = options.mode === "calc_results";
+    const displayFields = isCalcMode
+      ? monthlyFields
+      : monthlyFields.filter(f => normalizedFieldType(f) !== "file" && normalizedFieldType(f) !== "calculated");
+
+    const fileField = isCalcMode ? null : monthlyFields.find(f => normalizedFieldType(f) === "file");
+
+    const getGroupColspan = (group) => {
+      return group.fields.filter(f => 
+        isCalcMode || (normalizedFieldType(f) !== "file" && normalizedFieldType(f) !== "calculated")
+      ).length;
+    };
+
+    const activeGroups = hasSections ? monthlyGroups.filter(g => getGroupColspan(g) > 0) : [];
+    const hasVisibleGroups = activeGroups.some(g => g.name.toLowerCase() !== "ungrouped");
+
+    if (hasSections && monthlyGroups.length > 0 && hasVisibleGroups) {
       headEl.innerHTML = `
         <tr>
-          <th rowspan="2" class="sticky left-0 z-20 min-w-[150px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Month</th>
-          <th rowspan="2" class="min-w-[160px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Status</th>
-          ${monthlyGroups.map((group) => `
-            <th colspan="${group.fields.length}" class="border border-slate-200 bg-slate-100 px-3 py-1.5 text-center font-extrabold text-slate-700 tracking-wide uppercase text-xs">
-              ${escapeHtml(group.name)}
-              ${group.layout_type !== "monthly_table" ? `<span class="ml-1.5 text-[9px] font-normal lowercase text-slate-500 bg-slate-200 px-1.5 py-0.5 rounded">(${group.layout_type.replace("_table", "")})</span>` : ""}
-            </th>
-          `).join("")}
+          <th rowspan="2" class="sticky left-0 z-20 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Month</th>
+          ${activeGroups.map((group) => {
+            const isUngrouped = group.name.toLowerCase() === "ungrouped";
+            return `
+              <th colspan="${getGroupColspan(group)}" class="${isUngrouped ? "bg-transparent border-0" : "border border-slate-200 bg-slate-100 font-extrabold text-slate-700"} px-3 py-1.5 text-center tracking-wide uppercase text-xs">
+                ${isUngrouped ? "" : escapeHtml(group.name)}
+              </th>
+            `;
+          }).join("")}
+          ${!isCalcMode ? '<th rowspan="2" class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
         <tr>
-          ${monthlyFields.map((field) => `
-            <th class="min-w-[190px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">
-              <div class="font-bold text-slate-600">${escapeHtml(field.field_name)}</div>
-              <div class="mt-0.5 text-[10px] normal-case text-slate-400">
+          ${displayFields.map((field) => `
+            <th class="min-w-[180px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">
+              <div class="font-bold">${escapeHtml(field.field_name)}</div>
+              <div class="mt-0.5 text-[10px] normal-case text-slate-300">
                 ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
-                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-500">*</span>' : ""}
+                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
               </div>
             </th>
           `).join("")}
@@ -526,50 +598,88 @@
     } else {
       headEl.innerHTML = `
         <tr>
-          <th class="sticky left-0 z-20 min-w-[150px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Month</th>
-          <th class="min-w-[160px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">Status</th>
-          ${monthlyFields.map((field) => `
-            <th class="min-w-[190px] border border-slate-200 bg-slate-50 px-3 py-2 text-left">
-              <div class="font-bold text-slate-600">${escapeHtml(field.field_name)}</div>
-              <div class="mt-0.5 text-[10px] normal-case text-slate-400">
+          <th class="sticky left-0 z-20 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Month</th>
+          ${displayFields.map((field) => `
+            <th class="min-w-[180px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">
+              <div class="font-bold">${escapeHtml(field.field_name)}</div>
+              <div class="mt-0.5 text-[10px] normal-case text-slate-300">
                 ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
-                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-500">*</span>' : ""}
+                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
               </div>
             </th>
           `).join("")}
+          ${!isCalcMode ? '<th class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
       `;
     }
 
-    bodyEl.innerHTML = rows.map((row) => {
+    let tbodyHtml = "";
+    for (let idx = 0; idx < rows.length; idx++) {
+      const row = rows[idx];
+      const prevRow = idx > 0 ? rows[idx - 1] : null;
       const key = rowKey(row);
       const selected = key === options.selectedRowKey;
-      const rowClass = selected ? "bg-indigo-50/60" : "bg-white hover:bg-slate-50/60";
       const status = row.submission_status || row.status || row.period_status || "Unavailable";
-      return `
-        <tr data-row-key="${escapeHtml(key)}" class="${rowClass} transition">
-          <td class="sticky left-0 z-10 border border-slate-200 bg-inherit px-3 py-3 align-top">
-            <div class="font-bold text-slate-900">${escapeHtml(row.label || row.period_label || "Row")}</div>
-            <div class="text-xs text-slate-500">${escapeHtml(row.period_label || row.sheet_name || "")}</div>
+
+      let rowClass = selected ? "bg-indigo-50/60" : "bg-white hover:bg-slate-50/60";
+      if (row.is_active_period && row.period_status === "OPEN") {
+        rowClass = "bg-white font-semibold active-reporting-row current-month-row";
+      } else if (row.submission_status === "Approved" || row.is_locked) {
+        rowClass = "bg-[#eef3fa]/50 opacity-85 text-slate-500";
+      }
+
+      const rowState = getRowStatusState(row);
+      let monthBgClass = "";
+      let lockSuffix = "";
+      if (row.is_active_period && row.period_status === "OPEN") {
+        monthBgClass = "bg-white text-[#1f2937]";
+      } else if (rowState === "approved") {
+        monthBgClass = "bg-[#e6f4ea] text-[#1f2937] border-l-4 border-l-[#137333]";
+        lockSuffix = " 🔒";
+      } else if (rowState === "locked") {
+        monthBgClass = "bg-[#f1f3f4] text-[#1f2937] border-l-4 border-l-[#5f6368]";
+        lockSuffix = " 🔒";
+      } else if (rowState === "submitted") {
+        monthBgClass = "bg-[#f3e8ff] text-[#1f2937] border-l-4 border-l-[#7000af]";
+      } else if (rowState === "changes_requested") {
+        monthBgClass = "bg-[#fce8e6] text-[#1f2937] border-l-4 border-l-[#c5221f]";
+      } else if (rowState === "rejected") {
+        monthBgClass = "bg-[#fff7ed] text-[#1f2937] border-l-4 border-l-[#ea580c]";
+      } else if (rowState === "draft") {
+        monthBgClass = "bg-[#e6fffa] text-[#1f2937] border-l-4 border-l-[#007a78]";
+      } else if (rowState === "not_open") {
+        monthBgClass = "bg-[#f8f9fa] text-[#1f2937] opacity-60 border-l-4 border-l-[#70757a]";
+      } else {
+        monthBgClass = "bg-white text-[#1f2937] border-l-4 border-l-slate-300";
+      }
+
+      const trExtraClasses = (rowState === "not_open" ? " aw-row-not-open" : "") + ((rowState === "approved" || rowState === "locked") ? " aw-row-approved" : "");
+      tbodyHtml += `
+        <tr data-row-key="${escapeHtml(key)}" class="${rowClass} transition${trExtraClasses}">
+          <td class="sticky left-0 z-10 align-middle month-cell ${monthBgClass}">
+            ${escapeHtml(getFullMonthYear(row.month, row.year))}${lockSuffix}
           </td>
-          <td class="border border-slate-200 px-3 py-3 align-top">
-            <span class="inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(row)}">${escapeHtml(status)}</span>
-            ${row.reason ? `<div class="mt-1 max-w-[180px] text-xs text-slate-400">${escapeHtml(row.reason)}</div>` : ""}
-          </td>
-          ${monthlyFields.map((field) => renderCell(row, field, options)).join("")}
+          ${displayFields.map((field) => renderCell(row, field, options)).join("")}
+          ${!isCalcMode ? renderRemarksCell(row, fileField, options) : ""}
         </tr>
       `;
-    }).join("") + nonMonthlyGroups.map((group) => renderWorkbookValueSection(group, {
-      ...options,
-      monthlyColumnCount: monthlyFields.length,
-    })).join("");
+    }
 
+    bodyEl.innerHTML = tbodyHtml + (isCalcMode ? "" : nonMonthlyGroups.map((group) => renderWorkbookValueSection(group, {
+      ...options,
+      totalColumns: displayFields.length + 2,
+    })).join(""));
+
+    // Event Bindings
     bodyEl.querySelectorAll("tr[data-row-key]").forEach((tr) => {
       tr.addEventListener("click", function (event) {
         if (event.target && ["INPUT", "SELECT", "TEXTAREA", "BUTTON", "A"].includes(event.target.tagName)) return;
+        if (event.target && event.target.closest(".trigger-upload")) return;
         if (typeof options.onRowSelect === "function") options.onRowSelect(tr.dataset.rowKey);
       });
     });
+
+
 
     bodyEl.querySelectorAll("input[data-field-code], select[data-field-code], textarea[data-field-code]").forEach((input) => {
       input.addEventListener("input", options.onCellChange || function () {});
@@ -596,6 +706,20 @@
     bodyEl.querySelectorAll("[data-workbook-field-code]").forEach((input) => {
       input.addEventListener("input", options.onWorkbookValueChange || function () {});
       input.addEventListener("change", options.onWorkbookValueChange || function () {});
+    });
+
+    // File Upload programmatical triggers
+    bodyEl.querySelectorAll(".trigger-upload").forEach(btn => {
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        const uploader = document.getElementById("inline-file-uploader");
+        if (uploader) {
+          uploader.dataset.targetRowKey = btn.dataset.rowKey;
+          uploader.dataset.targetFieldCode = btn.dataset.fieldCode;
+          uploader.value = ""; // Reset file picker
+          uploader.click();
+        }
+      });
     });
   }
 

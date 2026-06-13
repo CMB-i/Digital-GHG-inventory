@@ -177,6 +177,10 @@ def human_sheet_label(form):
         if label and not _looks_like_internal_code(label):
             return label
 
+    if form.code:
+        return form.code.strip()
+    if form.name:
+        return form.name.strip()
     return "Untitled Sheet"
 
 
@@ -677,6 +681,7 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
             "editability": editability,
             "values": _submission_values_payload(submission, fields),
             "issues": submission_value_issues_by_field(submission, fields),
+            "is_active_period": bool(period and period.status in ("OPEN", "REOPENED")),
         })
 
     return {
@@ -941,6 +946,8 @@ def compose_calculation_results(site_id, fy_start_year, user_id):
     # Map all fields in assigned forms to translate dependency codes to names
     all_fields = Field.query.filter(Field.form_id.in_(form_ids or [0]), Field.is_deleted == False).all()
     field_id_to_code = {f.id: f.field_code for f in all_fields}
+    form_map = {form.id: human_sheet_label(form) for form, _ in assigned}
+    field_code_to_form_name = {f.field_code: form_map.get(f.form_id, "Unknown Sheet") for f in all_fields}
 
     for form, metadata in assigned:
         fields = get_form_version_fields(form.current_version_id)
@@ -968,6 +975,7 @@ def compose_calculation_results(site_id, fy_start_year, user_id):
             "field_type": "calculated",
             "field_config": item["version"].field_config or {},
             "display_order": item["field"].display_order,
+            "form_id": item["form"].id,
         })
 
     value_set_snapshot = get_approved_valsets_snapshot()
@@ -1098,8 +1106,12 @@ def compose_calculation_results(site_id, fy_start_year, user_id):
                     if missing_preview_deps:
                         preview_status = "missing_input"
                         for dep in missing_preview_deps:
-                            dep_name = field_code_to_name.get(dep, dep)
-                            preview_warnings.append(f"Cannot calculate — waiting for {dep_name}.")
+                            form_name = field_code_to_form_name.get(dep)
+                            if form_name and form_name != human_sheet_label(field_info["form"]):
+                                preview_warnings.append(f"Cannot calculate yet — [{form_name}] value is missing")
+                            else:
+                                dep_name = field_code_to_name.get(dep, dep)
+                                preview_warnings.append(f"Cannot calculate — waiting for {dep_name}.")
                     else:
                         try:
                             preview_val = evaluate_formula(formula_version.expression, preview_field_values, value_set_snapshot)
@@ -1124,8 +1136,12 @@ def compose_calculation_results(site_id, fy_start_year, user_id):
                     if missing_reportable_deps:
                         reportable_status = "missing_input"
                         for dep in missing_reportable_deps:
-                            dep_name = field_code_to_name.get(dep, dep)
-                            reportable_warnings.append(f"Cannot calculate — waiting for {dep_name}.")
+                            form_name = field_code_to_form_name.get(dep)
+                            if form_name and form_name != human_sheet_label(field_info["form"]):
+                                reportable_warnings.append(f"Cannot calculate yet — [{form_name}] value is missing")
+                            else:
+                                dep_name = field_code_to_name.get(dep, dep)
+                                reportable_warnings.append(f"Cannot calculate — waiting for {dep_name}.")
                     elif unapproved_reportable_deps:
                         reportable_status = "pending_approval"
                         for dep in unapproved_reportable_deps:
@@ -1173,7 +1189,8 @@ def compose_calculation_results(site_id, fy_start_year, user_id):
                 "reason": "Calculation Results are read-only output."
             },
             "values": row_values,
-            "issues": {}
+            "issues": {},
+            "is_active_period": bool(period and period.status in ("OPEN", "REOPENED")),
         })
 
     return {
