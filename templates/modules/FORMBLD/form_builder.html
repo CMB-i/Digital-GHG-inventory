@@ -220,10 +220,11 @@
               <input type="text" id="prop-code" required placeholder="e.g. fuel_qty" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border font-mono uppercase">
             </div>
             <div>
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Section</label>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Current Section / Sheet</label>
               <select id="prop-section" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
                 <option value="">No section</option>
               </select>
+              <p class="mt-1 text-[10px] text-slate-400">Changing this moves the field to the selected section on save draft.</p>
             </div>
             <div>
               <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Field Frequency</label>
@@ -322,10 +323,10 @@
 
             <!-- Order & Placement -->
             <div class="border-t border-slate-100 pt-3 flex items-center justify-between">
-              <span class="text-xs text-slate-500 font-semibold">Re-order Field:</span>
+              <span class="text-xs text-slate-500 font-semibold">Re-order within section:</span>
               <div class="flex items-center space-x-1">
-                <button type="button" id="btn-move-up" class="p-1 px-2 border border-slate-200 hover:bg-slate-50 rounded text-slate-500 font-bold">▲</button>
-                <button type="button" id="btn-move-down" class="p-1 px-2 border border-slate-200 hover:bg-slate-50 rounded text-slate-500 font-bold">▼</button>
+                <button type="button" id="btn-move-up" class="p-1 px-2 border border-slate-200 hover:bg-slate-50 rounded text-slate-500 font-bold disabled:opacity-40 disabled:cursor-not-allowed">▲</button>
+                <button type="button" id="btn-move-down" class="p-1 px-2 border border-slate-200 hover:bg-slate-50 rounded text-slate-500 font-bold disabled:opacity-40 disabled:cursor-not-allowed">▼</button>
               </div>
             </div>
 

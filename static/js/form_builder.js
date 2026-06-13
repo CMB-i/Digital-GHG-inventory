@@ -120,6 +120,16 @@ document.addEventListener("DOMContentLoaded", function () {
     return currentSections.find(section => section.code === activeSectionCode) || null;
   }
 
+  function orderedSections() {
+    return currentSections
+      .slice()
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+  }
+
+  function sameSection(field, sectionCode) {
+    return (field.section_code || "") === (sectionCode || "");
+  }
+
   function fieldsForActiveSection() {
     return currentFields
       .filter(field => {
@@ -128,6 +138,99 @@ document.addEventListener("DOMContentLoaded", function () {
       })
       .slice()
       .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+  }
+
+  function fieldsForSection(sectionCode) {
+    return currentFields
+      .filter(field => sameSection(field, sectionCode))
+      .slice()
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+  }
+
+  function normalizeFieldDisplayOrder() {
+    const ordered = [];
+    fieldsForSection("").forEach(field => ordered.push(field));
+    orderedSections().forEach(section => {
+      fieldsForSection(section.code).forEach(field => ordered.push(field));
+    });
+    const seen = new Set();
+    ordered.forEach((field, idx) => {
+      field.display_order = idx + 1;
+      seen.add(field.field_code);
+    });
+    currentFields
+      .filter(field => !seen.has(field.field_code))
+      .forEach(field => {
+        field.display_order = ordered.length + 1;
+        ordered.push(field);
+      });
+    currentFields = ordered;
+  }
+
+  function normalizeSectionDisplayOrder() {
+    currentSections = orderedSections().map((section, idx) => ({
+      ...section,
+      display_order: idx + 1,
+    }));
+  }
+
+  function moveSection(code, direction) {
+    syncSectionsFromDom();
+    const sections = orderedSections();
+    const idx = sections.findIndex(section => section.code === code);
+    const targetIdx = idx + direction;
+    if (idx < 0 || targetIdx < 0 || targetIdx >= sections.length) return;
+    const moving = sections[idx];
+    sections[idx] = sections[targetIdx];
+    sections[targetIdx] = moving;
+    currentSections = sections.map((section, orderIdx) => ({
+      ...section,
+      display_order: orderIdx + 1,
+    }));
+    activeSectionCode = code;
+    normalizeFieldDisplayOrder();
+    isUnsaved = true;
+    updateSaveStatusText();
+    renderSections();
+    renderWorkspace();
+    if (selectedFieldCode) openInspector(selectedFieldCode);
+  }
+
+  function moveFieldWithinActiveSection(fieldCode, direction) {
+    const field = currentFields.find(item => item.field_code === fieldCode);
+    if (!field) return;
+    const sectionCode = field.section_code || "";
+    const sectionFields = fieldsForSection(sectionCode);
+    const idx = sectionFields.findIndex(item => item.field_code === fieldCode);
+    const targetIdx = idx + direction;
+    if (idx < 0 || targetIdx < 0 || targetIdx >= sectionFields.length) return;
+    const moving = sectionFields[idx];
+    sectionFields[idx] = sectionFields[targetIdx];
+    sectionFields[targetIdx] = moving;
+
+    const previousFields = currentFields.slice();
+    const ordered = [];
+    ["", ...orderedSections().map(section => section.code)].forEach(code => {
+      const source = code === sectionCode ? sectionFields : fieldsForSection(code);
+      source.forEach(item => ordered.push(item));
+    });
+    const seen = new Set();
+    currentFields = ordered.filter(item => {
+      if (seen.has(item.field_code)) return false;
+      seen.add(item.field_code);
+      return true;
+    });
+    previousFields
+      .filter(item => !seen.has(item.field_code))
+      .forEach(item => currentFields.push(item));
+    currentFields.forEach((item, orderIdx) => {
+      item.display_order = orderIdx + 1;
+    });
+    selectedFieldCode = fieldCode;
+    isUnsaved = true;
+    updateSaveStatusText();
+    renderWorkspace();
+    openInspector(fieldCode);
   }
 
   function normalizeDropdownOptions(options) {
@@ -272,6 +375,16 @@ document.addEventListener("DOMContentLoaded", function () {
     loadVersionDetails(versionId);
   };
 
+  window.editWorkbookCard = function (formId, versionId, status) {
+    if (status === "Published") {
+      createNewDraft(formId);
+      return;
+    }
+    if (versionId) {
+      editFormLayout(formId, versionId);
+    }
+  };
+
   // --- Initial Setup & Data Fetching ---
   function init() {
     // 1. Fetch sites
@@ -376,20 +489,15 @@ document.addEventListener("DOMContentLoaded", function () {
           }
 
           // Actions
-          let primaryAction = "";
+          let editAction = "";
+          let previewAction = "";
           let secondaryActions = [];
-          if (status === "Draft" && form.latest_version_id) {
-            primaryAction = `<button onclick="editFormLayout(${form.id}, ${form.latest_version_id})" class="btn btn-primary btn-sm">Edit</button>`;
-            secondaryActions.push(`<button onclick="editFormDetails(${form.id})" class="block w-full px-3 py-1.5 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50">Edit details</button>`);
-          } else if (status === "Published") {
-            primaryAction = `<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="btn btn-outline btn-sm">View</button>`;
-            secondaryActions.push(`<button onclick="createNewDraft(${form.id})" class="block w-full px-3 py-1.5 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50">New draft version</button>`);
-          } else if (form.latest_version_id) {
-            primaryAction = `<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="btn btn-outline btn-sm">View</button>`;
-          }
-          
           if (form.latest_version_id) {
-            secondaryActions.push(`<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="block w-full px-3 py-1.5 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50">Preview</button>`);
+            editAction = `<button onclick="editWorkbookCard(${form.id}, ${form.latest_version_id}, '${escapeHtml(status)}')" class="btn btn-primary btn-sm min-w-[72px]" aria-label="Edit workbook ${escapeHtml(form.display_name || form.name)}">Edit</button>`;
+            previewAction = `<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="btn btn-outline btn-sm min-w-[72px]" aria-label="Preview workbook ${escapeHtml(form.display_name || form.name)}">Preview</button>`;
+          }
+          if (status === "Draft" && form.latest_version_id) {
+            secondaryActions.push(`<button onclick="editFormDetails(${form.id})" class="block w-full px-3 py-1.5 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50">Edit details</button>`);
           }
 
           card.innerHTML = `
@@ -420,7 +528,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 ${form.workflow_id ? "Workflow assigned" : "Workflow not assigned"}
               </div>
               <div class="flex items-center gap-2">
-                ${primaryAction}
+                ${editAction}
+                ${previewAction}
                 ${secondaryActions.length ? `
                   <div class="relative group">
                     <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-500 hover:bg-slate-50" aria-label="More actions">...</button>
@@ -628,9 +737,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function renderSections() {
     if (!sectionsList) return;
-    const sortedSections = currentSections
-      .slice()
-      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+    const sortedSections = orderedSections();
     const totalCount = currentFields.length;
     const allActiveClass = !activeSectionCode
       ? "border-indigo-200 bg-indigo-50 text-indigo-700"
@@ -653,6 +760,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     sectionsList.innerHTML = allRow + sortedSections
       .map(section => {
+        const idx = sortedSections.findIndex(item => item.code === section.code);
         const sectionFields = currentFields.filter(field => field.section_code === section.code).length;
         const activeClass = activeSectionCode === section.code
           ? "border-indigo-200 bg-indigo-50/70"
@@ -663,6 +771,13 @@ document.addEventListener("DOMContentLoaded", function () {
             <span class="truncate text-xs font-bold text-slate-800">${escapeHtml(section.name || section.code)}</span>
             <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">${sectionFields}</span>
           </button>
+          <div class="flex items-center justify-between gap-2 text-[10px] font-bold text-slate-500">
+            <span>Order ${idx + 1}</span>
+            <div class="flex items-center gap-1">
+              <button type="button" class="section-move-up rounded border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-section-code="${escapeHtml(section.code)}" ${idx === 0 ? "disabled" : ""} aria-label="Move section up">▲</button>
+              <button type="button" class="section-move-down rounded border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-section-code="${escapeHtml(section.code)}" ${idx === sortedSections.length - 1 ? "disabled" : ""} aria-label="Move section down">▼</button>
+            </div>
+          </div>
           <div class="flex items-center justify-between gap-2">
             <input
               type="text"
@@ -720,8 +835,13 @@ document.addEventListener("DOMContentLoaded", function () {
           field.section_id = previous.id || null;
         }
       });
+      if (activeSectionCode === originalCode) {
+        activeSectionCode = code;
+      }
     });
     currentSections = nextSections;
+    normalizeSectionDisplayOrder();
+    normalizeFieldDisplayOrder();
     if (activeSectionCode && !currentSections.some(section => section.code === activeSectionCode)) {
       activeSectionCode = "";
     }
@@ -772,6 +892,8 @@ document.addEventListener("DOMContentLoaded", function () {
           const selectedClass = field.field_code === selectedFieldCode
             ? "border-indigo-300 bg-indigo-50/50 ring-1 ring-indigo-200"
             : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50";
+          const sectionFields = fieldsForSection(field.section_code || "");
+          const sectionIdx = sectionFields.findIndex(item => item.field_code === field.field_code);
           const indicators = [];
           if (config.is_required) indicators.push("Required");
           if (field.field_type === "calculated") indicators.push("Calculated");
@@ -781,30 +903,46 @@ document.addEventListener("DOMContentLoaded", function () {
             indicators.push(optionCount ? `Options: ${optionCount}` : "Needs options");
           }
           return `
-            <button type="button" class="field-row flex w-full items-center justify-between gap-4 rounded-lg border px-4 py-3 text-left transition ${selectedClass}" data-field-code="${escapeHtml(field.field_code)}">
-              <div class="min-w-0">
+            <div class="field-row flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left transition ${selectedClass}" data-field-code="${escapeHtml(field.field_code)}">
+              <button type="button" class="field-select min-w-0 flex-1 text-left" data-field-code="${escapeHtml(field.field_code)}">
                 <div class="truncate text-sm font-bold text-slate-900">${escapeHtml(field.field_name || field.field_code)}</div>
                 <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-slate-500">
                   <span class="font-mono">${escapeHtml(field.field_code)}</span>
+                  <span class="rounded-full bg-slate-100 px-1.5 py-0.5">Order ${sectionIdx + 1}</span>
                   ${indicators.map(item => `<span class="rounded-full bg-slate-100 px-1.5 py-0.5">${escapeHtml(item)}</span>`).join("")}
                 </div>
-              </div>
+              </button>
               <div class="flex flex-shrink-0 items-center gap-2">
                 <span class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-600">${escapeHtml(humanizeType(field.field_type))}</span>
                 <span class="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase text-blue-700">${escapeHtml(field.frequency || "monthly")}</span>
-                <span class="text-xs font-bold text-indigo-600">Edit</span>
+                <div class="flex items-center gap-1">
+                  <button type="button" class="field-move-up rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-field-code="${escapeHtml(field.field_code)}" ${sectionIdx <= 0 ? "disabled" : ""} aria-label="Move field up">▲</button>
+                  <button type="button" class="field-move-down rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-field-code="${escapeHtml(field.field_code)}" ${sectionIdx === sectionFields.length - 1 ? "disabled" : ""} aria-label="Move field down">▼</button>
+                </div>
+                <button type="button" class="field-select text-xs font-bold text-indigo-600" data-field-code="${escapeHtml(field.field_code)}">Edit</button>
               </div>
-            </button>
+            </div>
           `;
         }).join("")}
       </div>
     `;
 
-    formWorkspace.querySelectorAll(".field-row").forEach(row => {
-      row.onclick = function () {
-        selectedFieldCode = row.dataset.fieldCode;
-        highlightRow(row);
+    formWorkspace.querySelectorAll(".field-select").forEach(button => {
+      button.onclick = function () {
+        selectedFieldCode = button.dataset.fieldCode;
+        const row = button.closest(".field-row");
+        if (row) highlightRow(row);
         openInspector(selectedFieldCode);
+      };
+    });
+    formWorkspace.querySelectorAll(".field-move-up").forEach(button => {
+      button.onclick = function () {
+        moveFieldWithinActiveSection(button.dataset.fieldCode, -1);
+      };
+    });
+    formWorkspace.querySelectorAll(".field-move-down").forEach(button => {
+      button.onclick = function () {
+        moveFieldWithinActiveSection(button.dataset.fieldCode, 1);
       };
     });
   }
@@ -869,6 +1007,10 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("prop-name").value = field.field_name;
     propSection.value = field.section_code || "";
     propFrequency.value = field.frequency || "monthly";
+    const sectionFields = fieldsForSection(field.section_code || "");
+    const sectionIndex = sectionFields.findIndex(item => item.field_code === field.field_code);
+    if (btnMoveUp) btnMoveUp.disabled = sectionIndex <= 0;
+    if (btnMoveDown) btnMoveDown.disabled = sectionIndex === -1 || sectionIndex >= sectionFields.length - 1;
     document.getElementById("prop-required").checked = field.field_config.is_required || false;
     document.getElementById("prop-remarks-req").checked = field.field_config.remarks_required || false;
     document.getElementById("prop-proof-req").checked = field.field_config.proof_required || false;
@@ -928,6 +1070,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (fieldIdx === -1) return;
 
     const field = currentFields[fieldIdx];
+    const previousSectionCode = field.section_code || "";
     const newCode = document.getElementById("prop-code").value.trim().toLowerCase().replace(/\s+/g, "_");
 
     // Validate code duplicate
@@ -942,6 +1085,13 @@ document.addEventListener("DOMContentLoaded", function () {
     field.section_code = propSection.value || "";
     const section = currentSections.find(item => item.code === field.section_code);
     field.section_id = section && section.id ? section.id : null;
+    if ((field.section_code || "") !== previousSectionCode) {
+      const targetSectionFields = fieldsForSection(field.section_code).filter(item => item.field_code !== field.field_code);
+      field.display_order = targetSectionFields.length
+        ? Math.max(...targetSectionFields.map(item => item.display_order || 0)) + 1
+        : currentFields.length + 1;
+      activeSectionCode = field.section_code || "";
+    }
     field.frequency = propFrequency.value || "monthly";
     field.field_config.is_required = document.getElementById("prop-required").checked;
     field.field_config.remarks_required = document.getElementById("prop-remarks-req").checked;
@@ -993,6 +1143,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     selectedFieldCode = newCode;
     isUnsaved = true;
+    normalizeFieldDisplayOrder();
     updateSaveStatusText();
     renderSections();
     renderWorkspace();
@@ -1025,6 +1176,7 @@ document.addEventListener("DOMContentLoaded", function () {
       currentFields.push(newField);
       isUnsaved = true;
       selectedFieldCode = code;
+      normalizeFieldDisplayOrder();
 
       updateSaveStatusText();
       renderSections();
@@ -1041,7 +1193,7 @@ document.addEventListener("DOMContentLoaded", function () {
     currentFields = currentFields.filter(x => x.field_code !== selectedFieldCode);
     
     // Normalize display order numbers
-    currentFields.forEach((f, idx) => f.display_order = idx + 1);
+    normalizeFieldDisplayOrder();
 
     isUnsaved = true;
     closeInspector();
@@ -1065,6 +1217,8 @@ document.addEventListener("DOMContentLoaded", function () {
       });
       activeSectionCode = code;
       isUnsaved = true;
+      normalizeSectionDisplayOrder();
+      normalizeFieldDisplayOrder();
       updateSaveStatusText();
       renderSections();
       renderWorkspace();
@@ -1088,6 +1242,17 @@ document.addEventListener("DOMContentLoaded", function () {
       renderWorkspace();
     });
     sectionsList.addEventListener("click", function (e) {
+      const moveUpButton = e.target.closest(".section-move-up");
+      if (moveUpButton) {
+        moveSection(moveUpButton.dataset.sectionCode, -1);
+        return;
+      }
+      const moveDownButton = e.target.closest(".section-move-down");
+      if (moveDownButton) {
+        moveSection(moveDownButton.dataset.sectionCode, 1);
+        return;
+      }
+
       const selectButton = e.target.closest(".section-select");
       if (selectButton) {
         activeSectionCode = selectButton.dataset.sectionCode || "";
@@ -1111,6 +1276,8 @@ document.addEventListener("DOMContentLoaded", function () {
         activeSectionCode = "";
       }
       isUnsaved = true;
+      normalizeSectionDisplayOrder();
+      normalizeFieldDisplayOrder();
       updateSaveStatusText();
       renderSections();
       renderWorkspace();
@@ -1142,46 +1309,21 @@ document.addEventListener("DOMContentLoaded", function () {
   // Move Field Up
   btnMoveUp.onclick = function () {
     if (!selectedFieldCode) return;
-    const idx = currentFields.findIndex(x => x.field_code === selectedFieldCode);
-    if (idx <= 0) return;
-
-    const tempOrder = currentFields[idx].display_order;
-    currentFields[idx].display_order = currentFields[idx - 1].display_order;
-    currentFields[idx - 1].display_order = tempOrder;
-
-    // Swap elements in array
-    const item = currentFields[idx];
-    currentFields[idx] = currentFields[idx - 1];
-    currentFields[idx - 1] = item;
-
-    isUnsaved = true;
-    updateSaveStatusText();
-    renderWorkspace();
+    moveFieldWithinActiveSection(selectedFieldCode, -1);
   };
 
   // Move Field Down
   btnMoveDown.onclick = function () {
     if (!selectedFieldCode) return;
-    const idx = currentFields.findIndex(x => x.field_code === selectedFieldCode);
-    if (idx === -1 || idx >= currentFields.length - 1) return;
-
-    const tempOrder = currentFields[idx].display_order;
-    currentFields[idx].display_order = currentFields[idx + 1].display_order;
-    currentFields[idx + 1].display_order = tempOrder;
-
-    // Swap elements in array
-    const item = currentFields[idx];
-    currentFields[idx] = currentFields[idx + 1];
-    currentFields[idx + 1] = item;
-
-    isUnsaved = true;
-    updateSaveStatusText();
-    renderWorkspace();
+    moveFieldWithinActiveSection(selectedFieldCode, 1);
   };
 
   // Save Layout Draft
   btnSaveLayout.onclick = function () {
     if (!selectedVersionId) return;
+    syncSectionsFromDom();
+    normalizeSectionDisplayOrder();
+    normalizeFieldDisplayOrder();
 
     fetch(`/module/FORMBLD/api/version/${selectedVersionId}/fields`, {
       method: "POST",
@@ -1264,7 +1406,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Create new version draft for published form
   window.createNewDraft = function (formId) {
-    if (!confirm("Create a new draft version based on the current published fields?")) return;
+    if (!confirm("Edit this published workbook? A draft will be prepared so the published version stays unchanged.")) return;
 
     fetch(`/module/FORMBLD/api/${formId}/new-version`, {
       method: "POST"
@@ -1274,7 +1416,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (resData.error) {
           showToast(resData.error, "error");
         } else {
-          showToast("New draft version created.");
+          showToast("Workbook ready to edit.");
           // Refresh list and open layout for editing
           fetch("/module/FORMBLD/api")
             .then(res => res.json())
