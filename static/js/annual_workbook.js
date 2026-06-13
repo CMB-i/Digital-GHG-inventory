@@ -333,7 +333,7 @@ document.addEventListener("DOMContentLoaded", function () {
         : null;
       if (activeRow) {
         const mName = activeRow.label || getMonthName(activeRow.month);
-        currentMonthEl.textContent = `CURRENT MONTH: ${mName.toUpperCase()}`;
+        currentMonthEl.textContent = "OPEN FOR ENTRY";
         currentMonthEl.classList.remove("hidden");
       } else {
         currentMonthEl.classList.add("hidden");

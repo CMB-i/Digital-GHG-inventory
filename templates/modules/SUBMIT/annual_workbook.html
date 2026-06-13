@@ -73,25 +73,10 @@
     </div>
   </section>
 
-  <!-- Calculated Results Section -->
-  <section id="calculated-results-section" class="hidden border border-slate-300 bg-[#eef3fa] shadow-sm">
-    <div class="bg-navy text-white px-5 py-3 border-l-4 border-red-jsw flex items-center justify-between">
-      <h2 class="text-xs font-bold uppercase tracking-widest text-white">Calculated Results</h2>
-      <span class="text-[10px] text-slate-300 font-semibold uppercase tracking-wider">Locked / Formulas</span>
-    </div>
-    <div class="overflow-x-auto bg-[#eef3fa]">
-      <table class="min-w-full border-collapse bg-[#eef3fa]">
-        <thead class="bg-navy text-white text-xs font-semibold uppercase tracking-wider">
-          <tr id="calc-head-tr">
-            <!-- Injected headers -->
-          </tr>
-        </thead>
-        <tbody id="calc-body-rows" class="divide-y divide-slate-200 text-sm text-slate-800">
-          <!-- Injected rows -->
-        </tbody>
-      </table>
-    </div>
-  </section>
+  <div class="calc-results-link">
+    Calculated outputs are shown in the
+    <a href="#" onclick="event.preventDefault(); switchToCalcTab();">Calculation Results</a> tab.
+  </div>
 </div>
 
 <!-- Hidden File Uploader for Proof Attachment -->
@@ -158,4 +143,11 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/workbook_sheet.js') }}"></script>
 <script src="{{ url_for('static', filename='js/annual_workbook.js') }}"></script>
+<script>
+function switchToCalcTab() {
+  document.querySelectorAll("#form-tabs .workbook-tab").forEach(function (btn) {
+    if (btn.textContent.trim() === "Calculation Results") { btn.click(); }
+  });
+}
+</script>
 {% endblock %}

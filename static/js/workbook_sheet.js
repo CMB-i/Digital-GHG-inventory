@@ -22,6 +22,12 @@
     return months[parseInt(month, 10)] || "";
   }
 
+  function getFullMonthYear(month, year) {
+    const full = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const name = full[parseInt(month, 10)] || "";
+    return year ? name + " " + year : name;
+  }
+
   function rowKey(row) {
     return row.row_key || `${row.year || "row"}-${row.month || row.submission_id || "0"}`;
   }
@@ -97,7 +103,7 @@
     if (status === "Rejected") return "rejected";
     if (status === "Changes Requested" || status === "Changes requested") return "changes_requested";
     if (status === "Draft") return "draft";
-    if (!row.period_id || row.period_status === "LOCKED") return "not_open";
+    if (!row.period_id || row.period_status !== "OPEN") return "not_open";
     return "not_started";
   }
 
@@ -616,8 +622,8 @@
       const status = row.submission_status || row.status || row.period_status || "Unavailable";
 
       let rowClass = selected ? "bg-indigo-50/60" : "bg-white hover:bg-slate-50/60";
-      if (row.is_active_period) {
-        rowClass = "bg-white font-semibold active-reporting-row";
+      if (row.is_active_period && row.period_status === "OPEN") {
+        rowClass = "bg-white font-semibold active-reporting-row current-month-row";
       } else if (row.submission_status === "Approved" || row.is_locked) {
         rowClass = "bg-[#eef3fa]/50 opacity-85 text-slate-500";
       }
@@ -625,8 +631,8 @@
       const rowState = getRowStatusState(row);
       let monthBgClass = "";
       let lockSuffix = "";
-      if (row.is_active_period) {
-        monthBgClass = "bg-white text-[#1f2937] border-l-[3px] border-l-[#1a3a6b]";
+      if (row.is_active_period && row.period_status === "OPEN") {
+        monthBgClass = "bg-white text-[#1f2937]";
       } else if (rowState === "approved") {
         monthBgClass = "bg-[#e6f4ea] text-[#1f2937] border-l-4 border-l-[#137333]";
         lockSuffix = " 🔒";
@@ -647,11 +653,11 @@
         monthBgClass = "bg-white text-[#1f2937] border-l-4 border-l-slate-300";
       }
 
+      const trExtraClasses = (rowState === "not_open" ? " aw-row-not-open" : "") + ((rowState === "approved" || rowState === "locked") ? " aw-row-approved" : "");
       tbodyHtml += `
-        <tr data-row-key="${escapeHtml(key)}" class="${rowClass} transition border-b border-slate-200">
-          <td class="sticky left-0 z-10 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 align-middle month-cell ${monthBgClass}">
-            <div>${escapeHtml(row.label || getMonthName(row.month) || row.period_label || "Row")}${lockSuffix}</div>
-            <div>${escapeHtml(row.period_label || row.sheet_name || "")}</div>
+        <tr data-row-key="${escapeHtml(key)}" class="${rowClass} transition${trExtraClasses}">
+          <td class="sticky left-0 z-10 align-middle month-cell ${monthBgClass}">
+            ${escapeHtml(getFullMonthYear(row.month, row.year))}${lockSuffix}
           </td>
           ${displayFields.map((field) => renderCell(row, field, options)).join("")}
           ${!isCalcMode ? renderRemarksCell(row, fileField, options) : ""}
