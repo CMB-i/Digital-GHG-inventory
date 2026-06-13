@@ -1040,9 +1040,10 @@ body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] select {
 body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] input[type="text"]:focus,
 body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] input[type="number"]:focus,
 body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] select:focus {
-  outline: none !important;
+  outline: 1px solid #1a3a6b !important;
+  outline-offset: -1px !important;
   border: none !important;
-  background: transparent !important;
+  background: #ffffff !important;
 }
 
 body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] > div.relative {
