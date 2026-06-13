@@ -115,6 +115,11 @@ document.addEventListener("DOMContentLoaded", function () {
       .replace(/\b\w/g, char => char.toUpperCase());
   }
 
+  function layoutDisplayName(type) {
+    const map = { monthly_table: "Monthly table", annual_table: "Annual table", reference_table: "Reference table" };
+    return map[type] || "Monthly table";
+  }
+
   function activeSection() {
     if (!activeSectionCode) return null;
     return currentSections.find(section => section.code === activeSectionCode) || null;
@@ -305,6 +310,7 @@ document.addEventListener("DOMContentLoaded", function () {
     step1View.classList.add("hidden");
     step2View.classList.add("hidden");
     listView.classList.remove("hidden");
+    document.body.classList.remove("builder-canvas-active");
     loadForms();
   };
 
@@ -312,6 +318,7 @@ document.addEventListener("DOMContentLoaded", function () {
     listView.classList.add("hidden");
     step2View.classList.add("hidden");
     step1View.classList.remove("hidden");
+    document.body.classList.remove("builder-canvas-active");
 
     step1Title.textContent = "New Form · Step 1 — Form Details";
     selectedFormId = null;
@@ -338,6 +345,7 @@ document.addEventListener("DOMContentLoaded", function () {
     listView.classList.add("hidden");
     step2View.classList.add("hidden");
     step1View.classList.remove("hidden");
+    document.body.classList.remove("builder-canvas-active");
 
     step1Title.textContent = `Edit Form Details · ${form.display_name || form.name}`;
     selectedFormId = formId;
@@ -366,6 +374,7 @@ document.addEventListener("DOMContentLoaded", function () {
     listView.classList.add("hidden");
     step1View.classList.add("hidden");
     step2View.classList.remove("hidden");
+    document.body.classList.add("builder-canvas-active");
 
     const form = formsList.find(x => x.id === formId);
     if (form) {
@@ -708,13 +717,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function populateInspectorDropdowns() {
     const fSelect = document.getElementById("prop-formula");
-    fSelect.innerHTML = '<option value="">Select Formula...</option>';
-    availableFormulas.forEach(f => {
-      const opt = document.createElement("option");
-      opt.value = f.current_version_id;
-      opt.textContent = `${f.name} (${f.code})`;
-      fSelect.appendChild(opt);
-    });
+    if (fSelect) {
+      fSelect.innerHTML = '<option value="">Select Formula...</option>';
+      availableFormulas.forEach(f => {
+        const opt = document.createElement("option");
+        opt.value = f.current_version_id;
+        opt.textContent = `${f.name} (${f.code})`;
+        fSelect.appendChild(opt);
+      });
+    }
 
     populateSectionDropdown();
   }
@@ -766,43 +777,38 @@ document.addEventListener("DOMContentLoaded", function () {
           ? "border-indigo-200 bg-indigo-50/70"
           : "border-slate-200 bg-white";
         return `
-        <div class="section-row rounded-lg border ${activeClass} p-3 space-y-2" data-section-code="${escapeHtml(section.code)}">
-          <button type="button" class="section-select flex w-full items-center justify-between gap-2 text-left" data-section-code="${escapeHtml(section.code)}">
-            <span class="truncate text-xs font-bold text-slate-800">${escapeHtml(section.name || section.code)}</span>
-            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">${sectionFields}</span>
-          </button>
-          <div class="flex items-center justify-between gap-2 text-[10px] font-bold text-slate-500">
-            <span>Order ${idx + 1}</span>
-            <div class="flex items-center gap-1">
-              <button type="button" class="section-move-up rounded border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-section-code="${escapeHtml(section.code)}" ${idx === 0 ? "disabled" : ""} aria-label="Move section up">▲</button>
-              <button type="button" class="section-move-down rounded border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-section-code="${escapeHtml(section.code)}" ${idx === sortedSections.length - 1 ? "disabled" : ""} aria-label="Move section down">▼</button>
-            </div>
+        <div class="section-row rounded-lg border ${activeClass} p-2.5 space-y-1.5" data-section-code="${escapeHtml(section.code)}">
+          <div class="flex items-center gap-1.5">
+            <button type="button" class="section-select flex-1 min-w-0 text-left" data-section-code="${escapeHtml(section.code)}">
+              <span class="truncate text-xs font-bold text-slate-800 block">${escapeHtml(section.name || section.code)}</span>
+            </button>
+            <span class="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">${sectionFields}</span>
+            <button type="button" class="section-move-up flex-shrink-0 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-section-code="${escapeHtml(section.code)}" ${idx === 0 ? "disabled" : ""} aria-label="Move section up">▲</button>
+            <button type="button" class="section-move-down flex-shrink-0 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-section-code="${escapeHtml(section.code)}" ${idx === sortedSections.length - 1 ? "disabled" : ""} aria-label="Move section down">▼</button>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <input type="text" class="section-name flex-1 min-w-0 block rounded border-slate-300 text-xs px-2 py-1 border font-semibold" value="${escapeHtml(section.name || "")}" placeholder="Section name">
+            <button type="button" class="section-delete flex-shrink-0 text-[10px] font-semibold text-rose-500 border border-rose-200 rounded px-1.5 py-0.5 hover:bg-rose-50">✕</button>
           </div>
           <div class="flex items-center justify-between gap-2">
-            <input
-              type="text"
-              class="section-name block w-full rounded-md border-slate-300 text-xs px-2 py-1.5 border font-semibold"
-              value="${escapeHtml(section.name || "")}"
-              placeholder="Section name"
-            >
-            <button type="button" class="section-delete text-[10px] font-bold text-rose-600 hover:underline">Remove</button>
+            <span class="text-[10px] text-slate-400">${escapeHtml(layoutDisplayName(section.layout_type))}</span>
+            <button type="button" class="section-details-toggle text-[10px] text-indigo-500 hover:text-indigo-700 font-semibold">Edit details</button>
           </div>
-          <input
-            type="text"
-            class="section-code block w-full rounded-md border-slate-300 text-[11px] px-2 py-1.5 border font-mono"
-            value="${escapeHtml(section.code || "")}"
-            placeholder="section_code"
-          >
-          <select class="section-layout block w-full rounded-md border-slate-300 text-[11px] px-2 py-1.5 border bg-white">
-            <option value="monthly_table" ${section.layout_type === "monthly_table" ? "selected" : ""}>Monthly table</option>
-            <option value="annual_table" ${section.layout_type === "annual_table" ? "selected" : ""}>Annual table</option>
-            <option value="reference_table" ${section.layout_type === "reference_table" ? "selected" : ""}>Reference table</option>
-          </select>
-          <textarea
-            class="section-description block w-full rounded-md border-slate-300 text-[11px] px-2 py-1.5 border"
-            rows="2"
-            placeholder="Optional section description"
-          >${escapeHtml(section.description || "")}</textarea>
+          <div class="section-details-area hidden space-y-1.5 pt-1.5 border-t border-slate-100">
+            <input type="text" class="section-code hidden" value="${escapeHtml(section.code || "")}" placeholder="section_code">
+            <div>
+              <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Layout type</label>
+              <select class="section-layout block w-full rounded border-slate-300 text-[11px] px-2 py-1 border bg-white">
+                <option value="monthly_table" ${section.layout_type === "monthly_table" ? "selected" : ""}>Monthly table</option>
+                <option value="annual_table" ${section.layout_type === "annual_table" ? "selected" : ""}>Annual table</option>
+                <option value="reference_table" ${section.layout_type === "reference_table" ? "selected" : ""}>Reference table</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Description (optional)</label>
+              <textarea class="section-description block w-full rounded border-slate-300 text-[11px] px-2 py-1 border" rows="2" placeholder="Optional section description">${escapeHtml(section.description || "")}</textarea>
+            </div>
+          </div>
         </div>
       `;
       })
@@ -903,23 +909,22 @@ document.addEventListener("DOMContentLoaded", function () {
             indicators.push(optionCount ? `Options: ${optionCount}` : "Needs options");
           }
           return `
-            <div class="field-row flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left transition ${selectedClass}" data-field-code="${escapeHtml(field.field_code)}">
+            <div class="field-row flex w-full min-h-[52px] items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition ${selectedClass}" data-field-code="${escapeHtml(field.field_code)}">
               <button type="button" class="field-select min-w-0 flex-1 text-left" data-field-code="${escapeHtml(field.field_code)}">
-                <div class="truncate text-sm font-bold text-slate-900">${escapeHtml(field.field_name || field.field_code)}</div>
-                <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-slate-500">
-                  <span class="font-mono">${escapeHtml(field.field_code)}</span>
-                  <span class="rounded-full bg-slate-100 px-1.5 py-0.5">Order ${sectionIdx + 1}</span>
-                  ${indicators.map(item => `<span class="rounded-full bg-slate-100 px-1.5 py-0.5">${escapeHtml(item)}</span>`).join("")}
+                <div class="truncate text-sm font-semibold text-slate-900">${escapeHtml(field.field_name || field.field_code)}</div>
+                <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
+                  <span class="font-mono text-[11px] text-[#94a3b8]">${escapeHtml(field.field_code)}</span>
+                  ${indicators.map(item => `<span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">${escapeHtml(item)}</span>`).join("")}
                 </div>
               </button>
-              <div class="flex flex-shrink-0 items-center gap-2">
-                <span class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-600">${escapeHtml(humanizeType(field.field_type))}</span>
-                <span class="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase text-blue-700">${escapeHtml(field.frequency || "monthly")}</span>
-                <div class="flex items-center gap-1">
-                  <button type="button" class="field-move-up rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-field-code="${escapeHtml(field.field_code)}" ${sectionIdx <= 0 ? "disabled" : ""} aria-label="Move field up">▲</button>
-                  <button type="button" class="field-move-down rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" data-field-code="${escapeHtml(field.field_code)}" ${sectionIdx === sectionFields.length - 1 ? "disabled" : ""} aria-label="Move field down">▼</button>
+              <div class="flex flex-shrink-0 items-center gap-1.5">
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">${escapeHtml(humanizeType(field.field_type))}</span>
+                <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase text-blue-700">${escapeHtml(field.frequency || "monthly")}</span>
+                <div class="flex items-center gap-0.5">
+                  <button type="button" class="field-move-up rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-50 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-30" data-field-code="${escapeHtml(field.field_code)}" ${sectionIdx <= 0 ? "disabled" : ""} aria-label="Move field up">▲</button>
+                  <button type="button" class="field-move-down rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-50 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-30" data-field-code="${escapeHtml(field.field_code)}" ${sectionIdx === sectionFields.length - 1 ? "disabled" : ""} aria-label="Move field down">▼</button>
                 </div>
-                <button type="button" class="field-select text-xs font-bold text-indigo-600" data-field-code="${escapeHtml(field.field_code)}">Edit</button>
+                <button type="button" class="field-select text-[10px] font-bold text-indigo-600 hover:text-indigo-800" data-field-code="${escapeHtml(field.field_code)}">Edit</button>
               </div>
             </div>
           `;
@@ -1004,7 +1009,13 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Common fields
     document.getElementById("prop-code").value = field.field_code;
+    const propCodeDisplay = document.getElementById("prop-code-display");
+    if (propCodeDisplay) propCodeDisplay.textContent = field.field_code;
     document.getElementById("prop-name").value = field.field_name;
+    const typeDisplay = document.getElementById("prop-type-display");
+    if (typeDisplay) {
+      typeDisplay.textContent = humanizeType(field.field_type);
+    }
     propSection.value = field.section_code || "";
     propFrequency.value = field.frequency || "monthly";
     const sectionFields = fieldsForSection(field.section_code || "");
@@ -1021,6 +1032,10 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("prop-section-dropdown").classList.add("hidden");
     document.getElementById("prop-section-calculated").classList.add("hidden");
     document.getElementById("prop-section-file").classList.add("hidden");
+    const calculatedIndicator = document.getElementById("prop-calculated-indicator");
+    if (calculatedIndicator) {
+      calculatedIndicator.classList.add("hidden");
+    }
 
     const config = field.field_config || {};
 
@@ -1038,8 +1053,9 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (field.field_type === "calculated") {
-      document.getElementById("prop-section-calculated").classList.remove("hidden");
-      document.getElementById("prop-formula").value = config.formula_version_id || "";
+      if (calculatedIndicator) {
+        calculatedIndicator.classList.remove("hidden");
+      }
     }
 
     if (field.field_type === "file") {
@@ -1116,20 +1132,23 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (field.field_type === "calculated") {
-      const formulaVal = document.getElementById("prop-formula").value;
-      field.field_config.formula_version_id = formulaVal ? parseInt(formulaVal) : undefined;
+      const formulaSelect = document.getElementById("prop-formula");
+      if (formulaSelect) {
+        const formulaVal = formulaSelect.value;
+        field.field_config.formula_version_id = formulaVal ? parseInt(formulaVal) : undefined;
 
-      if (formulaVal) {
-        fetch(`/module/FRMULA/api/version/${formulaVal}`)
-          .then(res => res.json())
-          .then(resData => {
-            field.field_config.expression = resData.version.expression;
-            field.field_config.tokens = resData.version.tokens;
-            renderWorkspace();
-          });
-      } else {
-        field.field_config.expression = "";
-        field.field_config.tokens = [];
+        if (formulaVal) {
+          fetch(`/module/FRMULA/api/version/${formulaVal}`)
+            .then(res => res.json())
+            .then(resData => {
+              field.field_config.expression = resData.version.expression;
+              field.field_config.tokens = resData.version.tokens;
+              renderWorkspace();
+            });
+        } else {
+          field.field_config.expression = "";
+          field.field_config.tokens = [];
+        }
       }
     }
 
@@ -1261,6 +1280,18 @@ document.addEventListener("DOMContentLoaded", function () {
         return;
       }
 
+      const detailsToggle = e.target.closest(".section-details-toggle");
+      if (detailsToggle) {
+        const row = detailsToggle.closest(".section-row");
+        const area = row && row.querySelector(".section-details-area");
+        if (area) {
+          const wasHidden = area.classList.contains("hidden");
+          area.classList.toggle("hidden", !wasHidden);
+          detailsToggle.textContent = wasHidden ? "Hide details" : "Edit details";
+        }
+        return;
+      }
+
       const button = e.target.closest(".section-delete");
       if (!button) return;
       const row = button.closest(".section-row");
@@ -1317,6 +1348,15 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!selectedFieldCode) return;
     moveFieldWithinActiveSection(selectedFieldCode, 1);
   };
+
+  // "+ Add field" link in centre footer — deselects field and shows palette
+  const btnAddFieldLink = document.getElementById("btn-add-field-link");
+  if (btnAddFieldLink) {
+    btnAddFieldLink.onclick = function () {
+      closeInspector();
+      renderWorkspace();
+    };
+  }
 
   // Save Layout Draft
   btnSaveLayout.onclick = function () {

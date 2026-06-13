@@ -1301,3 +1301,8 @@ body[data-theme="jsw-excel"] #form-tabs .workbook-tab:first-child {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* Workbook Builder — full-width canvas mode */
+body.builder-canvas-active main > div {
+  max-width: none !important;
+}
