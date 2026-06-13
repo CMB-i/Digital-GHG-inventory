@@ -12,6 +12,7 @@ document.addEventListener("DOMContentLoaded", function () {
   let selectedFormId = null;
   let selectedVersionId = null;
   let selectedFieldCode = null;
+  let activeSectionCode = "";
   let isUnsaved = false;
 
   // View containers
@@ -33,16 +34,21 @@ document.addEventListener("DOMContentLoaded", function () {
   const publishErrorsList = document.getElementById("publish-errors-list");
   const btnAddSection = document.getElementById("btn-add-section");
   const sectionsList = document.getElementById("sections-list");
+  const workspaceSectionTitle = document.getElementById("workspace-section-title");
+  const workspaceSectionMeta = document.getElementById("workspace-section-meta");
 
   // Inspector elements
   const inspectorPanel = document.getElementById("inspector-panel");
   const inspectorEmpty = document.getElementById("inspector-empty-state");
+  const inspectorSummary = document.getElementById("inspector-summary");
   const formFieldProperties = document.getElementById("form-field-properties");
   const btnDeleteField = document.getElementById("btn-delete-field");
   const btnMoveUp = document.getElementById("btn-move-up");
   const btnMoveDown = document.getElementById("btn-move-down");
   const propSection = document.getElementById("prop-section");
   const propFrequency = document.getElementById("prop-frequency");
+  const dropdownOptionsList = document.getElementById("dropdown-options-list");
+  const btnAddDropdownOption = document.getElementById("btn-add-dropdown-option");
 
   // Step 1 Details elements
   const formDetailsSubmit = document.getElementById("form-details-submit");
@@ -92,6 +98,103 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function normalizeCode(value) {
     return (value || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function humanizeType(value) {
+    return String(value || "text")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, char => char.toUpperCase());
+  }
+
+  function activeSection() {
+    if (!activeSectionCode) return null;
+    return currentSections.find(section => section.code === activeSectionCode) || null;
+  }
+
+  function fieldsForActiveSection() {
+    return currentFields
+      .filter(field => {
+        if (!activeSectionCode) return true;
+        return field.section_code === activeSectionCode;
+      })
+      .slice()
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+  }
+
+  function normalizeDropdownOptions(options) {
+    if (!Array.isArray(options)) return [];
+    return options
+      .map((option) => {
+        if (option && typeof option === "object") {
+          const code = String(option.entry_code || option.code || option.value || "").trim();
+          const label = String(option.entry_label || option.label || option.name || code).trim();
+          return {
+            entry_code: code || label,
+            entry_label: label || code,
+          };
+        }
+        const text = String(option ?? "").trim();
+        return {
+          entry_code: normalizeCode(text),
+          entry_label: text,
+        };
+      })
+      .filter(option => option.entry_label || option.entry_code);
+  }
+
+  function dropdownOptionCount(field) {
+    return normalizeDropdownOptions(field && field.field_config ? field.field_config.options : []).length;
+  }
+
+  function dropdownOptionRow(value = "") {
+    return `
+      <div class="dropdown-option-row flex items-center gap-2">
+        <input type="text" class="dropdown-option-input block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border" value="${escapeHtml(value)}" placeholder="Option label">
+        <button type="button" class="dropdown-option-remove h-9 rounded-lg border border-slate-200 px-2 text-[10px] font-bold text-rose-600 hover:bg-rose-50">Remove</button>
+      </div>
+    `;
+  }
+
+  function renderDropdownOptionsEditor(field) {
+    if (!dropdownOptionsList) return;
+    const options = normalizeDropdownOptions(field && field.field_config ? field.field_config.options : []);
+    const rows = options.length ? options : [{ entry_label: "" }];
+    dropdownOptionsList.innerHTML = rows
+      .map(option => dropdownOptionRow(option.entry_label || option.entry_code || ""))
+      .join("");
+  }
+
+  function collectDropdownOptions() {
+    if (!dropdownOptionsList) return [];
+    const seen = new Set();
+    const options = [];
+    dropdownOptionsList.querySelectorAll(".dropdown-option-input").forEach((input) => {
+      const label = input.value.trim();
+      if (!label) return;
+      let code = normalizeCode(label);
+      if (!code) code = `option_${options.length + 1}`;
+      let uniqueCode = code;
+      let suffix = 2;
+      while (seen.has(uniqueCode)) {
+        uniqueCode = `${code}_${suffix}`;
+        suffix += 1;
+      }
+      seen.add(uniqueCode);
+      options.push({
+        entry_code: uniqueCode,
+        entry_label: label,
+      });
+    });
+    return options;
   }
 
   // --- View Switching ---
@@ -232,7 +335,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Fetch all forms on load or refresh
   function loadForms() {
-    formsListBody.innerHTML = '<tr><td colspan="7" class="px-6 py-12 text-center text-slate-400 italic">Loading forms...</td></tr>';
+    formsListBody.innerHTML = '<div class="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400 shadow-sm md:col-span-2 xl:col-span-3">Loading workbooks...</div>';
     
     fetch("/module/FORMBLD/api")
       .then(res => res.json())
@@ -242,23 +345,23 @@ document.addEventListener("DOMContentLoaded", function () {
 
         if (data.length === 0) {
           formsListBody.innerHTML = `
-            <tr>
-              <td colspan="7" class="px-6 py-12 text-center text-slate-400 italic">
-                No forms created yet. Click "Create New Form" to get started.
-              </td>
-            </tr>
+            <div class="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400 shadow-sm md:col-span-2 xl:col-span-3">
+              No workbooks created yet. Click "Create Workbook" to get started.
+            </div>
           `;
           return;
         }
 
         data.forEach(form => {
-          const tr = document.createElement("tr");
-          tr.className = "hover:bg-slate-50/50 transition-colors";
+          const card = document.createElement("article");
+          card.className = "flex min-h-[220px] flex-col justify-between rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow-md";
           
           // Map site IDs to names
           let sitesText = "None";
+          let siteCountText = "No sites";
           if (form.sites && form.sites.length > 0) {
             sitesText = form.sites.map(sid => sitesMap[sid] || sid).join(", ");
+            siteCountText = `${form.sites.length} site${form.sites.length === 1 ? "" : "s"}`;
           }
 
           // Build status badge
@@ -272,38 +375,64 @@ document.addEventListener("DOMContentLoaded", function () {
             statusBadge = '<span class="status-badge status-badge-warning">Draft</span>';
           }
 
-          let workflowBadge = "";
-          if (form.workflow_id) {
-            workflowBadge = '<span class="text-context text-emerald-700">Workflow assigned</span>';
-          } else {
-            workflowBadge = '<span class="text-context text-rose-700">Workflow not assigned</span>';
-          }
-
           // Actions
-          let actions = [];
+          let primaryAction = "";
+          let secondaryActions = [];
           if (status === "Draft" && form.latest_version_id) {
-            actions.push(`<button onclick="editFormDetails(${form.id})" class="text-label text-indigo-600 hover:text-indigo-900 hover:underline mr-3">Edit Details</button>`);
-            actions.push(`<button onclick="editFormLayout(${form.id}, ${form.latest_version_id})" class="btn btn-outline btn-sm mr-3">Edit Layout</button>`);
+            primaryAction = `<button onclick="editFormLayout(${form.id}, ${form.latest_version_id})" class="btn btn-primary btn-sm">Edit</button>`;
+            secondaryActions.push(`<button onclick="editFormDetails(${form.id})" class="block w-full px-3 py-1.5 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50">Edit details</button>`);
           } else if (status === "Published") {
-            actions.push(`<button onclick="createNewDraft(${form.id})" class="btn btn-outline btn-sm mr-3">New Draft Version</button>`);
+            primaryAction = `<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="btn btn-outline btn-sm">View</button>`;
+            secondaryActions.push(`<button onclick="createNewDraft(${form.id})" class="block w-full px-3 py-1.5 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50">New draft version</button>`);
+          } else if (form.latest_version_id) {
+            primaryAction = `<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="btn btn-outline btn-sm">View</button>`;
           }
           
           if (form.latest_version_id) {
-            actions.push(`<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="text-label hover:text-slate-900 hover:underline">Preview</button>`);
+            secondaryActions.push(`<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="block w-full px-3 py-1.5 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50">Preview</button>`);
           }
 
-          tr.innerHTML = `
-            <td class="px-6 py-4 card-title">${form.display_name || form.name}</td>
-            <td class="px-6 py-4 font-mono text-context">${form.gri_code || "—"}</td>
-            <td class="px-6 py-4 text-slate-500 truncate max-w-xs" title="${sitesText}">${sitesText}</td>
-            <td class="px-6 py-4 text-slate-500">${form.frequency || "Monthly"}</td>
-            <td class="px-6 py-4">
-              <div class="flex flex-col gap-1">${statusBadge} ${workflowBadge}</div>
-            </td>
-            <td class="px-6 py-4 text-slate-500 font-semibold">v${form.latest_version_num || 1}</td>
-            <td class="px-6 py-4 text-right whitespace-nowrap">${actions.join("")}</td>
+          card.innerHTML = `
+            <div class="space-y-4">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <h2 class="card-title truncate" title="${escapeHtml(form.display_name || form.name)}">${escapeHtml(form.display_name || form.name)}</h2>
+                  <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
+                    <span class="font-mono">${escapeHtml(form.gri_code || form.code || "Workbook")}</span>
+                    <span>v${escapeHtml(form.latest_version_num || 1)}</span>
+                  </div>
+                </div>
+                ${statusBadge}
+              </div>
+              <div class="grid grid-cols-2 gap-3 text-xs">
+                <div class="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Sites</div>
+                  <div class="mt-1 font-bold text-slate-800" title="${escapeHtml(sitesText)}">${escapeHtml(siteCountText)}</div>
+                </div>
+                <div class="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Frequency</div>
+                  <div class="mt-1 font-bold text-slate-800">${escapeHtml(form.frequency || "Monthly")}</div>
+                </div>
+              </div>
+            </div>
+            <div class="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+              <div class="text-[11px] font-semibold ${form.workflow_id ? "text-emerald-700" : "text-slate-400"}">
+                ${form.workflow_id ? "Workflow assigned" : "Workflow not assigned"}
+              </div>
+              <div class="flex items-center gap-2">
+                ${primaryAction}
+                ${secondaryActions.length ? `
+                  <div class="relative group">
+                    <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-sm font-bold text-slate-500 hover:bg-slate-50" aria-label="More actions">...</button>
+                    <div class="absolute right-0 z-20 mt-1 hidden w-40 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg group-hover:block">
+                      ${secondaryActions.join("")}
+                    </div>
+                  </div>
+                ` : ""}
+              </div>
+            </div>
           `;
-          formsListBody.appendChild(tr);
+          formsListBody.appendChild(card);
         });
       })
       .catch(err => {
@@ -416,6 +545,9 @@ document.addEventListener("DOMContentLoaded", function () {
         currentSections = data.sections || [];
         availableValueSets = data.available_value_sets || [];
         availableFormulas = data.available_formulas || [];
+        if (activeSectionCode && !currentSections.some(section => section.code === activeSectionCode)) {
+          activeSectionCode = "";
+        }
         isUnsaved = false;
 
         // Set status badge and name
@@ -466,15 +598,6 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function populateInspectorDropdowns() {
-    const vsSelect = document.getElementById("prop-valueset");
-    vsSelect.innerHTML = '<option value="">Select Value Set...</option>';
-    availableValueSets.forEach(vs => {
-      const opt = document.createElement("option");
-      opt.value = vs.current_version_id;
-      opt.textContent = `${vs.name} (${vs.code})`;
-      vsSelect.appendChild(opt);
-    });
-
     const fSelect = document.getElementById("prop-formula");
     fSelect.innerHTML = '<option value="">Select Formula...</option>';
     availableFormulas.forEach(f => {
@@ -505,22 +628,46 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function renderSections() {
     if (!sectionsList) return;
-    if (currentSections.length === 0) {
-      sectionsList.innerHTML = '<p class="text-[10px] text-slate-400 italic">No sections configured yet.</p>';
+    const sortedSections = currentSections
+      .slice()
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+    const totalCount = currentFields.length;
+    const allActiveClass = !activeSectionCode
+      ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50";
+
+    const allRow = `
+      <button type="button" class="section-select w-full rounded-lg border px-3 py-2 text-left text-xs font-bold transition ${allActiveClass}" data-section-code="">
+        <div class="flex items-center justify-between gap-2">
+          <span>All fields</span>
+          <span class="rounded-full bg-white/70 px-2 py-0.5 text-[10px] text-slate-500">${totalCount}</span>
+        </div>
+      </button>
+    `;
+
+    if (sortedSections.length === 0) {
+      sectionsList.innerHTML = `${allRow}<p class="px-1 pt-1 text-[10px] text-slate-400 italic">No sections configured yet.</p>`;
       populateSectionDropdown();
       return;
     }
 
-    sectionsList.innerHTML = currentSections
-      .slice()
-      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
-      .map(section => `
-        <div class="section-row rounded-lg border border-slate-200 bg-slate-50/50 p-3 space-y-2" data-section-code="${section.code}">
+    sectionsList.innerHTML = allRow + sortedSections
+      .map(section => {
+        const sectionFields = currentFields.filter(field => field.section_code === section.code).length;
+        const activeClass = activeSectionCode === section.code
+          ? "border-indigo-200 bg-indigo-50/70"
+          : "border-slate-200 bg-white";
+        return `
+        <div class="section-row rounded-lg border ${activeClass} p-3 space-y-2" data-section-code="${escapeHtml(section.code)}">
+          <button type="button" class="section-select flex w-full items-center justify-between gap-2 text-left" data-section-code="${escapeHtml(section.code)}">
+            <span class="truncate text-xs font-bold text-slate-800">${escapeHtml(section.name || section.code)}</span>
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">${sectionFields}</span>
+          </button>
           <div class="flex items-center justify-between gap-2">
             <input
               type="text"
               class="section-name block w-full rounded-md border-slate-300 text-xs px-2 py-1.5 border font-semibold"
-              value="${section.name || ""}"
+              value="${escapeHtml(section.name || "")}"
               placeholder="Section name"
             >
             <button type="button" class="section-delete text-[10px] font-bold text-rose-600 hover:underline">Remove</button>
@@ -528,7 +675,7 @@ document.addEventListener("DOMContentLoaded", function () {
           <input
             type="text"
             class="section-code block w-full rounded-md border-slate-300 text-[11px] px-2 py-1.5 border font-mono"
-            value="${section.code || ""}"
+            value="${escapeHtml(section.code || "")}"
             placeholder="section_code"
           >
           <select class="section-layout block w-full rounded-md border-slate-300 text-[11px] px-2 py-1.5 border bg-white">
@@ -540,9 +687,10 @@ document.addEventListener("DOMContentLoaded", function () {
             class="section-description block w-full rounded-md border-slate-300 text-[11px] px-2 py-1.5 border"
             rows="2"
             placeholder="Optional section description"
-          >${section.description || ""}</textarea>
+          >${escapeHtml(section.description || "")}</textarea>
         </div>
-      `)
+      `;
+      })
       .join("");
     populateSectionDropdown();
   }
@@ -574,6 +722,9 @@ document.addEventListener("DOMContentLoaded", function () {
       });
     });
     currentSections = nextSections;
+    if (activeSectionCode && !currentSections.some(section => section.code === activeSectionCode)) {
+      activeSectionCode = "";
+    }
     populateSectionDropdown();
   }
 
@@ -592,37 +743,82 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function renderWorkspace() {
-    window.renderForm(currentFields, formWorkspace, "builder_preview");
-    
-    // Attach selection clicks to preview rows
-    const rows = formWorkspace.querySelectorAll("[data-field-code]");
-    rows.forEach(row => {
-      row.style.cursor = "pointer";
-      row.classList.add("hover:bg-slate-50/80", "transition-colors", "rounded-lg", "p-2", "my-1");
-      
-      row.onclick = function (e) {
-        if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" || e.target.tagName === "BUTTON") {
-          return;
-        }
+    const section = activeSection();
+    const fields = fieldsForActiveSection();
+    const countLabel = `${fields.length} field${fields.length === 1 ? "" : "s"}`;
+    if (workspaceSectionTitle) {
+      workspaceSectionTitle.textContent = section ? section.name : "All workbook fields";
+    }
+    if (workspaceSectionMeta) {
+      workspaceSectionMeta.textContent = section
+        ? `${humanizeType(section.layout_type || "monthly_table")} · ${countLabel}`
+        : `${countLabel} across all sheets and sections`;
+    }
+
+    if (fields.length === 0) {
+      formWorkspace.innerHTML = `
+        <div class="flex min-h-[260px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-6 py-12 text-center">
+          <div class="text-sm font-bold text-slate-700">No fields in this ${section ? "section" : "workbook"} yet</div>
+          <p class="mt-2 max-w-sm text-xs text-slate-400">Use the field palette on the left to add the next SPOC entry row.</p>
+        </div>
+      `;
+      return;
+    }
+
+    formWorkspace.innerHTML = `
+      <div class="space-y-2">
+        ${fields.map((field) => {
+          const config = field.field_config || {};
+          const selectedClass = field.field_code === selectedFieldCode
+            ? "border-indigo-300 bg-indigo-50/50 ring-1 ring-indigo-200"
+            : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50";
+          const indicators = [];
+          if (config.is_required) indicators.push("Required");
+          if (field.field_type === "calculated") indicators.push("Calculated");
+          if (config.proof_required) indicators.push("Proof");
+          if (field.field_type === "dropdown") {
+            const optionCount = dropdownOptionCount(field);
+            indicators.push(optionCount ? `Options: ${optionCount}` : "Needs options");
+          }
+          return `
+            <button type="button" class="field-row flex w-full items-center justify-between gap-4 rounded-lg border px-4 py-3 text-left transition ${selectedClass}" data-field-code="${escapeHtml(field.field_code)}">
+              <div class="min-w-0">
+                <div class="truncate text-sm font-bold text-slate-900">${escapeHtml(field.field_name || field.field_code)}</div>
+                <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-slate-500">
+                  <span class="font-mono">${escapeHtml(field.field_code)}</span>
+                  ${indicators.map(item => `<span class="rounded-full bg-slate-100 px-1.5 py-0.5">${escapeHtml(item)}</span>`).join("")}
+                </div>
+              </div>
+              <div class="flex flex-shrink-0 items-center gap-2">
+                <span class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-600">${escapeHtml(humanizeType(field.field_type))}</span>
+                <span class="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase text-blue-700">${escapeHtml(field.frequency || "monthly")}</span>
+                <span class="text-xs font-bold text-indigo-600">Edit</span>
+              </div>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    `;
+
+    formWorkspace.querySelectorAll(".field-row").forEach(row => {
+      row.onclick = function () {
         selectedFieldCode = row.dataset.fieldCode;
         highlightRow(row);
         openInspector(selectedFieldCode);
       };
-
-      if (row.dataset.fieldCode === selectedFieldCode) {
-        highlightRow(row);
-      }
     });
   }
 
   function highlightRow(rowElement) {
-    const rows = formWorkspace.querySelectorAll("[data-field-code]");
+    const rows = formWorkspace.querySelectorAll(".field-row[data-field-code]");
     rows.forEach(r => {
-      r.classList.remove("border-2", "border-indigo-400/80", "bg-indigo-50/10", "shadow-sm");
+      r.classList.remove("border-indigo-300", "bg-indigo-50/50", "ring-1", "ring-indigo-200");
+      r.classList.add("border-slate-200", "bg-white");
       r.style.borderStyle = "";
     });
     
-    rowElement.classList.add("border-2", "border-indigo-400/80", "bg-indigo-50/10", "shadow-sm");
+    rowElement.classList.remove("border-slate-200", "bg-white");
+    rowElement.classList.add("border-indigo-300", "bg-indigo-50/50", "ring-1", "ring-indigo-200");
     rowElement.style.borderStyle = "solid";
   }
 
@@ -632,6 +828,41 @@ document.addEventListener("DOMContentLoaded", function () {
 
     inspectorEmpty.classList.add("hidden");
     inspectorPanel.classList.remove("hidden");
+    if (inspectorSummary) {
+      const config = field.field_config || {};
+      const section = currentSections.find(item => item.code === field.section_code);
+      const indicators = [];
+      if (config.is_required) indicators.push("Required");
+      if (field.field_type === "calculated") indicators.push("Read-only calculated");
+      if (config.proof_required) indicators.push("Proof required");
+      if (config.remarks_required) indicators.push("Remarks required");
+      if (field.field_type === "dropdown") {
+        const optionCount = dropdownOptionCount(field);
+        indicators.push(optionCount ? `Options: ${optionCount}` : "Needs options");
+      }
+      inspectorSummary.innerHTML = `
+        <div class="space-y-3">
+          <div>
+            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Selected field</div>
+            <div class="mt-1 text-sm font-bold text-slate-900">${escapeHtml(field.field_name || field.field_code)}</div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="rounded-lg bg-slate-50 p-2">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Type</div>
+              <div class="mt-0.5 font-bold text-slate-700">${escapeHtml(humanizeType(field.field_type))}</div>
+            </div>
+            <div class="rounded-lg bg-slate-50 p-2">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Frequency</div>
+              <div class="mt-0.5 font-bold text-slate-700">${escapeHtml(field.frequency || "monthly")}</div>
+            </div>
+          </div>
+          <div class="text-[11px] font-semibold text-slate-500">
+            ${escapeHtml(section ? section.name : "No section")}
+          </div>
+          ${indicators.length ? `<div class="flex flex-wrap gap-1.5">${indicators.map(item => `<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+        </div>
+      `;
+    }
 
     // Common fields
     document.getElementById("prop-code").value = field.field_code;
@@ -661,7 +892,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (field.field_type === "dropdown") {
       document.getElementById("prop-section-dropdown").classList.remove("hidden");
-      document.getElementById("prop-valueset").value = config.value_set_version_id || "";
+      renderDropdownOptionsEditor(field);
     }
 
     if (field.field_type === "calculated") {
@@ -683,6 +914,9 @@ document.addEventListener("DOMContentLoaded", function () {
     selectedFieldCode = null;
     inspectorPanel.classList.add("hidden");
     inspectorEmpty.classList.remove("hidden");
+    if (inspectorSummary) {
+      inspectorSummary.innerHTML = "";
+    }
   }
 
   // Apply Changes from properties form
@@ -728,20 +962,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (field.field_type === "dropdown") {
-      const vsVal = document.getElementById("prop-valueset").value;
-      field.field_config.value_set_version_id = vsVal ? parseInt(vsVal) : undefined;
-
-      // Populate options for rendering preview dropdowns
-      if (vsVal) {
-        fetch(`/module/VALSET/api/version/${vsVal}`)
-          .then(res => res.json())
-          .then(resData => {
-            field.field_config.options = resData.entries;
-            renderWorkspace();
-          });
-      } else {
-        field.field_config.options = [];
-      }
+      field.field_config.options = collectDropdownOptions();
     }
 
     if (field.field_type === "calculated") {
@@ -773,6 +994,7 @@ document.addEventListener("DOMContentLoaded", function () {
     selectedFieldCode = newCode;
     isUnsaved = true;
     updateSaveStatusText();
+    renderSections();
     renderWorkspace();
     showToast("Field updated in workspace.");
   };
@@ -784,14 +1006,15 @@ document.addEventListener("DOMContentLoaded", function () {
       const displayOrder = currentFields.length + 1;
       const code = `field_${Date.now()}`;
       const name = `New ${type.charAt(0).toUpperCase() + type.slice(1)}`;
+      const section = activeSection();
 
       const newField = {
         field_code: code,
         field_name: name,
         field_type: type,
         display_order: displayOrder,
-        section_id: null,
-        section_code: "",
+        section_id: section && section.id ? section.id : null,
+        section_code: section ? section.code : "",
         frequency: "monthly",
         field_config: {
           is_required: false,
@@ -804,6 +1027,7 @@ document.addEventListener("DOMContentLoaded", function () {
       selectedFieldCode = code;
 
       updateSaveStatusText();
+      renderSections();
       renderWorkspace();
       openInspector(code);
     };
@@ -822,6 +1046,7 @@ document.addEventListener("DOMContentLoaded", function () {
     isUnsaved = true;
     closeInspector();
     updateSaveStatusText();
+    renderSections();
     renderWorkspace();
     showToast("Field deleted.");
   };
@@ -838,9 +1063,11 @@ document.addEventListener("DOMContentLoaded", function () {
         display_order: displayOrder,
         description: ""
       });
+      activeSectionCode = code;
       isUnsaved = true;
       updateSaveStatusText();
       renderSections();
+      renderWorkspace();
     };
   }
 
@@ -850,14 +1077,25 @@ document.addEventListener("DOMContentLoaded", function () {
       syncSectionsFromDom();
       isUnsaved = true;
       updateSaveStatusText();
+      renderWorkspace();
     });
     sectionsList.addEventListener("change", function (e) {
       if (!e.target.closest(".section-row")) return;
       syncSectionsFromDom();
       isUnsaved = true;
       updateSaveStatusText();
+      renderSections();
+      renderWorkspace();
     });
     sectionsList.addEventListener("click", function (e) {
+      const selectButton = e.target.closest(".section-select");
+      if (selectButton) {
+        activeSectionCode = selectButton.dataset.sectionCode || "";
+        renderSections();
+        renderWorkspace();
+        return;
+      }
+
       const button = e.target.closest(".section-delete");
       if (!button) return;
       const row = button.closest(".section-row");
@@ -869,11 +1107,34 @@ document.addEventListener("DOMContentLoaded", function () {
           field.section_id = null;
         }
       });
+      if (activeSectionCode === code) {
+        activeSectionCode = "";
+      }
       isUnsaved = true;
       updateSaveStatusText();
       renderSections();
+      renderWorkspace();
       if (selectedFieldCode) {
         openInspector(selectedFieldCode);
+      }
+    });
+  }
+
+  if (btnAddDropdownOption && dropdownOptionsList) {
+    btnAddDropdownOption.onclick = function () {
+      dropdownOptionsList.insertAdjacentHTML("beforeend", dropdownOptionRow(""));
+      const inputs = dropdownOptionsList.querySelectorAll(".dropdown-option-input");
+      const lastInput = inputs[inputs.length - 1];
+      if (lastInput) lastInput.focus();
+    };
+
+    dropdownOptionsList.addEventListener("click", function (e) {
+      const removeButton = e.target.closest(".dropdown-option-remove");
+      if (!removeButton) return;
+      const row = removeButton.closest(".dropdown-option-row");
+      if (row) row.remove();
+      if (!dropdownOptionsList.querySelector(".dropdown-option-row")) {
+        dropdownOptionsList.insertAdjacentHTML("beforeend", dropdownOptionRow(""));
       }
     });
   }
@@ -959,8 +1220,8 @@ document.addEventListener("DOMContentLoaded", function () {
       if (f.field_type === "calculated" && (!f.field_config || !f.field_config.formula_version_id)) {
         errors.push(`Calculated field "${f.field_name}" must reference a published formula.`);
       }
-      if (f.field_type === "dropdown" && (!f.field_config || !f.field_config.value_set_version_id)) {
-        errors.push(`Dropdown field "${f.field_name}" must reference an approved value set.`);
+      if (f.field_type === "dropdown" && dropdownOptionCount(f) === 0) {
+        errors.push(`Dropdown field "${f.field_name}" must have at least one option.`);
       }
     });
 

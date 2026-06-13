@@ -1,10 +1,10 @@
 (function () {
   const CELL_STATE_META = {
-    blank_editable: { label: "Blank", className: "bg-slate-100 text-slate-600 border-slate-200" },
-    draft_filled: { label: "Draft", className: "bg-blue-50 text-blue-700 border-blue-200" },
-    submitted: { label: "Pending review", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-    approved_locked: { label: "Approved", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    changes_requested: { label: "Changes requested", className: "bg-amber-50 text-amber-700 border-amber-200" },
+    blank_editable: { label: "Blank editable", className: "bg-white text-slate-600 border-slate-200" },
+    draft_filled: { label: "Draft saved", className: "bg-blue-50 text-blue-700 border-blue-200" },
+    submitted: { label: "Submitted for review", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+    approved_locked: { label: "Approved and locked", className: "bg-slate-100 text-slate-600 border-slate-200" },
+    changes_requested: { label: "Changes requested", className: "bg-rose-50 text-rose-700 border-rose-200" },
     late_entry: { label: "Late entry", className: "bg-violet-50 text-violet-700 border-violet-200" },
   };
 
@@ -95,6 +95,16 @@
     return meta.label;
   }
 
+  function cellStateTitle(state, rowLocked, issues, extraParts) {
+    const parts = [cellStateLabel(state)];
+    if (Array.isArray(extraParts)) {
+      extraParts.filter(Boolean).forEach(part => parts.push(part));
+    }
+    if (rowLocked) parts.push("Locked period");
+    if (issues && issues.length) parts.push("Issue/comment exists");
+    return parts.join(" · ");
+  }
+
   function getRowStatusState(row) {
     const status = row.submission_status || row.status || row.period_status || "Not Started";
     if (status === "Approved") return "approved";
@@ -137,6 +147,7 @@
 
   function inputClass(disabled) {
     return [
+      "workbook-cell-control",
       "min-h-9", "w-full", "border-0", "bg-transparent", "px-2", "py-1.5",
       "text-sm", "text-slate-900", "outline-none",
       disabled
@@ -284,18 +295,18 @@
     if (options.mode === "calc_results") {
       const cell = cellObject(row, field);
       if (!cell) {
-        return `<td class="border px-3 py-3 bg-slate-50 text-slate-400 text-xs text-center italic">—</td>`;
+        return `<td class="border px-3 py-3 bg-slate-50 text-slate-400 text-xs text-center italic" title="No calculated value">—</td>`;
       }
       if (cell.status === "not_configured") {
         return `
-          <td class="border px-3 py-2 bg-slate-100 text-slate-400 text-xs align-top">
+          <td class="border px-3 py-2 bg-slate-100 text-slate-400 text-xs align-top" title="Not configured for this period">
             <div class="font-semibold text-slate-500">Not configured</div>
           </td>
         `;
       }
       if (cell.status === "missing_input") {
         return `
-          <td class="border px-3 py-2 bg-slate-50 text-slate-500 text-xs align-top">
+          <td class="border px-3 py-2 bg-slate-50 text-slate-500 text-xs align-top" title="Missing input">
             <div class="text-slate-400 font-bold">—</div>
             ${Array.isArray(cell.warnings) ? cell.warnings.map(w => `<div class="mt-1 text-[10px] text-amber-600 bg-amber-50 px-1 py-0.5 rounded border border-amber-100 w-max max-w-[200px] whitespace-normal" title="${escapeHtml(w)}">${escapeHtml(w)}</div>`).join("") : ""}
           </td>
@@ -304,7 +315,7 @@
       if (cell.status === "pending_approval" || cell.status === "preview_only") {
         const valPreview = cell.preview_value !== null ? `${cell.preview_value} ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}` : "—";
         return `
-          <td class="border px-3 py-2 bg-blue-50/20 text-xs align-top">
+          <td class="border px-3 py-2 bg-blue-50/20 text-xs align-top" title="${cell.status === "pending_approval" ? "Submitted for review" : "Preview only"}">
             <div class="flex items-center gap-1.5 flex-wrap">
               <span class="font-bold text-blue-700 text-sm">${escapeHtml(valPreview)}</span>
               <span class="inline-flex items-center rounded bg-blue-50 px-1 py-0.5 text-[9px] font-bold text-blue-600 border border-blue-100">Preview</span>
@@ -319,7 +330,7 @@
       if (cell.status === "calculable") {
         const valReportable = cell.reportable_value !== null ? `${cell.reportable_value} ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}` : "—";
         return `
-          <td class="border px-3 py-2 bg-emerald-50/20 text-xs align-top">
+          <td class="border px-3 py-2 bg-emerald-50/20 text-xs align-top" title="Calculated field">
             <div class="flex items-center gap-1.5 flex-wrap">
               <span class="font-bold text-emerald-700 text-sm">${escapeHtml(valReportable)}</span>
               <span class="inline-flex items-center rounded bg-emerald-50 px-1 py-0.5 text-[9px] font-bold text-emerald-600 border border-emerald-100">Approved</span>
@@ -332,13 +343,13 @@
       }
       if (cell.status === "evaluation_error") {
         return `
-          <td class="border px-3 py-2 bg-rose-50/50 text-xs align-top">
+          <td class="border px-3 py-2 bg-rose-50/50 text-xs align-top" title="Evaluation error">
             <div class="font-bold text-rose-700">Calculation error</div>
             ${Array.isArray(cell.warnings) ? cell.warnings.map(w => `<div class="mt-1 text-[10px] text-rose-600 bg-rose-50 px-1 py-0.5 rounded border border-rose-100 w-max max-w-[200px] whitespace-normal" title="${escapeHtml(w)}">${escapeHtml(w)}</div>`).join("") : ""}
           </td>
         `;
       }
-      return `<td class="border px-3 py-3 bg-slate-50 text-slate-400 text-xs text-center italic">—</td>`;
+      return `<td class="border px-3 py-3 bg-slate-50 text-slate-400 text-xs text-center italic" title="No calculated value">—</td>`;
     }
 
     const rowLocked = row.is_locked || row.submission_status === "Approved";
@@ -355,19 +366,27 @@
     let stateClass = {
       blank_editable: "bg-white border-slate-200",
       draft_filled: "bg-blue-50/50 border-blue-100",
-      submitted: "bg-indigo-50/60 border-indigo-100",
-      approved_locked: "bg-emerald-50/60 border-emerald-100",
-      changes_requested: "bg-amber-50/70 border-amber-200",
+      submitted: "bg-amber-50/50 border-amber-100",
+      approved_locked: "bg-[#eef3fa]/80 border-slate-200",
+      changes_requested: "bg-rose-50/70 border-rose-200",
       late_entry: "bg-violet-50/60 border-violet-200 border-dashed",
     }[state] || "bg-white border-slate-200";
+    if (issues.length && state !== "changes_requested") {
+      stateClass += " border-l-2 border-l-[#c8102e]";
+    }
 
     const interactiveClass = canOpen && options.mode !== "entry"
       ? "cursor-pointer hover:ring-2 hover:ring-indigo-200"
       : "";
-    const stateTitle = `${cellStateLabel(state)}${rowLocked ? " · Locked" : ""}${issues.length ? ` · ${issues.length} issue${issues.length === 1 ? "" : "s"}` : ""}`;
+    const stateTitle = cellStateTitle(
+      state,
+      rowLocked,
+      issues,
+      disabled && fieldType === "calculated" ? ["Calculated field"] : []
+    );
 
     return `
-      <td class="min-w-[180px] border align-top ${stateClass} ${interactiveClass}" data-submission-value-id="${valueId ? escapeHtml(valueId) : ""}" data-field-code="${escapeHtml(field.field_code)}" title="${escapeHtml(stateTitle)}">
+      <td class="min-w-[180px] border align-top ${stateClass} ${interactiveClass}" data-cell-state="${escapeHtml(state)}" data-has-issues="${issues.length ? "true" : "false"}" data-row-locked="${rowLocked ? "true" : "false"}" data-submission-value-id="${valueId ? escapeHtml(valueId) : ""}" data-field-code="${escapeHtml(field.field_code)}" title="${escapeHtml(stateTitle)}">
         <div class="relative min-h-[48px]">
           ${issues.length ? '<span class="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" data-cell-open="true" title="Cell has issues/comments"></span>' : ""}
           ${proof && fieldType !== "file" ? '<span class="absolute bottom-1 left-1 h-1.5 w-1.5 rounded-full bg-indigo-500" title="Proof attached"></span>' : ""}
