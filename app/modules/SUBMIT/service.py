@@ -28,6 +28,38 @@ from app.modules.WFLWBLD.service import (
     find_next_applicable_level,
     validate_workflow_path_for_site,
 )
+from app.modules.WKBK.model import Workbook, WorkbookForm
+
+
+def _get_workflow_id_for_form(form_id):
+    """
+    Returns the workflow_id assigned to the active workbook that contains
+    this form, or None if no active workbook or no workflow is assigned.
+
+    workbook.workflow_id is now the authoritative approval path assignment.
+    """
+    wf_rows = (
+        db.session.query(Workbook.id, Workbook.workflow_id)
+        .join(WorkbookForm, WorkbookForm.workbook_id == Workbook.id)
+        .filter(
+            WorkbookForm.form_id == form_id,
+            Workbook.is_active == True,
+        )
+        .all()
+    )
+
+    assigned = [row.workflow_id for row in wf_rows if row.workflow_id]
+
+    if len(assigned) == 1:
+        return assigned[0]
+
+    if len(assigned) > 1:
+        raise ValueError(
+            "This sheet belongs to multiple workbooks with approval paths. "
+            "Please submit from a specific workbook context."
+        )
+
+    return None
 
 class DuplicateSubmissionError(Exception):
     def __init__(self, existing_id):
@@ -1420,13 +1452,17 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id):
         raise ValueError("This form is not applicable to the selected site.")
         
     # 4. Workflow assignment
-    wf_id = parsed_desc.get("workflow_id")
+    wf_id = _get_workflow_id_for_form(form_id)
     if not wf_id:
-        raise ValueError("This form is not ready for submission because no approval workflow has been assigned.")
-        
+        raise ValueError(
+            "This form is not ready for submission: no approval path has been assigned to its workbook."
+        )
+
     workflow = Workflow.query.filter_by(id=wf_id, is_deleted=False).first()
     if not workflow or not workflow.current_version_id:
-        raise ValueError("This form is not ready for submission because no approval workflow has been assigned.")
+        raise ValueError(
+            "This form is not ready for submission: the assigned approval path has no published version."
+        )
         
     # 5. Duplicate check
     existing = Submission.query.filter_by(
@@ -1875,12 +1911,11 @@ def submit_submission(submission_id, user_id):
 
     # Confirm form has workflow assigned
     form = Form.query.get(submission.form_id)
-    try:
-        parsed_desc = json.loads(form.description or "{}")
-    except Exception:
-        parsed_desc = {}
-    if not parsed_desc.get("workflow_id"):
-        raise ValueError("This form is not ready for submission because no approval workflow has been assigned.")
+    wf_id = _get_workflow_id_for_form(submission.form_id)
+    if not wf_id:
+        raise ValueError(
+            "This submission cannot proceed: no approval path has been assigned to its workbook."
+        )
     validate_workflow_path_for_site(submission.workflow_version_id, submission.site_id)
     first_applicable_level = find_next_applicable_level(
         submission.workflow_version_id,
