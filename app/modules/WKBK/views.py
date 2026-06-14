@@ -14,6 +14,10 @@ from app.modules.WKBK.service import (
     reorder_sheets,
     deactivate_workbook,
     get_addable_forms,
+    get_workbook_sites,
+    get_assignable_sites,
+    add_site_to_workbook,
+    remove_site_from_workbook,
 )
 from app.modules.WFLWBLD.model import Workflow, WorkflowVersion
 
@@ -203,6 +207,58 @@ def api_set_workflow_assignment(workbook_id):
         data={"workflow_id": wb.workflow_id},
         message="Workbook workflow assignment updated.",
     )
+
+
+@bp.route("/api/<int:workbook_id>/sites", methods=["GET"])
+@require_permission("form", "manage_forms")
+def api_list_sites(workbook_id):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+    return jsonify(get_workbook_sites(workbook_id))
+
+
+@bp.route("/api/<int:workbook_id>/assignable-sites", methods=["GET"])
+@require_permission("form", "manage_forms")
+def api_assignable_sites(workbook_id):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+    return jsonify(get_assignable_sites(workbook_id))
+
+
+@bp.route("/api/<int:workbook_id>/sites", methods=["POST"])
+@require_permission("form", "manage_forms")
+def api_add_site(workbook_id):
+    data = request.get_json() or {}
+    user = current_user()
+    try:
+        add_site_to_workbook(
+            workbook_id=workbook_id,
+            site_id=data.get("site_id"),
+            created_by=user.id,
+        )
+        db.session.commit()
+        return success_response(
+            data={"sites": get_workbook_sites(workbook_id)},
+            message="Site added.",
+        )
+    except ValueError as e:
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/<int:workbook_id>/sites/<int:site_id>", methods=["DELETE"])
+@require_permission("form", "manage_forms")
+def api_remove_site(workbook_id, site_id):
+    try:
+        remove_site_from_workbook(workbook_id=workbook_id, site_id=site_id)
+        db.session.commit()
+        return success_response(
+            data={"sites": get_workbook_sites(workbook_id)},
+            message="Site removed.",
+        )
+    except ValueError as e:
+        return error_response(str(e), 400)
 
 
 @bp.route("/api/<int:workbook_id>/preview", methods=["GET"])

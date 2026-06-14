@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
 
 from app.database import db
-from app.modules.WKBK.model import Workbook, WorkbookForm
+from app.modules.WKBK.model import Workbook, WorkbookForm, WorkbookSite
 from app.modules.FORMBLD.model import Form, FormVersion, FormSection, FieldVersion
+from app.modules.SITEMST.model import Site
 
 
 def _form_stats(form_id):
@@ -179,3 +180,71 @@ def get_addable_forms(workbook_id):
             "latest_version_status": latest.status if latest else None,
         })
     return result
+
+
+def get_workbook_sites(workbook_id):
+    rows = (
+        WorkbookSite.query
+        .filter_by(workbook_id=workbook_id)
+        .order_by(WorkbookSite.created_at.asc())
+        .all()
+    )
+    result = []
+    for row in rows:
+        site = Site.query.filter_by(id=row.site_id, is_deleted=False).first()
+        if site:
+            result.append({
+                "id": site.id,
+                "name": site.name,
+                "code": site.code,
+            })
+    return result
+
+
+def get_assignable_sites(workbook_id):
+    assigned_ids = {
+        row.site_id
+        for row in WorkbookSite.query.filter_by(workbook_id=workbook_id).all()
+    }
+    sites = (
+        Site.query.filter_by(is_deleted=False)
+        .order_by(Site.name.asc())
+        .all()
+    )
+    return [
+        {"id": s.id, "name": s.name, "code": s.code}
+        for s in sites
+        if s.id not in assigned_ids
+    ]
+
+
+def add_site_to_workbook(workbook_id, site_id, created_by):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        raise ValueError("Workbook not found.")
+    site = Site.query.filter_by(id=site_id, is_deleted=False).first()
+    if not site:
+        raise ValueError("Site not found.")
+    existing = WorkbookSite.query.filter_by(
+        workbook_id=workbook_id, site_id=site_id
+    ).first()
+    if existing:
+        raise ValueError("This site is already assigned to this workbook.")
+    row = WorkbookSite(
+        workbook_id=workbook_id,
+        site_id=site_id,
+        created_by=created_by,
+    )
+    db.session.add(row)
+    db.session.flush()
+    return row
+
+
+def remove_site_from_workbook(workbook_id, site_id):
+    row = WorkbookSite.query.filter_by(
+        workbook_id=workbook_id, site_id=site_id
+    ).first()
+    if not row:
+        raise ValueError("Site is not assigned to this workbook.")
+    db.session.delete(row)
+    db.session.flush()
