@@ -2,150 +2,170 @@
 {% block title %}Value Sets - Digital GHG Inventory{% endblock %}
 
 {% block content %}
-<!-- Tabulator CSS -->
-<link href="https://unpkg.com/tabulator-tables@5.5.0/dist/css/tabulator_tailwind.min.css" rel="stylesheet">
-<!-- Tabulator JS -->
-<script src="https://unpkg.com/tabulator-tables@5.5.0/dist/js/tabulator.min.js"></script>
-
 <div class="space-y-6">
-  <!-- Return link (shown when navigated from form builder) -->
+  <!-- Return link (workbook / form builder context) -->
   <div id="vs-return-link-bar" class="hidden">
     <a id="vs-return-link" href="#" class="text-xs font-semibold text-[#1a3a6b] hover:underline">← Back to workbook</a>
   </div>
 
-  <!-- Top Header -->
+  <!-- Formula builder context banner -->
+  <div id="vs-formula-banner" class="hidden">
+    <div class="flex items-center justify-between p-3.5 bg-indigo-50 border border-indigo-100 rounded-xl">
+      <span class="text-xs text-indigo-700 font-semibold">Building a formula — manage constants here, then return.</span>
+      <a id="vs-formula-back-link" href="#" class="text-xs font-bold text-indigo-600 hover:underline whitespace-nowrap ml-4">← Back to formula</a>
+    </div>
+  </div>
+
+  <!-- Top header -->
   <div class="flex items-center justify-between border-b border-slate-200 pb-4">
     <div>
-      <h1 class="text-2xl font-bold text-slate-800">Value Sets Management</h1>
-      <p class="text-xs text-slate-500 mt-1">Configure reference lookup value sets, emission factors, and constants.</p>
+      <h1 class="text-2xl font-bold text-slate-800">Value Sets</h1>
+      <p class="text-xs text-slate-500 mt-1">Lookup tables for emission factors, GWP constants, and conversion rates.</p>
     </div>
     <button id="btn-create-valset" class="inline-flex items-center justify-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
       <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
       </svg>
-      Create Value Set
+      New Value Set
     </button>
   </div>
 
-  <!-- Main Grid Layout -->
+  <!-- Main layout -->
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-    <!-- Left Panel: Value Sets List (Column Span 5) -->
-    <div class="lg:col-span-5 bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+
+    <!-- Left panel: value set list -->
+    <div class="lg:col-span-4 bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
       <div class="px-4 py-3 bg-slate-50 border-b border-slate-200/80">
         <h2 class="text-sm font-bold text-slate-700">All Value Sets</h2>
       </div>
-      <ul id="valset-list" class="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-        <!-- Rendered dynamically -->
-        <li class="p-6 text-center text-slate-400 italic text-sm">Loading value sets...</li>
+      <ul id="valset-list" class="divide-y divide-slate-100 max-h-[620px] overflow-y-auto">
+        <li class="p-6 text-center text-slate-400 italic text-sm">Loading...</li>
       </ul>
     </div>
 
-    <!-- Right Panel: Version Details & Entries Editor (Column Span 7) -->
-    <div id="details-panel" class="lg:col-span-7 bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden hidden">
-      <!-- Title & Details Header -->
-      <div class="p-5 border-b border-slate-100 space-y-4">
-        <div class="flex items-start justify-between">
-          <div>
-            <h2 id="detail-name" class="text-lg font-bold text-slate-800">Select a value set</h2>
-            <p id="detail-code" class="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded inline-block mt-1">CODE</p>
+    <!-- Right panel -->
+    <div class="lg:col-span-8">
+
+      <!-- Editor panel (hidden until a value set is selected) -->
+      <div id="details-panel" class="hidden bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+
+        <!-- Header strip: version selector + status + action buttons -->
+        <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/60">
+          <div class="flex items-center space-x-2.5">
+            <label class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Version</label>
+            <select id="version-select" class="form-select text-xs rounded border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 py-1 pl-2.5 pr-7"></select>
+            <span id="version-status-badge" class="px-2 py-0.5 rounded-full font-bold text-[9px] uppercase bg-amber-100 text-amber-800">Draft</span>
           </div>
-          <!-- Version Selector -->
           <div class="flex items-center space-x-2">
-            <label class="text-xs font-medium text-slate-500">Version:</label>
-            <select id="version-select" class="form-select text-xs rounded border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 py-1 pl-2.5 pr-8">
-              <!-- Options loaded dynamically -->
-            </select>
-          </div>
-        </div>
-
-        <p id="detail-desc" class="text-xs text-slate-500 leading-relaxed">Description goes here...</p>
-
-        <!-- Status & Approvals Bar -->
-        <div id="status-bar" class="flex flex-wrap items-center justify-between p-3.5 rounded-lg bg-slate-50 border border-slate-200/70 text-xs">
-          <!-- Dynamically populated status badge and actions -->
-        </div>
-      </div>
-
-      <!-- Entries Table Section -->
-      <div class="p-5 space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-bold text-slate-800">Value Set Entries</h3>
-          <div id="entry-actions" class="flex items-center space-x-2 hidden">
-            <button id="btn-add-entry" class="inline-flex items-center px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded shadow-sm transition">
-              + Add Entry
+            <button id="btn-reject" class="hidden px-3 py-1.5 border border-slate-300 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-lg transition">
+              Reject
             </button>
-            <button id="btn-save-entries" class="inline-flex items-center px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded shadow-sm transition">
-              Save Draft Entries
+            <button id="btn-save-draft" class="hidden px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow transition">
+              Save Changes
+            </button>
+            <button id="btn-publish" class="hidden px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition">
+              Publish Version
             </button>
           </div>
         </div>
 
-        <!-- Tabulator Table Holder -->
-        <div id="entries-table-holder" class="border border-slate-200 rounded-lg overflow-hidden">
-          <div id="entries-table"></div>
+        <!-- Value set identity (read-only) -->
+        <div class="px-5 py-4 border-b border-slate-100">
+          <h2 id="detail-name" class="text-xl font-bold text-slate-800"></h2>
+          <p id="detail-code" class="text-xs font-mono text-slate-400 mt-0.5"></p>
+          <p id="detail-desc" class="text-xs text-slate-500 mt-1 hidden"></p>
         </div>
 
-        <!-- Audit block -->
-        <div class="mt-4 border-t border-slate-200/80 pt-4 text-slate-500 flex items-center space-x-2 text-[11px] font-medium">
-          <svg class="h-4 w-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <rect x="5" y="11" width="14" height="9"/>
-            <path d="M8 11V8a4 4 0 0 1 8 0v3"/>
-          </svg>
-          <span>Superseded versions are read-only and kept for audit. Publishing a new version closes the current one's effective date automatically.</span>
+        <!-- Published version notice -->
+        <div id="published-notice" class="hidden mx-5 mt-4 flex items-center justify-between p-3.5 bg-amber-50 border border-amber-200 rounded-lg">
+          <span class="text-xs font-semibold text-amber-800">Version history is preserved for future governance.</span>
+          <button id="btn-create-draft" class="text-xs font-bold text-indigo-600 hover:underline whitespace-nowrap ml-4">
+            Create new version →
+          </button>
         </div>
+
+        <!-- Rejection notice -->
+        <div id="rejection-notice" class="hidden mx-5 mt-4 p-3.5 bg-rose-50 border border-rose-100 rounded-lg text-xs text-rose-700 font-medium"></div>
+
+        <!-- Inline entries table -->
+        <div class="p-5 space-y-3">
+          <h3 class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Entries</h3>
+          <p class="text-xs text-slate-400">Entry codes are what formulas reference. Example: <span class="font-mono">diesel_consumed × diesel_ef</span></p>
+
+          <div class="border border-slate-200 rounded-lg overflow-hidden">
+            <table class="w-full">
+              <thead class="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th class="px-3 py-2 text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider w-[38%]">Code</th>
+                  <th class="px-3 py-2 text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">Value</th>
+                  <th class="w-10"></th>
+                </tr>
+              </thead>
+              <tbody id="entries-tbody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+
+          <button id="btn-add-entry" class="hidden inline-flex items-center text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition">
+            <svg class="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Add entry
+          </button>
+        </div>
+
       </div>
-    </div>
 
-    <!-- Right Panel Empty State -->
-    <div id="details-empty-state" class="lg:col-span-7 bg-white rounded-xl border border-slate-200/80 shadow-sm p-12 text-center flex flex-col items-center justify-center min-h-[300px]">
-      <svg class="h-12 w-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-      </svg>
-      <h3 class="mt-4 text-sm font-semibold text-slate-700">No Value Set Selected</h3>
-      <p class="mt-1.5 text-xs text-slate-400">Click a value set on the left panel to manage its versions and entries.</p>
+      <!-- Empty state -->
+      <div id="details-empty-state" class="bg-white rounded-xl border border-slate-200/80 shadow-sm p-12 text-center flex flex-col items-center justify-center min-h-[300px]">
+        <svg class="h-12 w-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+        </svg>
+        <h3 class="mt-4 text-sm font-semibold text-slate-700">No Value Set Selected</h3>
+        <p class="mt-1.5 text-xs text-slate-400">Select a value set from the list to view and edit its entries.</p>
+      </div>
+
     </div>
   </div>
 </div>
 
 <!-- Create Value Set Modal -->
 <div id="modal-create" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
-  <div class="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden transition-all transform scale-100">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-sm overflow-hidden">
     <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
       <h3 class="text-base font-bold text-slate-800">Create New Value Set</h3>
-      <button id="btn-close-modal" class="text-slate-400 hover:text-slate-500">
+      <button id="btn-close-modal" class="text-slate-400 hover:text-slate-600 transition-colors">
         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
     </div>
-    <form id="form-create-valset" class="p-6 space-y-4">
+    <form id="form-create-valset" class="p-6 space-y-5">
       <div>
-        <label class="block text-xs font-semibold text-slate-700 uppercase">Value Set Name</label>
-        <input type="text" id="valset-name" required placeholder="e.g. Grid Emission Factors" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm h-10 px-3 border">
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Value Set Name</label>
+        <input type="text" id="valset-name" required
+          placeholder="e.g. Grid Emission Factors"
+          autocomplete="off"
+          class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm h-10 px-3 border">
+        <p id="valset-code-preview" class="text-[10px] font-mono text-slate-400 mt-1.5 min-h-[1rem]"></p>
       </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 uppercase">Unique Code</label>
-        <input type="text" id="valset-code" required placeholder="e.g. EMISSION_GRID" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm h-10 px-3 border font-mono uppercase">
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-700 uppercase">Description</label>
-        <textarea id="valset-description" placeholder="Describe the purpose of this value set..." rows="3" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-3 border"></textarea>
-      </div>
-      <div class="pt-2 flex justify-end space-x-2">
-        <button type="button" id="btn-cancel-modal" class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded-lg transition-colors">
+      <div class="flex justify-end space-x-2 pt-1">
+        <button type="button" id="btn-cancel-modal"
+          class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded-lg transition-colors">
           Cancel
         </button>
-        <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
-          Create
+        <button type="submit"
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
+          Create →
         </button>
       </div>
     </form>
   </div>
 </div>
 
-<!-- Reject Reason Dialog Modal -->
+<!-- Reject Modal -->
 <div id="modal-reject" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
-  <div class="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden transition-all transform scale-100">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden">
     <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
       <h3 class="text-base font-bold text-slate-800">Reject Value Set Version</h3>
       <button id="btn-close-reject" class="text-slate-400 hover:text-slate-500">
@@ -157,13 +177,17 @@
     <form id="form-reject-version" class="p-6 space-y-4">
       <div>
         <label class="block text-xs font-semibold text-slate-700 uppercase">Reason for Rejection</label>
-        <textarea id="reject-reason" required placeholder="Provide a detailed explanation of why this version is rejected..." rows="4" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-3 border"></textarea>
+        <textarea id="reject-reason" required rows="4"
+          placeholder="Explain why this version is being rejected..."
+          class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm p-3 border"></textarea>
       </div>
-      <div class="pt-2 flex justify-end space-x-2">
-        <button type="button" id="btn-cancel-reject" class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded-lg transition-colors">
+      <div class="flex justify-end space-x-2 pt-2">
+        <button type="button" id="btn-cancel-reject"
+          class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded-lg transition-colors">
           Cancel
         </button>
-        <button type="submit" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
+        <button type="submit"
+          class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
           Submit Rejection
         </button>
       </div>

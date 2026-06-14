@@ -173,19 +173,18 @@ def publish_formula_version(version_id, user_id):
         
     tokens_keys = set((version.tokens or {}).keys())
     
-    # Cross-check tokens against actual live form field codes and approved value set entry codes
+    # Cross-check tokens against actual live form field codes and current value set entry codes.
     from app.modules.FORMBLD.model import Field
     active_field_codes = {f.field_code for f in Field.query.filter_by(is_deleted=False).all()}
     
     from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
-    approved_valsets = (
+    current_valsets = (
         ValueSet.query.filter_by(is_deleted=False)
         .join(ValueSetVersion, ValueSetVersion.id == ValueSet.current_version_id)
-        .filter(ValueSetVersion.status == "Approved")
         .all()
     )
     active_valset_codes = set()
-    for vs in approved_valsets:
+    for vs in current_valsets:
         entries = ValueSetEntry.query.filter_by(
             value_set_version_id=vs.current_version_id,
             is_deleted=False,
