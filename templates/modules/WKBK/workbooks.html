@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Workbooks - Digital GHG Inventory{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div id="toast-container" class="fixed top-5 right-5 z-50 space-y-2 pointer-events-none"></div>
+
+  <!-- Header -->
+  <div class="flex items-center justify-between border-b border-slate-200 pb-4">
+    <div>
+      <div class="text-xs text-slate-500 mb-1">Configuration · <strong class="text-indigo-600">Workbooks</strong></div>
+      <h1 class="text-2xl font-bold text-slate-800">Workbooks</h1>
+      <p class="text-xs text-slate-500 mt-1">Named containers that group data collection sheets for site reporting.</p>
+    </div>
+    <button id="btn-create-workbook"
+      class="inline-flex items-center justify-center px-4 py-2 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-sm font-semibold rounded-lg shadow transition-colors">
+      <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+      </svg>
+      Create Workbook
+    </button>
+  </div>
+
+  <!-- Workbook card grid -->
+  <div id="workbooks-grid" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div class="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400 shadow-sm md:col-span-2 xl:col-span-3">
+      Loading workbooks…
+    </div>
+  </div>
+</div>
+
+<!-- Create Workbook Modal -->
+<div id="modal-create-wb" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-sm overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+      <h3 class="text-base font-bold text-slate-800">New Workbook</h3>
+      <button id="btn-close-create-wb" class="text-slate-400 hover:text-slate-600">
+        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+    <form id="form-create-wb" class="p-6 space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Workbook Name</label>
+        <input type="text" id="wb-name" required autocomplete="off"
+          placeholder="e.g. SGGH Annual Workbook"
+          class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm h-10 px-3 border">
+        <p id="wb-code-preview" class="text-[10px] font-mono text-slate-400 mt-1.5 min-h-[1rem]"></p>
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Description <span class="font-normal text-slate-400">(optional)</span></label>
+        <textarea id="wb-description" rows="2"
+          placeholder="Brief description of what this workbook covers…"
+          class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm px-3 py-2 border"></textarea>
+      </div>
+      <div class="flex justify-end space-x-2 pt-1">
+        <button type="button" id="btn-cancel-create-wb"
+          class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded-lg transition-colors">
+          Cancel
+        </button>
+        <button type="submit"
+          class="px-4 py-2 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-sm font-semibold rounded-lg shadow transition-colors">
+          Create →
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/workbooks.js') }}"></script>
+{% endblock %}

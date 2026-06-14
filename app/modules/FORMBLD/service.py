@@ -53,6 +53,22 @@ from app.database import db
 from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion, FormSection
 from app.modules.FRMULA.model import FormulaVersion
 
+MOCK_FY_START_YEAR = 2026
+MOCK_FY_MONTHS = (
+    (4, "April"),
+    (5, "May"),
+    (6, "June"),
+    (7, "July"),
+    (8, "August"),
+    (9, "September"),
+    (10, "October"),
+    (11, "November"),
+    (12, "December"),
+    (1, "January"),
+    (2, "February"),
+    (3, "March"),
+)
+
 ALLOWED_SECTION_LAYOUT_TYPES = {"monthly_table", "annual_table", "reference_table"}
 ALLOWED_FIELD_FREQUENCIES = {"monthly", "annual", "static"}
 
@@ -142,6 +158,134 @@ def get_form_version_fields(form_version_id):
         .all()
     )
     return rows
+
+def compose_preview_workbook_context(form_version_id):
+    version = get_form_version(form_version_id)
+    if not version:
+        raise ValueError("Form version not found.")
+
+    form = get_form(version.form_id)
+    if not form:
+        raise ValueError("Form not found.")
+
+    fields = []
+    for fv, field in get_form_version_fields(form_version_id):
+        field_config = dict(fv.field_config or {})
+        field_type = (fv.field_type or "").strip().lower()
+        fields.append({
+            "id": fv.field_id,
+            "field_id": fv.field_id,
+            "field_version_id": fv.id,
+            "field_code": field.field_code,
+            "display_order": field.display_order,
+            "field_name": fv.field_name,
+            "field_type": fv.field_type,
+            "field_config": field_config,
+            "section_id": fv.section_id,
+            "section_code": fv.section.code if fv.section else "",
+            "frequency": fv.frequency or "monthly",
+            "calculated": field_type == "calculated",
+        })
+
+    sections = [{
+        "id": section.id,
+        "name": section.name,
+        "code": section.code,
+        "layout_type": section.layout_type,
+        "display_order": section.display_order,
+        "description": section.description or "",
+    } for section in get_form_sections(form.id)]
+
+    rows = []
+    for month, month_name in MOCK_FY_MONTHS:
+        year = MOCK_FY_START_YEAR if month >= 4 else MOCK_FY_START_YEAR + 1
+        values = {}
+        for field in fields:
+            field_type = (field.get("field_type") or "").strip().lower()
+            values[field["field_code"]] = {
+                "submission_value_id": None,
+                "raw_value": None,
+                "calculated_value": None,
+                "cell_state": "approved_locked" if field_type == "calculated" else "blank_editable",
+                "is_locked": field_type == "calculated",
+                "remark": None,
+                "status": "preview_only" if field_type == "calculated" else None,
+                "preview_value": None,
+                "reportable_value": None,
+                "warnings": [],
+            }
+        rows.append({
+            "row_key": f"preview-{year}-{month:02d}",
+            "year": year,
+            "month": month,
+            "label": f"{month_name} {year}",
+            "period_label": f"{month_name} {year}",
+            "period_id": None,
+            "period_status": "OPEN",
+            "submission_id": None,
+            "submission_status": "Not Started",
+            "is_locked": False,
+            "editable": False,
+            "editability": {"editable": False, "reason": "Preview only"},
+            "values": values,
+            "proofs": {},
+            "issues": {},
+            "is_active_period": False,
+        })
+
+    section_by_id = {section["id"]: section for section in sections}
+    workbook_values = {}
+    for field in fields:
+        section = section_by_id.get(field.get("section_id"))
+        layout_type = (section.get("layout_type") if section else "monthly_table") or "monthly_table"
+        is_non_monthly = (
+            (field.get("frequency") or "monthly").strip().lower() in ("annual", "static")
+            or layout_type.strip().lower() in ("annual_table", "reference_table")
+        )
+        if is_non_monthly:
+            workbook_values[field["field_code"]] = {
+                "workbook_value_id": None,
+                "raw_value": None,
+                "calculated_value": None,
+                "cell_state": "approved_locked" if field.get("calculated") else "blank_editable",
+                "is_locked": bool(field.get("calculated")),
+                "remark": None,
+            }
+
+    return {
+        "financial_year": {
+            "start_year": MOCK_FY_START_YEAR,
+            "label": f"FY {MOCK_FY_START_YEAR}-{str(MOCK_FY_START_YEAR + 1)[-2:]}",
+            "months": [
+                {
+                    "year": MOCK_FY_START_YEAR if month >= 4 else MOCK_FY_START_YEAR + 1,
+                    "month": month,
+                    "label": month_name,
+                }
+                for month, month_name in MOCK_FY_MONTHS
+            ],
+        },
+        "site": {
+            "id": None,
+            "name": "SPOC Preview",
+            "code": "PREVIEW",
+        },
+        "selected_form": {
+            "id": form.id,
+            "name": form.name,
+            "code": form.code,
+            "workflow_id": None,
+        },
+        "version": {
+            "id": version.id,
+            "version_number": version.version_number,
+            "status": version.status,
+        },
+        "fields": fields,
+        "sections": sections,
+        "workbook_values": workbook_values,
+        "rows": rows,
+    }
 
 def save_form_sections(form_id, sections_list, user_id):
     if sections_list is None:

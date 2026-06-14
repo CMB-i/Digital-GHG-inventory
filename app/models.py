@@ -13,3 +13,4 @@ from app.modules.SUBMIT import model as submit_model  # noqa: F401
 from app.modules.USRMGMT import model as usrmgmt_model  # noqa: F401
 from app.modules.VALSET import model as valset_model  # noqa: F401
 from app.modules.WFLWBLD import model as wflwbld_model  # noqa: F401
+from app.modules.WKBK import model as wkbk_model  # noqa: F401

@@ -26,6 +26,7 @@ from app.modules.USRMGMT import auth_bp, bp as usrmgmt_bp
 from app.modules.USRMGMT.model import User
 from app.modules.VALSET import bp as valset_bp
 from app.modules.WFLWBLD import bp as wflwbld_bp
+from app.modules.WKBK import bp as wkbk_bp
 from app.modules.WFLWBLD.model import WorkflowLevelApprover
 
 
@@ -43,6 +44,7 @@ MODULE_BLUEPRINTS = [
     auditl_bp,
     notify_bp,
     period_bp,
+    wkbk_bp,
 ]
 
 
@@ -396,8 +398,8 @@ def build_nav_items(user):
                     "visible": capabilities["can_manage_setup"] and user_can(user, "site", "view"),
                 },
                 {
-                    "label": "Workbook Builder",
-                    "href": "/module/FORMBLD/",
+                    "label": "Workbooks",
+                    "href": "/workbooks/",
                     "visible": capabilities["can_manage_setup"] and user_can(user, "form", "manage_forms"),
                 },
                 {
@@ -462,8 +464,8 @@ def build_dashboard_cards(user):
             "visible": capabilities["can_manage_setup"] and user_can(user, "site", "view"),
         },
         {
-            "title": "Workbook Builder",
-            "href": "/module/FORMBLD/",
+            "title": "Workbooks",
+            "href": "/workbooks/",
             "description": "Build reusable workbook and sheet structures for site reporting.",
             "visible": capabilities["can_manage_setup"] and user_can(user, "form", "manage_forms"),
         },

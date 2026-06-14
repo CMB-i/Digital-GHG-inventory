@@ -15,6 +15,7 @@ document.addEventListener("DOMContentLoaded", function () {
   let activeSectionCode = "";
   let isUnsaved = false;
   let pendingPrefill = null;
+  let workspaceMode = "fields";
 
   // View containers
   const listView = document.getElementById("list-view");
@@ -37,6 +38,16 @@ document.addEventListener("DOMContentLoaded", function () {
   const sectionsList = document.getElementById("sections-list");
   const workspaceSectionTitle = document.getElementById("workspace-section-title");
   const workspaceSectionMeta = document.getElementById("workspace-section-meta");
+  const workspaceTabFields = document.getElementById("workspace-tab-fields");
+  const workspaceTabPreview = document.getElementById("workspace-tab-preview");
+  const builderPreviewPanel = document.getElementById("builder-preview-panel");
+  const builderPreviewEmpty = document.getElementById("builder-preview-empty");
+  const builderPreviewTableWrap = document.getElementById("builder-preview-table-wrap");
+  const builderPreviewWorkbookHead = document.getElementById("builder-preview-workbook-head");
+  const builderPreviewWorkbookBody = document.getElementById("builder-preview-workbook-body");
+  const builderPreviewStaticWrap = document.getElementById("builder-preview-static-wrap");
+  const builderPreviewStaticHead = document.getElementById("builder-preview-static-head");
+  const builderPreviewStaticBody = document.getElementById("builder-preview-static-body");
 
   // Inspector elements
   const inspectorPanel = document.getElementById("inspector-panel");
@@ -67,6 +78,13 @@ document.addEventListener("DOMContentLoaded", function () {
   const pvTitle = document.getElementById("pv-title");
   const pvMeta = document.getElementById("pv-meta");
   const previewWorkspaceEl = document.getElementById("preview-workspace-el");
+  const previewEmpty = document.getElementById("preview-empty");
+  const previewTableWrap = document.getElementById("preview-table-wrap");
+  const previewWorkbookHead = document.getElementById("preview-workbook-head");
+  const previewWorkbookBody = document.getElementById("preview-workbook-body");
+  const previewStaticWrap = document.getElementById("preview-static-wrap");
+  const previewStaticHead = document.getElementById("preview-static-head");
+  const previewStaticBody = document.getElementById("preview-static-body");
 
   // Toast Helper
   function showToast(message, type = "success") {
@@ -119,6 +137,261 @@ document.addEventListener("DOMContentLoaded", function () {
   function layoutDisplayName(type) {
     const map = { monthly_table: "Monthly table", annual_table: "Annual table", reference_table: "Reference table" };
     return map[type] || "Monthly table";
+  }
+
+  function fieldType(field) {
+    return String((field && field.field_type) || "").trim().toLowerCase();
+  }
+
+  function previewOrderedFields(fields, sections) {
+    const allFields = Array.isArray(fields) ? fields : [];
+    const allSections = Array.isArray(sections) ? sections : [];
+    if (!allSections.length) {
+      return [...allFields].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+    }
+    const ordered = [];
+    allSections.forEach(section => {
+      ordered.push(...allFields
+        .filter(field => field.section_id === section.id)
+        .sort((a, b) => (a.display_order || 0) - (b.display_order || 0)));
+    });
+    const sectionIds = new Set(allSections.map(section => section.id));
+    ordered.push(...allFields
+      .filter(field => !field.section_id || !sectionIds.has(field.section_id))
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0)));
+    return ordered;
+  }
+
+  function isPreviewNonMonthlyField(field, context) {
+    if (window.WorkbookSheet && typeof window.WorkbookSheet.isFieldNonMonthly === "function") {
+      return window.WorkbookSheet.isFieldNonMonthly(field, context);
+    }
+    const frequency = String((field && field.frequency) || "monthly").trim().toLowerCase();
+    if (frequency === "annual" || frequency === "static") return true;
+    const section = (context.sections || []).find(item => item.id === field.section_id);
+    const layoutType = String((section && section.layout_type) || "monthly_table").trim().toLowerCase();
+    return layoutType === "annual_table" || layoutType === "reference_table";
+  }
+
+  function dropdownSelectHtml(field) {
+    const options = normalizeDropdownOptions(field && field.field_config ? field.field_config.options : []);
+    return `
+      <select class="workbook-cell-control min-h-9 w-full cursor-not-allowed border-0 bg-transparent px-2 py-1.5 text-sm text-slate-500 outline-none" disabled>
+        <option value="">Select...</option>
+        ${options.map(option => `<option value="${escapeHtml(option.entry_code || option.entry_label || "")}">${escapeHtml(option.entry_label || option.entry_code || "")}</option>`).join("")}
+      </select>
+    `;
+  }
+
+  function modalPreviewTarget() {
+    return {
+      empty: previewEmpty,
+      tableWrap: previewTableWrap,
+      head: previewWorkbookHead,
+      body: previewWorkbookBody,
+      staticWrap: previewStaticWrap,
+      staticHead: previewStaticHead,
+      staticBody: previewStaticBody,
+    };
+  }
+
+  function builderPreviewTarget() {
+    return {
+      empty: builderPreviewEmpty,
+      tableWrap: builderPreviewTableWrap,
+      head: builderPreviewWorkbookHead,
+      body: builderPreviewWorkbookBody,
+      staticWrap: builderPreviewStaticWrap,
+      staticHead: builderPreviewStaticHead,
+      staticBody: builderPreviewStaticBody,
+    };
+  }
+
+  function resetPreviewTarget(target, message = "Loading preview...") {
+    if (!target) return;
+    if (target.empty) {
+      target.empty.classList.remove("hidden");
+      target.empty.textContent = message;
+    }
+    if (target.tableWrap) target.tableWrap.classList.add("hidden");
+    if (target.staticWrap) target.staticWrap.classList.add("hidden");
+    if (target.head) target.head.innerHTML = "";
+    if (target.body) target.body.innerHTML = "";
+    if (target.staticHead) target.staticHead.innerHTML = "";
+    if (target.staticBody) target.staticBody.innerHTML = "";
+  }
+
+  function previewUrl(formId, versionId) {
+    const params = new URLSearchParams();
+    if (versionId) params.set("version_id", versionId);
+    return `/module/FORMBLD/forms/${formId}/preview-spoc${params.toString() ? `?${params.toString()}` : ""}`;
+  }
+
+  function loadPreviewContext(formId, versionId) {
+    return fetch(previewUrl(formId, versionId))
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to load preview.");
+        return res.json();
+      });
+  }
+
+  function enhancePreviewMonthlyCells(target, context, monthlyFields) {
+    if (!target || !target.body) return;
+    if (target.head) {
+      target.head.querySelectorAll("tr:first-child th[colspan]").forEach(header => {
+        if (!header.textContent.trim()) return;
+        header.classList.remove("bg-slate-100", "text-slate-700");
+        header.classList.add("bg-navy", "text-white");
+      });
+    }
+    const rows = target.body.querySelectorAll("tr[data-row-key]");
+    rows.forEach(row => {
+      monthlyFields.forEach((field, idx) => {
+        const cell = row.children[idx + 1];
+        if (!cell) return;
+        cell.dataset.fieldCode = field.field_code || "";
+        if (fieldType(field) === "dropdown") {
+          cell.classList.remove("text-center");
+          cell.classList.add("bg-slate-50", "text-slate-500");
+          cell.innerHTML = `<div class="relative min-h-[48px]">${dropdownSelectHtml(field)}</div>`;
+        } else if (fieldType(field) === "calculated") {
+          cell.classList.add("bg-[#eef3fa]", "text-slate-500");
+          cell.innerHTML = `
+            <div class="flex min-h-[48px] items-center justify-center gap-1.5 px-2 py-2 text-sm font-semibold text-slate-500">
+              <span title="Calculated field">🔒</span>
+              <span>—</span>
+            </div>
+          `;
+        }
+      });
+    });
+  }
+
+  function renderPreviewWorkbookContext(context, target) {
+    if (!window.WorkbookSheet || !target || !target.head || !target.body) {
+      throw new Error("Workbook preview renderer is unavailable.");
+    }
+
+    const fields = context.fields || [];
+    if (!fields.length) {
+      if (target.tableWrap) target.tableWrap.classList.add("hidden");
+      if (target.staticWrap) target.staticWrap.classList.add("hidden");
+      if (target.empty) {
+        target.empty.classList.remove("hidden");
+        target.empty.textContent = "No fields configured for this workbook.";
+      }
+      return;
+    }
+
+    if (target.empty) target.empty.classList.add("hidden");
+    if (target.tableWrap) target.tableWrap.classList.remove("hidden");
+    if (target.staticWrap) target.staticWrap.classList.add("hidden");
+
+    const orderedFields = previewOrderedFields(fields, context.sections || []);
+    const monthlyFields = orderedFields.filter(field => !isPreviewNonMonthlyField(field, context));
+    const nonMonthlyFields = orderedFields.filter(field => isPreviewNonMonthlyField(field, context));
+
+    window.WorkbookSheet.render({
+      mode: "calc_results",
+      headEl: target.head,
+      bodyEl: target.body,
+      fields: monthlyFields,
+      sections: context.sections || [],
+      workbookValues: context.workbook_values || {},
+      rows: context.rows || [],
+      selectedRowKey: null,
+    });
+    enhancePreviewMonthlyCells(target, context, monthlyFields);
+
+    if (nonMonthlyFields.length && target.staticHead && target.staticBody) {
+      const unsectionedStaticSectionId = "__preview_static_values";
+      let staticFields = nonMonthlyFields.map(field => ({ ...field }));
+      const hasUnsectionedStatic = staticFields.some(field => !field.section_id);
+      if (hasUnsectionedStatic) {
+        staticFields = staticFields.map(field => (
+          field.section_id
+            ? field
+            : { ...field, section_id: unsectionedStaticSectionId }
+        ));
+      }
+      const staticSections = (context.sections || []).filter(section =>
+        nonMonthlyFields.some(field => field.section_id === section.id)
+      );
+      if (hasUnsectionedStatic) {
+        staticSections.push({
+          id: unsectionedStaticSectionId,
+          name: "Annual / static fields",
+          code: "annual_static_fields",
+          layout_type: "annual_table",
+          display_order: 9999,
+          description: "",
+        });
+      }
+      window.WorkbookSheet.render({
+        mode: "entry",
+        headEl: target.staticHead,
+        bodyEl: target.staticBody,
+        fields: staticFields,
+        sections: staticSections,
+        workbookValues: context.workbook_values || {},
+        rows: context.rows || [],
+        selectedRowKey: null,
+      });
+      target.staticBody.querySelectorAll("tr[data-row-key]").forEach(row => row.remove());
+      target.staticHead.innerHTML = "";
+      if (target.staticBody.children.length && target.staticWrap) {
+        target.staticWrap.classList.remove("hidden");
+      }
+    }
+  }
+
+  function setWorkspaceTabStyles() {
+    if (workspaceTabFields) {
+      workspaceTabFields.className = workspaceMode === "fields"
+        ? "rounded-md bg-[#1a3a6b] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm"
+        : "rounded-md px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:bg-slate-50 hover:text-[#1a3a6b]";
+    }
+    if (workspaceTabPreview) {
+      workspaceTabPreview.className = workspaceMode === "preview"
+        ? "rounded-md bg-[#1a3a6b] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm"
+        : "rounded-md px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:bg-slate-50 hover:text-[#1a3a6b]";
+    }
+  }
+
+  function showWorkspaceFields() {
+    workspaceMode = "fields";
+    setWorkspaceTabStyles();
+    if (formWorkspace) formWorkspace.classList.remove("hidden");
+    if (builderPreviewPanel) builderPreviewPanel.classList.add("hidden");
+  }
+
+  function refreshBuilderPreview() {
+    if (!selectedFormId || !selectedVersionId) {
+      resetPreviewTarget(builderPreviewTarget(), "No form is currently loaded for preview.");
+      return;
+    }
+    const target = builderPreviewTarget();
+    resetPreviewTarget(target);
+    loadPreviewContext(selectedFormId, selectedVersionId)
+      .then(data => {
+        renderPreviewWorkbookContext(data, target);
+      })
+      .catch(err => {
+        console.error("Error loading inline preview fields:", err);
+        if (target.empty) {
+          target.empty.classList.remove("hidden");
+          target.empty.textContent = err.message || "Error loading preview.";
+        }
+        showToast("Error loading workbook preview.", "error");
+      });
+  }
+
+  function showWorkspacePreview() {
+    workspaceMode = "preview";
+    setWorkspaceTabStyles();
+    if (formWorkspace) formWorkspace.classList.add("hidden");
+    if (builderPreviewPanel) builderPreviewPanel.classList.remove("hidden");
+    refreshBuilderPreview();
   }
 
   function activeSection() {
@@ -308,6 +581,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // --- View Switching ---
   window.showList = function () {
+    showWorkspaceFields();
     step1View.classList.add("hidden");
     step2View.classList.add("hidden");
     listView.classList.remove("hidden");
@@ -316,6 +590,7 @@ document.addEventListener("DOMContentLoaded", function () {
   };
 
   window.startNew = function () {
+    showWorkspaceFields();
     listView.classList.add("hidden");
     step2View.classList.add("hidden");
     step1View.classList.remove("hidden");
@@ -371,6 +646,7 @@ document.addEventListener("DOMContentLoaded", function () {
   window.editFormLayout = function (formId, versionId) {
     selectedFormId = formId;
     selectedVersionId = versionId;
+    showWorkspaceFields();
 
     listView.classList.add("hidden");
     step1View.classList.add("hidden");
@@ -700,6 +976,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
         // Render Canvas Preview
         renderWorkspace();
+        if (workspaceMode === "preview") {
+          refreshBuilderPreview();
+        }
 
         // Save status styling
         updateSaveStatusText();
@@ -907,7 +1186,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (workspaceSectionMeta) {
       workspaceSectionMeta.textContent = section
         ? `${humanizeType(section.layout_type || "monthly_table")} · ${countLabel}`
-        : `${countLabel} across all sheets and sections`;
+        : `${countLabel} across all sections`;
     }
 
     if (fields.length === 0) {
@@ -1380,8 +1659,24 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnAddFieldLink = document.getElementById("btn-add-field-link");
   if (btnAddFieldLink) {
     btnAddFieldLink.onclick = function () {
+      showWorkspaceFields();
       closeInspector();
       renderWorkspace();
+    };
+  }
+
+  if (workspaceTabFields) {
+    workspaceTabFields.onclick = function () {
+      showWorkspaceFields();
+    };
+  }
+
+  if (workspaceTabPreview) {
+    workspaceTabPreview.onclick = function () {
+      if (isUnsaved) {
+        showToast("Preview shows the last saved draft. Save changes to refresh it.", "error");
+      }
+      showWorkspacePreview();
     };
   }
 
@@ -1517,22 +1812,24 @@ document.addEventListener("DOMContentLoaded", function () {
     if (form.sites && form.sites.length > 0) {
       sitesText = form.sites.map(sid => sitesMap[sid] || sid).join(", ");
     }
-    pvMeta.textContent = `${sitesText} · Frequency: ${form.frequency || "Monthly"} · Version: v${form.latest_version_num || 1}`;
+    pvMeta.textContent = `${sitesText} · Frequency: ${form.frequency || "Monthly"} · Loading preview...`;
+    const target = modalPreviewTarget();
+    resetPreviewTarget(target);
+    previewOverlay.classList.remove("hidden");
 
-    fetch(`/module/FORMBLD/api/version/${versionId}`)
-      .then(res => res.json())
+    loadPreviewContext(formId, versionId)
       .then(data => {
-        const fields = data.fields || [];
-        window.renderForm(fields, previewWorkspaceEl, "spoc_entry", {}, {
-          onValueChange: function (code, val, allValues) {
-            console.log(`Preview value change: ${code} = ${val}`, allValues);
-          }
-        });
+        pvMeta.textContent = `${sitesText} · ${data.financial_year && data.financial_year.label ? data.financial_year.label : "Preview"} · Version: v${data.version ? data.version.version_number : (form.latest_version_num || 1)}`;
+        renderPreviewWorkbookContext(data, target);
         previewOverlay.classList.remove("hidden");
       })
       .catch(err => {
         console.error("Error loading preview fields:", err);
-        showToast("Error loading form preview fields.", "error");
+        if (target.empty) {
+          target.empty.classList.remove("hidden");
+          target.empty.textContent = err.message || "Error loading preview.";
+        }
+        showToast("Error loading workbook preview.", "error");
       });
   };
 
@@ -1590,6 +1887,41 @@ document.addEventListener("DOMContentLoaded", function () {
     const fieldCode = params.get("field_id");
     const formId = params.get("form_id");
     const versionId = params.get("version_id");
+    const workbookId = params.get("workbook_id");
+    const workbookName = params.get("workbook_name");
+    const sheetLabel = params.get("sheet_label");
+
+    const formsBackBtn    = document.getElementById("btn-forms-back");
+    const tabFieldsLabel  = document.getElementById("tab-fields-label");
+    const sectionSubtext  = document.getElementById("sections-panel-subtext");
+
+    if (workbookId) {
+      // Show workbook breadcrumb
+      const bar  = document.getElementById("fb-return-link-bar");
+      const link = document.getElementById("fb-return-link");
+      if (bar && link) {
+        link.href = "/workbooks/" + workbookId;
+        const crumb = workbookName
+          ? (sheetLabel ? workbookName + " / " + sheetLabel : workbookName)
+          : "Workbook";
+        link.textContent = "← " + crumb;
+        bar.classList.remove("hidden");
+      }
+      // Hide redundant "← Forms" button — breadcrumb is the only back nav
+      if (formsBackBtn) formsBackBtn.classList.add("hidden");
+      // Relabel centre panel tab
+      if (tabFieldsLabel) tabFieldsLabel.textContent = "Fields in This Sheet";
+      // Relabel left panel subtext
+      if (sectionSubtext) sectionSubtext.textContent = "Choose column groups within this sheet.";
+    } else {
+      // Standalone: redirect "← Forms" to /workbooks/ instead of old list view
+      if (formsBackBtn) {
+        formsBackBtn.onclick = (e) => {
+          e.preventDefault();
+          window.location.href = "/workbooks/";
+        };
+      }
+    }
 
     if (!formId || !versionId) return;
 
