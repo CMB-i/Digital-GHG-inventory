@@ -4,6 +4,27 @@ document.addEventListener("DOMContentLoaded", function () {
   let selectedVersionId = null;
   let currentPermissions = {};
 
+  // Parse return-to params (set by form builder when opening from inspector)
+  const _vsUrlParams = new URLSearchParams(window.location.search);
+  const _vsReturnTo = _vsUrlParams.get("return_to");
+  const _vsReturnFormId = _vsUrlParams.get("form_id");
+  const _vsReturnVersionId = _vsUrlParams.get("version_id");
+  const _vsReturnFieldId = _vsUrlParams.get("field_id");
+
+  // Show back link when navigated from form builder
+  if (_vsReturnTo) {
+    const bar = document.getElementById("vs-return-link-bar");
+    const link = document.getElementById("vs-return-link");
+    if (bar && link) {
+      const returnParams = new URLSearchParams();
+      if (_vsReturnFormId) returnParams.set("form_id", _vsReturnFormId);
+      if (_vsReturnVersionId) returnParams.set("version_id", _vsReturnVersionId);
+      if (_vsReturnFieldId) returnParams.set("field_id", _vsReturnFieldId);
+      link.href = returnParams.toString() ? _vsReturnTo + "?" + returnParams.toString() : _vsReturnTo;
+      bar.classList.remove("hidden");
+    }
+  }
+
   const listContainer = document.getElementById("valset-list");
   const detailsPanel = document.getElementById("details-panel");
   const emptyState = document.getElementById("details-empty-state");
@@ -403,8 +424,18 @@ document.addEventListener("DOMContentLoaded", function () {
         showToast(resData.error, "error");
       } else {
         showToast("Version approved and published.");
-        loadVersion(selectedVersionId);
-        loadValueSets();
+        if (_vsReturnTo) {
+          const returnParams = new URLSearchParams();
+          if (_vsReturnFormId) returnParams.set("form_id", _vsReturnFormId);
+          if (_vsReturnVersionId) returnParams.set("version_id", _vsReturnVersionId);
+          if (_vsReturnFieldId) returnParams.set("field_id", _vsReturnFieldId);
+          window.location.href = returnParams.toString()
+            ? _vsReturnTo + "?" + returnParams.toString()
+            : _vsReturnTo;
+        } else {
+          loadVersion(selectedVersionId);
+          loadValueSets();
+        }
       }
     } catch (err) {
       console.error("Error approving:", err);
