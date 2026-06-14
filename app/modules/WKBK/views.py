@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from flask import Blueprint, render_template, request, jsonify
 
 from app.common.decorators import require_permission
@@ -23,7 +25,10 @@ from app.modules.WKBK.service import (
     add_site_submitter,
     remove_site_submitter,
 )
-from app.modules.WFLWBLD.model import Workflow, WorkflowVersion
+from app.modules.WFLWBLD.model import (
+    Workflow, WorkflowVersion, WorkflowLevel, WorkflowLevelApprover,
+)
+from app.modules.USRMGMT.model import User
 
 bp = Blueprint("wkbk", __name__, url_prefix="/workbooks")
 
@@ -316,3 +321,249 @@ def api_preview(workbook_id):
         }
         for s in sheets
     ])
+
+
+# ── Chain builder helpers + routes ─────────────────────────────────────────────
+
+def _build_chain_payload(wb):
+    if not wb.workflow_id:
+        return {
+            "workflow_id": None,
+            "version_id": None,
+            "version_status": None,
+            "levels": [],
+            "approvers_by_site": {},
+            "available_users": [],
+        }
+
+    workflow = Workflow.query.filter_by(id=wb.workflow_id, is_deleted=False).first()
+    if not workflow:
+        return {
+            "workflow_id": None,
+            "version_id": None,
+            "version_status": None,
+            "levels": [],
+            "approvers_by_site": {},
+            "available_users": [],
+        }
+
+    latest_version = (
+        WorkflowVersion.query.filter_by(workflow_id=workflow.id)
+        .order_by(WorkflowVersion.version_number.desc())
+        .first()
+    )
+
+    levels = []
+    approvers_by_site = {}
+
+    if latest_version:
+        raw_levels = (
+            WorkflowLevel.query.filter_by(
+                workflow_version_id=latest_version.id, is_deleted=False
+            )
+            .order_by(WorkflowLevel.level_number.asc())
+            .all()
+        )
+
+        level_ids = [l.id for l in raw_levels]
+
+        for l in raw_levels:
+            levels.append({
+                "id": l.id,
+                "level_number": l.level_number,
+                "level_name": l.level_name,
+                "level_type": "final" if l.level_name == "Final Approval" else "regular",
+                "approval_mode": l.approval_mode,
+                "skip_if_empty": l.skip_if_empty,
+            })
+
+        if level_ids:
+            for approver in WorkflowLevelApprover.query.filter(
+                WorkflowLevelApprover.workflow_level_id.in_(level_ids),
+                WorkflowLevelApprover.is_deleted == False,
+            ).all():
+                site_key = str(approver.scope_site_id) if approver.scope_site_id else "null"
+                if site_key not in approvers_by_site:
+                    approvers_by_site[site_key] = []
+                user = User.query.filter_by(
+                    id=approver.user_id, is_deleted=False, is_active=True
+                ).first()
+                if user:
+                    approvers_by_site[site_key].append({
+                        "level_id": approver.workflow_level_id,
+                        "user_id": approver.user_id,
+                        "user_name": user.full_name,
+                        "scope_site_id": approver.scope_site_id,
+                    })
+
+    available_users = [
+        {"id": u.id, "full_name": u.full_name, "email": u.email}
+        for u in User.query.filter_by(is_deleted=False, is_active=True)
+        .order_by(User.full_name.asc())
+        .all()
+    ]
+
+    version_status = None
+    if latest_version:
+        version_status = "Published" if latest_version.published_at is not None else "Draft"
+
+    return {
+        "workflow_id": workflow.id,
+        "version_id": latest_version.id if latest_version else None,
+        "version_status": version_status,
+        "levels": levels,
+        "approvers_by_site": approvers_by_site,
+        "available_users": available_users,
+    }
+
+
+@bp.route("/api/<int:workbook_id>/chain", methods=["GET"])
+@require_permission("form", "manage_forms")
+def api_get_chain(workbook_id):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+    return jsonify(_build_chain_payload(wb))
+
+
+@bp.route("/api/<int:workbook_id>/chain/site/<int:site_id>", methods=["POST"])
+@require_permission("form", "manage_forms")
+def api_save_site_chain(workbook_id, site_id):
+    from app.modules.WFLWBLD.service import (
+        create_workflow as wf_create_workflow,
+        create_new_workflow_version_draft as wf_create_draft,
+    )
+
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+
+    data = request.get_json() or {}
+    steps = data.get("steps", [])
+    user = current_user()
+    now = datetime.now(timezone.utc)
+
+    try:
+        if not wb.workflow_id:
+            name = wb.name + " Approval Path"
+            code = wb.code.upper() + "_APPROVAL"
+            workflow = wf_create_workflow(name=name, code=code, user_id=user.id)
+            wb.workflow_id = workflow.id
+            db.session.flush()
+
+        workflow = Workflow.query.filter_by(id=wb.workflow_id, is_deleted=False).first()
+        if not workflow:
+            return error_response("Workflow not found.", 404)
+
+        draft_version = WorkflowVersion.query.filter_by(
+            workflow_id=workflow.id, published_at=None
+        ).first()
+        if not draft_version:
+            draft_version = wf_create_draft(workflow_id=workflow.id, user_id=user.id)
+
+        posted_level_numbers = {s["level_number"] for s in steps}
+
+        existing_levels = WorkflowLevel.query.filter_by(
+            workflow_version_id=draft_version.id, is_deleted=False
+        ).all()
+
+        for level in existing_levels:
+            if level.level_number not in posted_level_numbers:
+                level.is_deleted = True
+                level.deleted_at = now
+                level.deleted_by = user.id
+
+        level_map = {
+            l.level_number: l
+            for l in existing_levels
+            if not l.is_deleted
+        }
+
+        for step in steps:
+            ln = step["level_number"]
+            if ln in level_map:
+                if level_map[ln].level_name != step["level_name"]:
+                    level_map[ln].level_name = step["level_name"]
+                    level_map[ln].updated_by = user.id
+            else:
+                new_level = WorkflowLevel(
+                    workflow_version_id=draft_version.id,
+                    level_number=ln,
+                    level_name=step["level_name"],
+                    approval_mode="ANY_ONE",
+                    skip_if_empty=False,
+                    created_by=user.id,
+                    updated_by=user.id,
+                )
+                db.session.add(new_level)
+                level_map[ln] = new_level
+
+        db.session.flush()
+
+        all_version_level_ids = [
+            l.id for l in WorkflowLevel.query.filter_by(
+                workflow_version_id=draft_version.id
+            ).all()
+        ]
+
+        if all_version_level_ids:
+            for approver in WorkflowLevelApprover.query.filter(
+                WorkflowLevelApprover.workflow_level_id.in_(all_version_level_ids),
+                WorkflowLevelApprover.scope_site_id == site_id,
+                WorkflowLevelApprover.is_deleted == False,
+            ).all():
+                approver.is_deleted = True
+                approver.deleted_at = now
+                approver.deleted_by = user.id
+
+        db.session.flush()
+
+        for step in steps:
+            if step.get("user_id"):
+                level = level_map.get(step["level_number"])
+                if level:
+                    db.session.add(WorkflowLevelApprover(
+                        workflow_level_id=level.id,
+                        user_id=step["user_id"],
+                        scope_site_id=site_id,
+                        sequence_number=None,
+                        created_by=user.id,
+                        updated_by=user.id,
+                    ))
+
+        db.session.commit()
+        return success_response(data=_build_chain_payload(wb))
+
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/<int:workbook_id>/chain/init", methods=["POST"])
+@require_permission("form", "manage_forms")
+def api_init_chain(workbook_id):
+    from app.modules.WFLWBLD.service import create_workflow as wf_create_workflow
+
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+
+    if wb.workflow_id:
+        return success_response(
+            data={"workflow_id": wb.workflow_id},
+            message="Workflow already exists.",
+        )
+
+    user = current_user()
+    try:
+        name = wb.name + " Approval Path"
+        code = wb.code.upper() + "_APPROVAL"
+        workflow = wf_create_workflow(name=name, code=code, user_id=user.id)
+        wb.workflow_id = workflow.id
+        db.session.commit()
+        return success_response(
+            data={"workflow_id": workflow.id},
+            message="Workflow created.",
+        )
+    except ValueError as e:
+        return error_response(str(e), 400)
