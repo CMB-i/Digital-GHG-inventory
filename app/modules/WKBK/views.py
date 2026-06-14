@@ -15,6 +15,7 @@ from app.modules.WKBK.service import (
     deactivate_workbook,
     get_addable_forms,
 )
+from app.modules.WFLWBLD.model import Workflow, WorkflowVersion
 
 bp = Blueprint("wkbk", __name__, url_prefix="/workbooks")
 
@@ -140,6 +141,68 @@ def api_deactivate(workbook_id):
 @require_permission("form", "manage_forms")
 def api_addable_forms(workbook_id):
     return jsonify(get_addable_forms(workbook_id))
+
+
+@bp.route("/api/<int:workbook_id>/workflow", methods=["GET"])
+@require_permission("form", "manage_forms")
+def api_get_workflow_assignment(workbook_id):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+
+    if not wb.workflow_id:
+        return jsonify({"workflow_id": None})
+
+    workflow = Workflow.query.filter_by(id=wb.workflow_id, is_deleted=False).first()
+    if not workflow:
+        return jsonify({"workflow_id": None})
+
+    latest_version = (
+        WorkflowVersion.query.filter_by(workflow_id=workflow.id)
+        .order_by(WorkflowVersion.version_number.desc())
+        .first()
+    )
+    return jsonify({
+        "workflow_id": workflow.id,
+        "workflow_name": workflow.name,
+        "workflow_code": workflow.code,
+        "version_id": latest_version.id if latest_version else None,
+        "version_status": (
+            "Published"
+            if latest_version and latest_version.published_at is not None
+            else ("Draft" if latest_version else None)
+        ),
+    })
+
+
+@bp.route("/api/<int:workbook_id>/workflow", methods=["POST"])
+@require_permission("form", "manage_forms")
+def api_set_workflow_assignment(workbook_id):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+
+    data = request.get_json() or {}
+    workflow_id = data.get("workflow_id")
+    if workflow_id in ("", "null"):
+        workflow_id = None
+
+    if workflow_id is not None:
+        try:
+            workflow_id = int(workflow_id)
+        except (TypeError, ValueError):
+            return error_response("Invalid workflow_id.", 400)
+
+        workflow = Workflow.query.filter_by(id=workflow_id, is_deleted=False).first()
+        if not workflow:
+            return error_response("Workflow not found.", 404)
+
+    wb.workflow_id = workflow_id
+    db.session.commit()
+    return success_response(
+        data={"workflow_id": wb.workflow_id},
+        message="Workbook workflow assignment updated.",
+    )
 
 
 @bp.route("/api/<int:workbook_id>/preview", methods=["GET"])

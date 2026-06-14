@@ -11,6 +11,11 @@ class Workbook(db.Model):
     code = db.Column(db.String(100), nullable=False, unique=True)
     status = db.Column(db.String(50), nullable=False, server_default="draft", default="draft")
     description = db.Column(db.Text, nullable=True)
+    workflow_id = db.Column(
+        db.Integer,
+        db.ForeignKey("workflows.id"),
+        nullable=True,
+    )
     is_active = db.Column(db.Boolean, nullable=False, server_default="true", default=True)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     created_at = db.Column(

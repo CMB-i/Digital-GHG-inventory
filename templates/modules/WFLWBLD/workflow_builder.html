@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Workflow Paths - Digital GHG Inventory{% endblock %}
+{% block title %}Approval Paths - Digital GHG Inventory{% endblock %}
 
 {% block content %}
 <div class="space-y-6">
@@ -8,17 +8,17 @@
 
   <!-- 1. LIST VIEW -->
   <div id="list-view">
-    <div class="text-xs text-slate-500 mb-2">Configuration · <strong class="text-indigo-600">All Workflow Paths</strong></div>
+    <div class="text-xs text-slate-500 mb-2">Configuration · <strong class="text-[#1a3a6b]">Approval Paths</strong></div>
     <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-slate-800">Workflow Paths</h1>
-        <p class="text-xs text-slate-500 mt-1">Configure submission review levels and assign approvers.</p>
+        <h1 class="text-2xl font-bold text-slate-900">Approval Paths</h1>
+        <p class="text-sm text-slate-500 mt-1">Approval paths decide who reviews submitted workbook packages, by workbook and site.</p>
       </div>
-      <button onclick="startNewWorkflow()" class="inline-flex items-center justify-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
+      <button onclick="startNewWorkflow()" class="inline-flex items-center justify-center px-4 py-2 bg-[#1a3a6b] hover:bg-[#142f57] text-white text-sm font-semibold rounded-lg shadow transition-colors">
         <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
         </svg>
-        Create Workflow Path
+        + Create Approval Path
       </button>
     </div>
 
@@ -26,16 +26,16 @@
       <table class="min-w-full divide-y divide-slate-200 text-left text-xs">
         <thead class="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
           <tr>
-            <th class="px-6 py-3.5 w-1/3">Workflow Name</th>
+            <th class="px-6 py-3.5 w-1/3">Approval Path</th>
             <th class="px-6 py-3.5 w-[20%]">Code</th>
-            <th class="px-6 py-3.5 w-[15%]">Levels</th>
+            <th class="px-6 py-3.5 w-[15%]">Review Steps</th>
             <th class="px-6 py-3.5 w-[15%]">Status</th>
             <th class="px-6 py-3.5 text-right w-[17%]">Actions</th>
           </tr>
         </thead>
         <tbody id="workflows-list-body" class="divide-y divide-slate-100 font-medium text-slate-700">
           <tr>
-            <td colspan="5" class="px-6 py-12 text-center text-slate-400 italic">Loading workflows...</td>
+            <td colspan="5" class="px-6 py-12 text-center text-slate-400 italic">Loading approval paths...</td>
           </tr>
         </tbody>
       </table>
@@ -47,18 +47,18 @@
     <div class="sticky top-0 z-30 border-b border-slate-200 bg-slate-50/95 px-6 py-4 backdrop-blur">
       <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div class="min-w-0">
-          <button onclick="showList()" class="mb-2 inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-800">
-            ← Back to Workflows
+          <button id="btn-editor-back" onclick="showList()" class="mb-2 inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-800">
+            ← Approval Paths
           </button>
           <div class="flex flex-wrap items-center gap-2">
-            <h1 id="editor-title" class="truncate text-xl font-bold text-slate-900">Edit Workflow</h1>
+            <h1 id="editor-title" class="truncate text-xl font-bold text-slate-900">Edit Approval Path</h1>
             <span id="editor-version-badge" class="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase text-amber-800">Draft</span>
             <span id="save-state" class="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-500">Saved</span>
           </div>
           <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-            <span>Form: <strong id="header-form-name" class="font-semibold text-slate-700">Not linked</strong></span>
-            <span><strong id="header-sites-count" class="font-semibold text-slate-700">0</strong> covered sites</span>
-            <span><strong id="header-levels-count" class="font-semibold text-slate-700">0</strong> approval levels</span>
+            <span>Workbook: <strong id="header-form-name" class="font-semibold text-slate-700">Not linked</strong></span>
+            <span><strong id="header-sites-count" class="font-semibold text-slate-700">0</strong> sites</span>
+            <span><strong id="header-levels-count" class="font-semibold text-slate-700">0</strong> review steps</span>
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
@@ -76,14 +76,17 @@
     <div class="mx-auto mt-6 grid max-w-[1560px] grid-cols-1 gap-6 px-6 xl:grid-cols-[260px_minmax(680px,1fr)] 2xl:grid-cols-[260px_minmax(680px,1fr)_360px]">
       <aside class="space-y-4 xl:sticky xl:top-28">
         <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">Build steps</h2>
-          <ol class="mt-4 space-y-2 text-sm">
-            <li class="rounded-lg bg-indigo-50 px-3 py-2 font-semibold text-indigo-700 ring-1 ring-indigo-100">1. Name & form</li>
-            <li class="rounded-lg px-3 py-2 font-medium text-slate-600">2. Sites covered</li>
-            <li class="rounded-lg px-3 py-2 font-medium text-slate-600">3. Approval levels</li>
-            <li class="rounded-lg px-3 py-2 font-medium text-slate-600">4. Site routing</li>
-            <li class="rounded-lg px-3 py-2 font-medium text-slate-600">5. Review & publish</li>
-          </ol>
+          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">About This Path</h2>
+          <div class="mt-4 space-y-4 text-sm">
+            <div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Name</div>
+              <div id="about-path-name" class="mt-1 font-semibold text-slate-800">Not selected</div>
+            </div>
+            <div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Code</div>
+              <div id="about-path-code" class="mt-1 font-mono text-xs text-slate-500">—</div>
+            </div>
+          </div>
         </div>
 
         <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -98,33 +101,27 @@
 
       <main class="space-y-5">
         <section class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div class="grid gap-4 lg:grid-cols-3">
+          <h2 class="mb-4 text-lg font-bold text-slate-900">Path details</h2>
+          <div class="grid gap-4 lg:grid-cols-2">
             <div>
-              <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400" for="df-name">Workflow name</label>
-              <input type="text" id="df-name" required placeholder="e.g. Monthly GHG Approval" class="mt-1 block h-10 w-full rounded-lg border border-slate-300 px-3 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+              <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400" for="df-name">Approval path name</label>
+              <input type="text" id="df-name" required placeholder="e.g. Monthly GHG Review Path" class="mt-1 block h-10 w-full rounded-lg border border-slate-300 px-3 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
             </div>
             <div>
-              <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400" for="df-code">Workflow code</label>
+              <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400" for="df-code">Path code</label>
               <input type="text" id="df-code" required disabled class="mt-1 block h-10 w-full rounded-lg border border-slate-300 bg-slate-50 px-3 font-mono text-sm text-slate-500 shadow-sm">
-            </div>
-            <div>
-              <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400" for="df-form">Form to approve</label>
-              <select id="df-form" class="mt-1 block h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                <option value="">Choose form</option>
-              </select>
-              <p class="mt-1 text-xs text-slate-500">Choose the data collection form this workflow will approve.</p>
             </div>
           </div>
 
-          <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-5">
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2 class="text-sm font-semibold text-slate-800">Sites covered</h2>
-                <p class="mt-1 text-xs text-slate-500">Choose which sites can use this workflow.</p>
-              </div>
-              <span id="covered-sites-count" class="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">0 selected</span>
-            </div>
-            <div id="covered-sites-list" class="mt-4 grid gap-2 sm:grid-cols-2"></div>
+          <select id="df-form" class="hidden" aria-hidden="true">
+            <option value="">Choose form</option>
+          </select>
+          <span id="covered-sites-count" class="hidden">0 selected</span>
+          <div id="covered-sites-list" class="hidden"></div>
+
+          <div class="mt-5 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-800">
+            <span class="font-semibold">Info:</span>
+            Site scope is configured on the workbook detail page. Approvers can still be scoped per site in each step.
           </div>
         </section>
 
@@ -132,17 +129,17 @@
           <div class="border-b border-slate-200 px-6 py-5">
             <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
-                <h2 class="text-lg font-bold text-slate-900">Approval chain</h2>
-                <p class="mt-1 max-w-2xl text-sm text-slate-500">The order people approve submissions, top to bottom. This workflow runs automatically every month for the selected form and sites.</p>
+                <h2 class="text-lg font-bold text-slate-900">Review Steps</h2>
+                <p class="mt-1 max-w-2xl text-sm text-slate-500">Add the reviewers who check workbook packages before final approval locks the data. Steps run in order, top to bottom.</p>
               </div>
               <button id="btn-add-level" type="button" class="inline-flex h-9 min-w-max items-center justify-center whitespace-nowrap rounded-lg border border-indigo-200 bg-indigo-50 px-4 text-sm font-semibold text-indigo-700 hover:bg-indigo-100">
-                + Add approval level
+                + Add review step
               </button>
             </div>
           </div>
           <div class="p-6">
             <div class="mb-4 inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700">
-              Submission filed by SPOC
+              SPOC submits workbook package
             </div>
             <div id="levels-container" class="space-y-4"></div>
           </div>
@@ -152,11 +149,11 @@
       <aside id="preview-panel" class="space-y-4 xl:col-start-2 2xl:col-start-auto 2xl:sticky 2xl:top-28">
         <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div>
-            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">Preview Approval Path</h2>
-            <p class="mt-1 text-xs text-slate-500">Choose a site to see exactly who will approve its submission.</p>
+            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">Preview by Site</h2>
+            <p class="mt-1 text-xs text-slate-500">Choose a site to see the full reviewer sequence for that site.</p>
           </div>
           <div class="mt-4">
-            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400" for="preview-site-select">Show path for</label>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400" for="preview-site-select">Site</label>
             <select id="preview-site-select" class="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
               <option value="">Choose site</option>
             </select>
@@ -167,7 +164,7 @@
         </div>
 
         <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">All Sites at a Glance</h2>
+          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500">Site Readiness</h2>
           <div id="site-summary-list" class="mt-4 space-y-2"></div>
         </div>
       </aside>
@@ -180,24 +177,24 @@
   <div class="w-full max-w-lg overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
     <div class="flex items-center justify-between border-b border-slate-100 px-6 py-4">
       <div>
-        <h3 class="text-base font-bold text-slate-900">Review & publish workflow</h3>
-        <p class="mt-1 text-xs text-slate-500">Publishing makes this approval chain live for all covered sites. Partial publishing is not available in MVP.</p>
+        <h3 class="text-base font-bold text-slate-900">Publish Approval Path</h3>
+        <p class="mt-1 text-xs text-slate-500">Publishing makes this path live. Once published, create a new version to make changes.</p>
       </div>
       <button id="btn-close-publish-modal" type="button" class="text-slate-400 hover:text-slate-700">✕</button>
     </div>
     <div id="publish-review-body" class="max-h-[60vh] overflow-y-auto px-6 py-5 text-sm"></div>
     <div class="flex justify-end gap-2 border-t border-slate-100 px-6 py-4">
       <button id="btn-cancel-publish-modal" type="button" class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
-      <button id="btn-confirm-publish" type="button" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">Publish workflow</button>
+      <button id="btn-confirm-publish" type="button" class="rounded-lg bg-[#1a3a6b] px-4 py-2 text-sm font-semibold text-white hover:bg-[#142f57] disabled:cursor-not-allowed disabled:opacity-50">Publish path</button>
     </div>
   </div>
 </div>
 
-<!-- Create Workflow Dialog Modal -->
+<!-- Create Approval Path Dialog Modal -->
 <div id="modal-create-workflow" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
   <div class="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden transition-all transform scale-100">
     <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-      <h3 class="text-base font-bold text-slate-800">Create New Workflow</h3>
+      <h3 class="text-base font-bold text-slate-800">Create Approval Path</h3>
       <button id="btn-close-workflow-modal" class="text-slate-400 hover:text-slate-500">
         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -206,19 +203,19 @@
     </div>
     <form id="form-create-workflow" class="p-6 space-y-4 text-xs font-semibold">
       <div>
-        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Workflow Name</label>
-        <input type="text" id="new-workflow-name" required placeholder="e.g. Scope 1 Stationary Workflow" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-10 px-3 border">
+        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Path Name</label>
+        <input type="text" id="new-workflow-name" required placeholder="e.g. Monthly GHG Review" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-10 px-3 border">
       </div>
       <div>
-        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Unique Code</label>
-        <input type="text" id="new-workflow-code" required placeholder="e.g. SCOPE1_STATIONARY_WF" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-10 px-3 border font-mono uppercase">
+        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Path Code</label>
+        <input type="text" id="new-workflow-code" required placeholder="e.g. MONTHLY_GHG_REVIEW" class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-10 px-3 border font-mono uppercase">
       </div>
       <div class="pt-2 flex justify-end space-x-2">
         <button type="button" id="btn-cancel-workflow-modal" class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-bold rounded-lg transition-colors">
           Cancel
         </button>
         <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow transition-colors">
-          Create Workflow
+          Create path
         </button>
       </div>
     </form>

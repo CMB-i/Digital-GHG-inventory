@@ -1,4 +1,9 @@
 document.addEventListener("DOMContentLoaded", () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const wkbkContext = urlParams.get("context") === "workbook";
+  const wkbkId = urlParams.get("workbook_id");
+  const editWorkflowId = urlParams.get("edit");
+
   const listView = document.getElementById("list-view");
   const editorView = document.getElementById("editor-view");
   const workflowsListBody = document.getElementById("workflows-list-body");
@@ -12,6 +17,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const headerFormName = document.getElementById("header-form-name");
   const headerSitesCount = document.getElementById("header-sites-count");
   const headerLevelsCount = document.getElementById("header-levels-count");
+  const aboutPathName = document.getElementById("about-path-name");
+  const aboutPathCode = document.getElementById("about-path-code");
+  const btnEditorBack = document.getElementById("btn-editor-back");
   const readySitesCount = document.getElementById("ready-sites-count");
   const readinessSummary = document.getElementById("readiness-summary");
   const readinessSiteList = document.getElementById("readiness-site-list");
@@ -56,11 +64,20 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   let hasUnsavedChanges = false;
   let lastValidation = null;
+  let didAutoOpenContextWorkflow = false;
 
   const approvalModes = [
-    { value: "ANY_ONE", label: "Any one approver can approve" },
-    { value: "SEQUENTIAL", label: "Approvers must approve in order" }
+    { value: "ANY_ONE", label: "Any one reviewer can approve" },
+    { value: "SEQUENTIAL", label: "Reviewers approve in order" }
   ];
+
+  if (wkbkContext && wkbkId && btnEditorBack) {
+    btnEditorBack.textContent = "← Back to Workbook";
+    btnEditorBack.onclick = () => {
+      if (hasUnsavedChanges && !confirm("You have unsaved changes. Discard and return to workbook?")) return;
+      window.location.href = `/workbooks/${encodeURIComponent(wkbkId)}`;
+    };
+  }
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -152,7 +169,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function isGenericLevelName(value) {
-    return !value || /^Level \d+$/.test(value) || /^Approval Level \d+$/.test(value) || value === "Final Approval";
+    return !value || /^Level \d+$/.test(value) || /^Approval Level \d+$/.test(value) || /^Review Step \d+$/.test(value) || value === "Final Approval";
   }
 
   function normalizeLevelOrder() {
@@ -190,7 +207,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         regularCount += 1;
         if (isGenericLevelName(currentName)) {
-          level.level_name = `Approval Level ${regularCount}`;
+          level.level_name = `Review Step ${regularCount}`;
         }
       }
       level.level_number = index + 1;
@@ -227,7 +244,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!levelsList.length) {
       blocked = true;
-      issues.push("Add at least one approval level.");
+      issues.push("Add at least one review step.");
     }
 
     levelsList.forEach((level, index) => {
@@ -241,7 +258,7 @@ document.addEventListener("DOMContentLoaded", () => {
           level,
           status: "active",
           approvers: eligible,
-          message: final ? "Final approval locks the submission." : "Submission waits here for approval."
+          message: final ? "Final approval locks the workbook package and releases data for reporting." : "Workbook package waits here for review."
         });
         return;
       }
@@ -252,15 +269,15 @@ document.addEventListener("DOMContentLoaded", () => {
           level,
           status: "skipped",
           approvers: [],
-          message: "This level will be skipped - submission goes straight to the next level."
+          message: "This step will be skipped because no reviewer exists for this site."
         });
         return;
       }
 
       blocked = true;
       issues.push(final
-        ? `${level.level_name} needs an eligible approver for ${site.name}.`
-        : `${level.level_name} needs an eligible approver for ${site.name}, or must be marked skippable.`
+        ? `${level.level_name} needs an eligible final approver for ${site.name}.`
+        : `${level.level_name} needs an eligible reviewer for ${site.name}, or must be marked skippable.`
       );
       rows.push({
         level,
@@ -268,7 +285,7 @@ document.addEventListener("DOMContentLoaded", () => {
         approvers: [],
         message: final
           ? "Final Approval is mandatory and cannot be skipped."
-          : "This site cannot use the workflow until this level is fixed."
+          : "This site cannot submit through this path until this step is fixed."
       });
     });
 
@@ -285,20 +302,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!selectedFormId) {
       setupState = "no_form";
-      issues.push("Link this workflow to a form before publishing.");
+      issues.push("Choose the workbook this approval path applies to before publishing.");
     } else if (!coveredSites.length) {
       setupState = "no_sites";
-      issues.push("The linked form must cover at least one site before this workflow can be published.");
+      issues.push("Choose at least one site before publishing this approval path.");
     }
     if (!levelsList.length) {
-      issues.push("Add at least one approval level.");
+      issues.push("Add at least one review step.");
     }
 
     if (levelsList.length && finalIndex === -1) {
-      issues.push("Final approval level is missing.");
+      issues.push("Final approval step is missing.");
     }
     if (finalIndex >= 0 && finalIndex !== levelsList.length - 1) {
-      issues.push("Final approval must be the last level.");
+      issues.push("Final approval must be the last review step.");
     }
 
     paths.forEach(path => {
@@ -310,7 +327,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         const finalApprovers = getEligibleApprovers(finalLevel, path.site.id);
         if (!finalApprovers.length) {
-          issues.push(`${path.site.name} — Final approval needs an approver.`);
+          issues.push(`${path.site.name} - Final approval needs a reviewer.`);
         }
       }
     });
@@ -330,6 +347,8 @@ document.addEventListener("DOMContentLoaded", () => {
     headerFormName.textContent = getLinkedFormLabel();
     headerSitesCount.textContent = String(getCoveredSites().length);
     headerLevelsCount.textContent = String(levelsList.length);
+    if (aboutPathName) aboutPathName.textContent = currentWorkflow ? currentWorkflow.name : "Not selected";
+    if (aboutPathCode) aboutPathCode.textContent = currentWorkflow ? currentWorkflow.code : "—";
   }
 
   function renderSetupControls() {
@@ -350,7 +369,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!selectedFormId) {
       coveredSitesList.innerHTML = `
         <div class="sm:col-span-2 rounded-lg border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
-          Choose a form before selecting covered sites.
+          Site scope is configured on the workbook detail page.
         </div>
       `;
       return;
@@ -410,25 +429,25 @@ document.addEventListener("DOMContentLoaded", () => {
     if (lastValidation.setupState === "no_form") {
       readinessSummary.innerHTML = `
         <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
-          Choose the form this workflow will approve.
+          Choose the workbook this approval path applies to.
         </div>
       `;
     } else if (lastValidation.setupState === "no_sites") {
       readinessSummary.innerHTML = `
         <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
-          Choose the sites this workflow should cover.
+          Choose the sites this approval path should cover.
         </div>
       `;
     } else if (lastValidation.canPublish) {
       readinessSummary.innerHTML = `
         <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
-          All covered sites have a valid approval path.
+          All selected sites have a valid approval path.
         </div>
       `;
     } else {
       readinessSummary.innerHTML = `
         <div class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800">
-          ${lastValidation.issues.length} issue${lastValidation.issues.length === 1 ? "" : "s"} must be fixed before publish.
+          ${lastValidation.issues.length} issue${lastValidation.issues.length === 1 ? "" : "s"} must be fixed before publishing.
         </div>
       `;
     }
@@ -463,7 +482,7 @@ document.addEventListener("DOMContentLoaded", () => {
     siteSummaryList.innerHTML = "";
 
     if (!validation.paths.length) {
-      siteSummaryList.innerHTML = '<p class="text-xs italic text-slate-400">No covered sites to summarize.</p>';
+      siteSummaryList.innerHTML = '<p class="text-xs italic text-slate-400">No sites to summarize.</p>';
       return;
     }
 
@@ -481,7 +500,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <span class="rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${statusClass}">${path.status}</span>
         </div>
         <div class="mt-1 text-[11px] leading-4 text-slate-500">
-          ${path.approvalsCount} approval${path.approvalsCount === 1 ? "" : "s"} · ${path.skippedCount} skipped
+          ${path.approvalsCount} review step${path.approvalsCount === 1 ? "" : "s"} · ${path.skippedCount} skipped
         </div>
       `;
       siteSummaryList.appendChild(item);
@@ -511,7 +530,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!selectedFormId) {
       previewPathOutput.innerHTML = `
         <div class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-          Choose a form and covered sites to preview the approval path.
+          Assign this path from a workbook detail page to preview it by site.
         </div>
       `;
       return;
@@ -520,7 +539,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!getCoveredSites().length) {
       previewPathOutput.innerHTML = `
         <div class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-          Choose covered sites to preview the approval path.
+          Configure site scope from the workbook detail page to preview this path.
         </div>
       `;
       return;
@@ -544,8 +563,8 @@ document.addEventListener("DOMContentLoaded", () => {
       <li class="flex gap-3">
         <span class="mt-1 h-2.5 w-2.5 rounded-full bg-slate-400"></span>
         <div>
-          <div class="text-sm font-semibold text-slate-800">Submitted by SPOC</div>
-          <div class="text-xs text-slate-500">Monthly submission enters this workflow.</div>
+          <div class="text-sm font-semibold text-slate-800">SPOC</div>
+          <div class="text-xs text-slate-500">Workbook package is submitted for review.</div>
         </div>
       </li>
     `);
@@ -564,12 +583,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const approverText = row.approvers.length
         ? row.approvers.map(app => `${escapeHtml(app.full_name)} <span class="text-slate-400">(${app.scope_site_id ? `${escapeHtml(getSiteName(app.scope_site_id))} only` : "All sites"})</span>`).join("<br>")
         : escapeHtml(row.message);
+      const stepTitle = isFinalLevel(levelsList.indexOf(row.level)) ? "Final Approval" : `Step ${row.level.level_number}`;
 
       rows.push(`
         <li class="flex gap-3">
           <span class="mt-3 h-2.5 w-2.5 rounded-full ${dotClass}"></span>
           <div class="min-w-0 flex-1 rounded-lg border px-3 py-2 ${borderClass}">
-            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Level ${row.level.level_number}</div>
+            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">${stepTitle}</div>
             <div class="text-sm font-semibold text-slate-800">${escapeHtml(row.level.level_name)}</div>
             <div class="mt-1 text-xs text-slate-600">${approverText}</div>
           </div>
@@ -582,17 +602,41 @@ document.addEventListener("DOMContentLoaded", () => {
         <li class="flex gap-3">
           <span class="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
           <div>
-            <div class="text-sm font-semibold text-slate-800">Outcome: Approved & locked</div>
-            <div class="text-xs text-slate-500">Final Approval locks the submission for this site.</div>
+            <div class="text-sm font-semibold text-slate-800">Approved & locked — data released for reporting</div>
+            <div class="text-xs text-slate-500">Final approval locks the workbook package for this site.</div>
           </div>
         </li>
       `);
     }
 
+    const pathParts = ["SPOC"].concat(path.rows.map(row => (
+      row.status === "skipped" ? `${row.level.level_name} (skipped if empty)` : row.level.level_name
+    )));
+    if (!path.blocked && finalApprovalIndex() >= 0) {
+      pathParts.push("Approved & locked");
+    }
+    const warnings = [];
+    path.rows.forEach(row => {
+      if (row.status === "skipped") {
+        warnings.push(`${row.level.level_name} will be skipped because no reviewer exists for ${site.name}.`);
+      }
+      if (row.status === "blocked" || row.status === "attention") {
+        warnings.push(`${row.level.level_name} would block submission for ${site.name}.`);
+      }
+    });
+
     previewPathOutput.innerHTML = `
       <div class="mb-3 rounded-lg border ${path.blocked ? "border-rose-200 bg-rose-50 text-rose-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"} px-3 py-2 text-xs font-semibold">
-        ${path.blocked ? "Configuration error for this site." : "This site is ready."}
+        ${path.blocked ? "This site would block during submission." : "This site has a valid approval path."}
       </div>
+      <div class="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+        ${pathParts.join(" -> ")}
+      </div>
+      ${warnings.length ? `
+        <div class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          ${warnings.map(warning => `<div>${escapeHtml(warning)}</div>`).join("")}
+        </div>
+      ` : ""}
       <ol class="space-y-3">${rows.join("")}</ol>
     `;
   }
@@ -608,8 +652,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!levelsList.length) {
       levelsContainer.innerHTML = `
         <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
-          <div class="text-sm font-semibold text-slate-700">No approval levels yet.</div>
-          <div class="mt-1 text-xs text-slate-500">Add Approval Level 1, then add a mandatory Final Approval before publishing.</div>
+          <div class="text-sm font-semibold text-slate-700">No review steps yet.</div>
+          <div class="mt-1 text-xs text-slate-500">Add the first reviewer, then add a mandatory final approval step before publishing.</div>
         </div>
       `;
     } else {
@@ -637,15 +681,15 @@ document.addEventListener("DOMContentLoaded", () => {
         ? "Complete setup to publish"
         : (lastValidation && !lastValidation.canPublish)
           ? `Fix ${lastValidation.issues.length} issue${lastValidation.issues.length === 1 ? "" : "s"} to publish`
-        : "Publish workflow";
+        : "Publish path";
       publishButton.onclick = openPublishReview;
       versionActions.appendChild(publishButton);
     }
     if (permissions.can_create_version) {
       const newVersionButton = document.createElement("button");
       newVersionButton.type = "button";
-      newVersionButton.className = "inline-flex h-9 items-center justify-center rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white hover:bg-indigo-700";
-      newVersionButton.textContent = "Edit workflow";
+      newVersionButton.className = "inline-flex h-9 items-center justify-center rounded-lg bg-[#1a3a6b] px-3 text-xs font-semibold text-white hover:bg-[#142f57]";
+      newVersionButton.textContent = "Edit path";
       newVersionButton.onclick = createNewVersionDraft;
       versionActions.appendChild(newVersionButton);
     }
@@ -653,7 +697,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50";
-    deleteButton.title = "Delete workflow";
+    deleteButton.title = "Delete approval path";
     deleteButton.innerHTML = `
       <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -666,25 +710,27 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderLevelCard(level, index, editable) {
     const final = isFinalLevel(index);
     const mode = getAssignmentMode(level);
+    const stepLabel = final ? "Final Approval" : `Step ${level.level_number}`;
     const card = document.createElement("article");
     card.id = `workflow-level-${index}`;
     card.className = "rounded-xl border border-slate-200 bg-white p-6 shadow-sm";
 
     card.innerHTML = `
       <div class="flex flex-col gap-4 lg:flex-row lg:items-start">
-        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${final ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100"} text-sm font-bold">${level.level_number}</span>
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${final ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-[#e8eef7] text-[#1a3a6b] ring-1 ring-[#c8d6ea]"} text-sm font-bold">${final ? "✓" : level.level_number}</span>
 
         <div class="min-w-0 flex-1">
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div class="min-w-0 flex-1">
-              <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Level name</label>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">${stepLabel}</div>
+              <label class="mt-2 block text-[10px] font-bold uppercase tracking-wider text-slate-400">Step name</label>
               <input type="text" value="${escapeHtml(level.level_name)}" ${!editable ? "disabled" : ""}
                 class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-indigo-500 focus:ring-indigo-500 disabled:bg-slate-50 disabled:text-slate-500">
-              <p class="mt-1 text-xs leading-5 text-slate-500">Shown in approval queues, notifications, and preview paths.</p>
+              <p class="mt-1 text-xs leading-5 text-slate-500">Shown in review queues, notifications, and preview paths.</p>
             </div>
             <div class="flex shrink-0 items-center gap-2 pt-5">
               <span class="rounded-full ${final ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"} px-2.5 py-1 text-[10px] font-bold uppercase">
-                ${final ? "Final approval" : "Approval level"}
+                ${final ? "Final approval" : "Review step"}
               </span>
               ${editable ? `<button type="button" class="delete-level rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100">Remove</button>` : ""}
             </div>
@@ -695,19 +741,19 @@ document.addEventListener("DOMContentLoaded", () => {
       <div class="mt-5 rounded-xl border border-slate-200 bg-white p-5">
         <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <div>
-            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Approval rule</label>
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Review rule</label>
             <select class="approval-mode mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" ${!editable ? "disabled" : ""}>
               ${approvalModeOptions(level.approval_mode || "ANY_ONE")}
             </select>
-            <p class="mt-2 text-xs leading-5 text-slate-500">This controls how approvers at this level complete the step.</p>
+            <p class="mt-2 text-xs leading-5 text-slate-500">This controls whether one reviewer is enough, or reviewers must approve in sequence.</p>
           </div>
           <div>
-            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Level type</label>
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Step type</label>
             <select class="level-type mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" ${!editable ? "disabled" : ""}>
-              <option value="regular" ${final ? "" : "selected"}>Regular approval</option>
+              <option value="regular" ${final ? "" : "selected"}>Review step</option>
               <option value="final" ${final ? "selected" : ""}>Final approval</option>
             </select>
-            <p class="mt-2 text-xs leading-5 text-slate-500">${final ? "This is the approval that locks and releases data to reports." : "Regular levels can be skipped when configured below."}</p>
+            <p class="mt-2 text-xs leading-5 text-slate-500">${final ? "Final approval locks the workbook package and releases data for reporting." : "This step can be skipped if no reviewer exists for a site."}</p>
           </div>
         </div>
       </div>
@@ -715,12 +761,12 @@ document.addEventListener("DOMContentLoaded", () => {
       <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 p-5">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 class="text-sm font-semibold text-slate-800">Who approves at this level?</h3>
-            <p class="mt-1 text-xs text-slate-500">${mode === "same" ? "One approver assignment applies to every covered site." : "Each covered site can route to a different approver."}</p>
+            <h3 class="text-sm font-semibold text-slate-800">${final ? "Who gives final approval?" : "Who reviews at this step?"}</h3>
+            <p class="mt-1 text-xs text-slate-500">${mode === "same" ? "One reviewer applies to all selected sites." : "Each selected site can route to a different reviewer."}</p>
           </div>
           <div class="inline-flex rounded-lg border border-slate-200 bg-white p-1">
-            <button type="button" data-mode="same" class="assignment-mode-button rounded-md px-3 py-1.5 text-xs font-semibold ${mode === "same" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:text-slate-800"}" ${!editable ? "disabled" : ""}>Same for every site</button>
-            <button type="button" data-mode="site" class="assignment-mode-button rounded-md px-3 py-1.5 text-xs font-semibold ${mode === "site" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:text-slate-800"}" ${!editable ? "disabled" : ""}>Different per site</button>
+            <button type="button" data-mode="same" class="assignment-mode-button rounded-md px-3 py-1.5 text-xs font-semibold ${mode === "same" ? "bg-[#e8eef7] text-[#1a3a6b]" : "text-slate-500 hover:text-slate-800"}" ${!editable ? "disabled" : ""}>Same for every site</button>
+            <button type="button" data-mode="site" class="assignment-mode-button rounded-md px-3 py-1.5 text-xs font-semibold ${mode === "site" ? "bg-[#e8eef7] text-[#1a3a6b]" : "text-slate-500 hover:text-slate-800"}" ${!editable ? "disabled" : ""}>Different per site</button>
           </div>
         </div>
         <div class="assignment-body mt-4"></div>
@@ -728,19 +774,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
       <div class="mt-4 rounded-lg border ${final ? "border-emerald-100 bg-emerald-50" : "border-indigo-100 bg-indigo-50"} px-4 py-3 text-xs leading-5">
         ${final
-          ? '<span class="font-semibold text-emerald-800">Final approval is required for every covered site.</span> <span class="text-emerald-700">This is the step that approves, locks, and releases data to reports.</span>'
+          ? '<span class="font-semibold text-emerald-800">Final approval is required.</span> <span class="text-emerald-700">This step locks the workbook package and releases it for reporting.</span>'
           : `<label class="inline-flex items-center gap-2 font-semibold text-slate-700">
               <input type="checkbox" class="skip-empty-checkbox rounded border-slate-300 text-indigo-600" ${level.skip_if_empty ? "checked" : ""} ${!editable ? "disabled" : ""}>
-              Skip this level when no approver matches the site
+              Skip this step if no reviewer exists for this site
             </label>
-            <p class="mt-1 text-slate-500">If no approver matches a site, skip this level and move to the next approval level.</p>`
+            <p class="mt-1 text-slate-500">If no reviewer is assigned for a site, this step will block submission unless 'Skip if empty' is checked above.</p>`
         }
       </div>
     `;
 
     const nameInput = card.querySelector("input[type='text']");
     nameInput.addEventListener("change", () => {
-      level.level_name = nameInput.value.trim() || (final ? "Final Approval" : `Approval Level ${level.level_number}`);
+      level.level_name = nameInput.value.trim() || (final ? "Final Approval" : `Review Step ${level.level_number}`);
       setUnsaved(true);
       renderWorkspace();
     });
@@ -848,12 +894,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const allSiteApprover = (level.approvers || []).find(app => !app.scope_site_id);
     container.innerHTML = `
       <div class="rounded-xl border border-slate-200 bg-white p-5">
-        <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Approver</label>
+        <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Reviewer</label>
         <select class="all-site-approver mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" ${!editable ? "disabled" : ""}>
-          <option value="">Choose approver</option>
+          <option value="">Choose reviewer</option>
           ${availableUsers.map(user => `<option value="${user.id}" ${allSiteApprover && parseInt(allSiteApprover.user_id) === parseInt(user.id) ? "selected" : ""}>${escapeHtml(user.full_name)} (${escapeHtml(user.email)})</option>`).join("")}
         </select>
-        <div class="mt-3 inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">Applies to all covered sites</div>
+        <div class="mt-3 inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">All sites</div>
       </div>
     `;
 
@@ -896,7 +942,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ? { label: "Set", className: "bg-emerald-50 text-emerald-700 border-emerald-200" }
         : (!final && level.skip_if_empty)
           ? { label: "Will skip", className: "bg-slate-50 text-slate-600 border-slate-200" }
-          : { label: "Needs approver", className: "bg-rose-50 text-rose-700 border-rose-200" };
+          : { label: "Needs reviewer", className: "bg-rose-50 text-rose-700 border-rose-200" };
       const row = document.createElement("div");
       row.className = "rounded-xl border border-slate-200 bg-white p-4";
       row.innerHTML = `
@@ -907,10 +953,10 @@ document.addEventListener("DOMContentLoaded", () => {
           </div>
           <div>
             <select class="site-approver block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm" data-site-id="${site.id}" ${!editable ? "disabled" : ""}>
-            <option value="">Choose approver</option>
+            <option value="">Choose reviewer</option>
             ${availableUsers.map(user => `<option value="${user.id}" ${assignment && parseInt(assignment.user_id) === parseInt(user.id) ? "selected" : ""}>${escapeHtml(user.full_name)} (${escapeHtml(user.email)})</option>`).join("")}
             </select>
-            ${!eligible.length && !final && level.skip_if_empty ? '<p class="mt-1 text-xs text-slate-500">If no approver matches, this site moves to the next approval level.</p>' : ""}
+            ${!eligible.length && !final && level.skip_if_empty ? '<p class="mt-1 text-xs text-slate-500">If no reviewer exists for this site, this step will be skipped.</p>' : ""}
           </div>
           <div class="flex justify-start xl:justify-self-end">
             <span class="inline-flex min-w-[112px] justify-center whitespace-nowrap rounded-full border px-3 py-1 text-xs font-semibold ${status.className}">${status.label}</span>
@@ -943,7 +989,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function loadWorkflows() {
-    workflowsListBody.innerHTML = '<tr><td colspan="5" class="px-6 py-12 text-center text-slate-400 italic">Loading workflows...</td></tr>';
+    workflowsListBody.innerHTML = '<tr><td colspan="5" class="px-6 py-12 text-center text-slate-400 italic">Loading approval paths...</td></tr>';
     try {
       const res = await fetch("/module/WFLWBLD/api");
       const data = await res.json();
@@ -954,7 +1000,7 @@ document.addEventListener("DOMContentLoaded", () => {
         workflowsListBody.innerHTML = `
           <tr>
             <td colspan="5" class="px-6 py-12 text-center text-slate-400 italic">
-              No workflows configured yet. Click "Create Workflow" to get started.
+              No approval paths configured yet. Create a path to decide who reviews submitted workbook packages.
             </td>
           </tr>
         `;
@@ -969,20 +1015,30 @@ document.addEventListener("DOMContentLoaded", () => {
           ? '<span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">Published</span>'
           : '<span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-800">Draft</span>';
         const action = item.latest_version_id
-          ? `<button onclick="editWorkflow(${item.id}, ${item.latest_version_id})" class="font-bold text-indigo-600 hover:text-indigo-900 hover:underline">Edit / Details</button>`
+          ? `<button onclick="editWorkflow(${item.id}, ${item.latest_version_id})" class="font-bold text-[#1a3a6b] hover:text-[#c8102e] hover:underline">Edit path</button>`
           : "";
         tr.innerHTML = `
           <td class="px-6 py-4 font-bold text-slate-800">${escapeHtml(item.name)}</td>
           <td class="px-6 py-4 font-mono text-slate-500">${escapeHtml(item.code)}</td>
-          <td class="px-6 py-4 font-bold text-slate-500">${item.levels_count || 0} levels</td>
+          <td class="px-6 py-4 font-bold text-slate-500">${item.levels_count || 0} step${item.levels_count === 1 ? "" : "s"}</td>
           <td class="px-6 py-4">${statusBadge}</td>
           <td class="px-6 py-4 text-right whitespace-nowrap">${action}</td>
         `;
         workflowsListBody.appendChild(tr);
       });
+
+      if (!didAutoOpenContextWorkflow && wkbkContext && editWorkflowId) {
+        didAutoOpenContextWorkflow = true;
+        const workflowToOpen = data.find(item => parseInt(item.id) === parseInt(editWorkflowId));
+        if (workflowToOpen && workflowToOpen.latest_version_id) {
+          editWorkflow(workflowToOpen.id, workflowToOpen.latest_version_id);
+        } else {
+          showToast("Could not find the requested approval path.", "error");
+        }
+      }
     } catch (err) {
       console.error(err);
-      showToast("Error loading workflows list.", "error");
+      showToast("Error loading approval paths.", "error");
     }
   }
 
@@ -1015,7 +1071,7 @@ document.addEventListener("DOMContentLoaded", () => {
       renderWorkspace();
     } catch (err) {
       console.error(err);
-      showToast("Error loading workflow version details.", "error");
+      showToast("Error loading approval path details.", "error");
     }
   }
 
@@ -1051,7 +1107,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const name = document.getElementById("new-workflow-name").value.trim();
     const code = document.getElementById("new-workflow-code").value.trim().toUpperCase().replace(/\s+/g, "_");
     if (workflows.find(workflow => workflow.code === code)) {
-      showToast(`Workflow with code '${code}' already exists.`, "error");
+      showToast(`Approval path with code '${code}' already exists.`, "error");
       return;
     }
 
@@ -1068,11 +1124,11 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       const data = await res.json();
       if (!res.ok) {
-        showToast(data.error || "Failed to create workflow.", "error");
+        showToast(data.error || "Failed to create approval path.", "error");
         return;
       }
 
-      showToast("Workflow created successfully.");
+      showToast("Approval path created.");
       hideCreateWorkflowModal();
       const listRes = await fetch("/module/WFLWBLD/api");
       const listData = await listRes.json();
@@ -1084,7 +1140,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (err) {
       console.error(err);
-      showToast("Failed to create workflow.", "error");
+      showToast("Failed to create approval path.", "error");
     } finally {
       submitButton.disabled = false;
       submitButton.textContent = originalText;
@@ -1095,7 +1151,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (levelsList.length === 0) {
       levelsList.push({
         level_number: 1,
-        level_name: "Approval Level 1",
+        level_name: "Review Step 1",
         level_type: "regular",
         assignment_mode: "same",
         approval_mode: "ANY_ONE",
@@ -1122,13 +1178,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   previewSiteSelect.onchange = renderPreviewPath;
 
-  dfForm.addEventListener("change", () => {
-    selectedFormId = dfForm.value ? parseInt(dfForm.value) : null;
-    const selectedForm = availableForms.find(form => parseInt(form.id) === parseInt(selectedFormId));
-    selectedSiteIds = selectedForm ? (selectedForm.site_ids || []).map(siteId => parseInt(siteId)).filter(Boolean) : [];
-    setUnsaved(true);
-    renderWorkspace();
-  });
+  if (dfForm) {
+    dfForm.addEventListener("change", () => {
+      selectedFormId = dfForm.value ? parseInt(dfForm.value) : null;
+      const selectedForm = availableForms.find(form => parseInt(form.id) === parseInt(selectedFormId));
+      selectedSiteIds = selectedForm ? (selectedForm.site_ids || []).map(siteId => parseInt(siteId)).filter(Boolean) : [];
+      setUnsaved(true);
+      renderWorkspace();
+    });
+  }
 
   btnScrollPreview.onclick = () => {
     document.getElementById("preview-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1142,7 +1200,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!permissions.can_edit) return;
     const name = dfName.value.trim();
     if (!name) {
-      showToast("Workflow name cannot be empty.", "error");
+      showToast("Approval path name cannot be empty.", "error");
       return;
     }
 
@@ -1165,11 +1223,7 @@ document.addEventListener("DOMContentLoaded", () => {
       await fetch(`/module/WFLWBLD/api/${currentWorkflowId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          form_id: selectedFormId || null,
-          site_ids: selectedSiteIds
-        })
+        body: JSON.stringify({ name })
       });
 
       const res = await fetch(`/module/WFLWBLD/api/version/${currentVersionId}/levels`, {
@@ -1179,11 +1233,11 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       const data = await res.json();
       if (!res.ok) {
-        showToast(data.error || "Failed to save workflow.", "error");
+        showToast(data.error || "Failed to save approval path.", "error");
         return;
       }
 
-      showToast("Workflow draft saved.");
+      showToast("Approval path draft saved.");
       setUnsaved(false);
       loadVersionDetails(currentVersionId);
     } catch (err) {
@@ -1208,11 +1262,11 @@ document.addEventListener("DOMContentLoaded", () => {
       publishReviewBody.innerHTML = `
         <div class="space-y-3">
           <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
-            This workflow is ready. Publishing will make it live for ${lastValidation.coveredSites.length} covered site${lastValidation.coveredSites.length === 1 ? "" : "s"} and lock the approval path for future submissions using this version.
+            This path is ready to publish. It will be live for ${lastValidation.coveredSites.length} site${lastValidation.coveredSites.length === 1 ? "" : "s"} immediately after publishing.
           </div>
           <ul class="space-y-2 text-slate-600">
-            <li>✓ Every covered site has a valid path.</li>
-            <li>✓ Final Approval exists for every covered site.</li>
+            <li>✓ Every selected site has a valid path.</li>
+            <li>✓ Final approval exists for every selected site.</li>
             <li>✓ No partial publishing will be performed.</li>
           </ul>
         </div>
@@ -1261,17 +1315,17 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       closePublishReview();
-      showToast("Workflow version published.");
+      showToast("Approval path published.");
       showList();
     } catch (err) {
       console.error(err);
-      showToast("Failed to publish workflow.", "error");
+      showToast("Failed to publish approval path.", "error");
     }
   }
 
   async function createNewVersionDraft() {
     if (!permissions.can_create_version) return;
-    if (!confirm("Create a new draft version starting from this live workflow?")) return;
+    if (!confirm("Create a new draft version starting from this live approval path?")) return;
 
     try {
       const res = await fetch(`/module/WFLWBLD/api/${currentWorkflowId}/new-version`, {
@@ -1291,21 +1345,21 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function deleteWorkflow() {
-    if (!confirm("Delete this workflow? This soft-deletes the workflow record.")) return;
+    if (!confirm("Delete this approval path? This soft-deletes the path record.")) return;
     try {
       const res = await fetch(`/module/WFLWBLD/api/${currentWorkflowId}`, {
         method: "DELETE"
       });
       const data = await res.json();
       if (!res.ok) {
-        showToast(data.error || "Failed to delete workflow.", "error");
+        showToast(data.error || "Failed to delete approval path.", "error");
         return;
       }
-      showToast("Workflow deleted.");
+      showToast("Approval path deleted.");
       showList();
     } catch (err) {
       console.error(err);
-      showToast("Failed to delete workflow.", "error");
+      showToast("Failed to delete approval path.", "error");
     }
   }
 
