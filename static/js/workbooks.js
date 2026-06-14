@@ -30,7 +30,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function esc(s) {
-    return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -179,7 +179,53 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnAddSheet = document.getElementById("btn-add-sheet");
 
   if (sheetsGrid && typeof WORKBOOK_ID !== "undefined") {
+    let activeTab = "sheets";
+    let approvalTabLoaded = false;
+    let currentWorkflowAssignment = null;
+
+    const tabSheets = document.getElementById("tab-sheets");
+    const tabApprovalPath = document.getElementById("tab-approval-path");
+    const panelSheets = document.getElementById("tab-panel-sheets");
+    const panelApprovalPath = document.getElementById("tab-panel-approval-path");
+    const approvalPathContent = document.getElementById("approval-path-content");
+    const assignPathModal = document.getElementById("modal-assign-path");
+    const assignPathSelect = document.getElementById("assign-path-select");
+    const assignPathMessage = document.getElementById("assign-path-message");
+    const btnCloseAssignPath = document.getElementById("btn-close-assign-path");
+    const btnCancelAssignPath = document.getElementById("btn-cancel-assign-path");
+    const btnConfirmAssignPath = document.getElementById("btn-confirm-assign-path");
+    const btnRemoveAssignedPath = document.getElementById("btn-remove-assigned-path");
+
     loadSheets();
+
+    function setWorkbookTab(nextTab) {
+      activeTab = nextTab;
+      const isSheets = activeTab === "sheets";
+
+      if (panelSheets) panelSheets.classList.toggle("hidden", !isSheets);
+      if (panelApprovalPath) panelApprovalPath.classList.toggle("hidden", isSheets);
+      if (btnAddSheet) btnAddSheet.classList.toggle("hidden", !isSheets);
+      const btnPreviewWorkbook = document.getElementById("btn-preview-workbook");
+      if (btnPreviewWorkbook) btnPreviewWorkbook.classList.toggle("hidden", !isSheets);
+
+      if (tabSheets) {
+        tabSheets.className = isSheets
+          ? "workbook-detail-tab border-b-2 border-indigo-600 px-1 pb-3 text-xs font-bold uppercase tracking-wider text-indigo-700"
+          : "workbook-detail-tab border-b-2 border-transparent px-1 pb-3 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700";
+      }
+      if (tabApprovalPath) {
+        tabApprovalPath.className = !isSheets
+          ? "workbook-detail-tab border-b-2 border-indigo-600 px-1 pb-3 text-xs font-bold uppercase tracking-wider text-indigo-700"
+          : "workbook-detail-tab border-b-2 border-transparent px-1 pb-3 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700";
+      }
+
+      if (!isSheets && !approvalTabLoaded) {
+        loadApprovalTab();
+      }
+    }
+
+    if (tabSheets) tabSheets.onclick = () => setWorkbookTab("sheets");
+    if (tabApprovalPath) tabApprovalPath.onclick = () => setWorkbookTab("approval");
 
     // ── Workbook Preview modal ────────────────────────────────────────────
     const btnPreview      = document.getElementById("btn-preview-workbook");
@@ -471,5 +517,339 @@ document.addEventListener("DOMContentLoaded", function () {
         else { toast("Sheet removed.", "warn"); loadSheets(); }
       } catch { toast("Failed to remove sheet.", "error"); }
     }
+
+    // ── Approval Path tab ─────────────────────────────────────────────────
+    async function loadApprovalTab() {
+      approvalTabLoaded = true;
+      if (!approvalPathContent) return;
+      approvalPathContent.innerHTML = `
+        <div class="rounded-xl border border-slate-200 bg-white p-6 text-center text-sm italic text-slate-400 shadow-sm">
+          Loading approval path…
+        </div>
+      `;
+
+      try {
+        const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/workflow`);
+        const data = await r.json();
+        if (!r.ok || data.error) throw new Error(data.error || "Failed to load approval path.");
+        currentWorkflowAssignment = data.workflow_id ? data : null;
+
+        if (!currentWorkflowAssignment) {
+          renderNoAssignedPath();
+          return;
+        }
+        renderAssignedPath(currentWorkflowAssignment);
+      } catch (err) {
+        approvalPathContent.innerHTML = `
+          <div class="rounded-xl border border-rose-200 bg-rose-50 p-6 text-sm font-semibold text-rose-700 shadow-sm">
+            ${esc(err.message || "Failed to load approval path.")}
+          </div>
+        `;
+      }
+    }
+
+    function renderNoAssignedPath() {
+      approvalPathContent.innerHTML = `
+        <div class="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
+          <p class="text-sm font-semibold text-slate-700">No approval path configured.</p>
+          <p class="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">
+            Submitted workbook packages cannot move through review until an approval path is assigned.
+          </p>
+          <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <button id="btn-create-path-from-workbook" type="button"
+              class="inline-flex items-center rounded-lg bg-[#1a3a6b] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1e4280]">
+              + Create New Path
+            </button>
+            <button id="btn-open-assign-path-empty" type="button"
+              class="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+              Assign Existing Path
+            </button>
+          </div>
+        </div>
+      `;
+      document.getElementById("btn-create-path-from-workbook").onclick = () => {
+        window.location.href = `/module/WFLWBLD/?context=workbook&workbook_id=${WORKBOOK_ID}`;
+      };
+      document.getElementById("btn-open-assign-path-empty").onclick = openAssignPathModal;
+    }
+
+    function statusPill(status) {
+      if (status === "Published") {
+        return '<span class="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-800">Live</span>';
+      }
+      return '<span class="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase text-amber-800">Draft</span>';
+    }
+
+    function renderAssignedPath(data) {
+      approvalPathContent.innerHTML = `
+        <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-col gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Approval Path</div>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <h2 class="text-lg font-bold text-slate-800">${esc(data.workflow_name)}</h2>
+                ${statusPill(data.version_status)}
+              </div>
+              <p class="mt-1 font-mono text-xs text-slate-400">${esc(data.workflow_code)}</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="btn-open-assign-path-assigned" type="button"
+                class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                Change
+              </button>
+              <a href="/module/WFLWBLD/?edit=${encodeURIComponent(data.workflow_id)}&context=workbook&workbook_id=${WORKBOOK_ID}"
+                class="font-semibold text-[#1a3a6b] hover:underline text-xs">
+                Edit Path
+              </a>
+            </div>
+          </div>
+
+          <div class="mt-5">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 class="text-sm font-semibold text-slate-800">Preview path by site</h3>
+                <p class="mt-1 text-xs text-slate-500">Check who reviews workbook packages for a selected site.</p>
+              </div>
+              <select id="approval-preview-site-select"
+                class="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-indigo-500 focus:ring-indigo-500">
+                <option value="">Loading sites…</option>
+              </select>
+            </div>
+            <div id="approval-preview-chain" class="mt-5">
+              <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm italic text-slate-400">
+                Loading path preview…
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById("btn-open-assign-path-assigned").onclick = openAssignPathModal;
+      loadAssignedPathSites(data.version_id);
+    }
+
+    async function loadAssignedPathSites(versionId) {
+      const siteSelect = document.getElementById("approval-preview-site-select");
+      const chain = document.getElementById("approval-preview-chain");
+      if (!siteSelect || !chain) return;
+
+      if (!versionId) {
+        siteSelect.innerHTML = '<option value="">No version available</option>';
+        chain.innerHTML = `
+          <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm italic text-slate-400">
+            This approval path has no version to preview.
+          </div>
+        `;
+        return;
+      }
+
+      try {
+        const r = await fetch(`/module/WFLWBLD/api/version/${versionId}`);
+        const data = await r.json();
+        if (!r.ok || data.error) throw new Error(data.error || "Failed to load path sites.");
+        const sites = data.available_sites || [];
+        if (!sites.length) {
+          siteSelect.innerHTML = '<option value="">No sites available</option>';
+          chain.innerHTML = `
+            <div class="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm italic text-slate-400">
+              No sites are available for preview.
+            </div>
+          `;
+          return;
+        }
+
+        siteSelect.innerHTML = sites.map(site => `<option value="${site.id}">${esc(site.name)}</option>`).join("");
+        siteSelect.onchange = () => loadApprovalPathPreview(versionId, siteSelect.value);
+        loadApprovalPathPreview(versionId, siteSelect.value);
+      } catch (err) {
+        siteSelect.innerHTML = '<option value="">Unable to load sites</option>';
+        chain.innerHTML = `
+          <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-4 text-sm font-semibold text-rose-700">
+            ${esc(err.message || "Failed to load path sites.")}
+          </div>
+        `;
+      }
+    }
+
+    async function loadApprovalPathPreview(versionId, siteId) {
+      const chain = document.getElementById("approval-preview-chain");
+      if (!chain || !siteId) return;
+      chain.innerHTML = `
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm italic text-slate-400">
+          Loading path preview…
+        </div>
+      `;
+
+      try {
+        const r = await fetch(`/module/WFLWBLD/api/version/${versionId}/preview?site_id=${encodeURIComponent(siteId)}`);
+        const payload = await r.json();
+        if (!r.ok || payload.error) throw new Error(payload.error || "Failed to load path preview.");
+        renderApprovalPathChain(payload.data || {});
+      } catch (err) {
+        chain.innerHTML = `
+          <div class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-4 text-sm font-semibold text-rose-700">
+            ${esc(err.message || "Failed to load path preview.")}
+          </div>
+        `;
+      }
+    }
+
+    function renderApprovalPathChain(data) {
+      const chain = document.getElementById("approval-preview-chain");
+      if (!chain) return;
+      const rows = data.rows || [];
+      const nodes = [{
+        title: "SPOC submits",
+        detail: "Workbook package enters review.",
+        status: "start"
+      }];
+
+      rows.forEach(row => {
+        const approverNames = (row.approvers || []).map(approver => approver.name).join(", ");
+        nodes.push({
+          title: row.level_name,
+          detail: row.status === "active"
+            ? (approverNames || "Reviewer assigned")
+            : row.status === "skipped"
+              ? "(skipped)"
+              : "No reviewer exists for this site.",
+          status: row.status
+        });
+      });
+
+      if (!data.has_warning) {
+        nodes.push({
+          title: "Approved & locked",
+          detail: "Final approval locks the submitted workbook data.",
+          status: "done"
+        });
+      }
+
+      const nodeHtml = nodes.map((node, index) => {
+        const isLast = index === nodes.length - 1;
+        const dotClass =
+          node.status === "blocked" ? "bg-rose-500" :
+          node.status === "skipped" ? "bg-slate-300" :
+          node.status === "done" ? "bg-emerald-500" :
+          "bg-[#1a3a6b]";
+        const boxClass =
+          node.status === "blocked" ? "border-rose-200 bg-rose-50" :
+          node.status === "skipped" ? "border-slate-200 bg-slate-50" :
+          node.status === "done" ? "border-emerald-200 bg-emerald-50" :
+          "border-slate-200 bg-white";
+
+        return `
+          <li class="relative flex gap-3 ${isLast ? "" : "pb-4"}">
+            ${isLast ? "" : '<span class="absolute left-[5px] top-4 h-full w-px bg-slate-200"></span>'}
+            <span class="relative mt-3 h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}"></span>
+            <div class="min-w-0 flex-1 rounded-lg border px-3 py-2 ${boxClass}">
+              <div class="text-sm font-semibold text-slate-800">${esc(node.title)}</div>
+              <div class="mt-1 text-xs text-slate-500">${esc(node.detail)}</div>
+            </div>
+          </li>
+        `;
+      }).join("");
+
+      chain.innerHTML = `
+        ${data.has_warning ? `
+          <div class="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">
+            ${esc(data.message || "This site would block during submission.")}
+          </div>
+        ` : ""}
+        <ol class="space-y-0">${nodeHtml}</ol>
+      `;
+    }
+
+    async function openAssignPathModal() {
+      if (!assignPathModal || !assignPathSelect) return;
+      assignPathModal.classList.remove("hidden");
+      assignPathModal.classList.add("flex");
+      assignPathSelect.disabled = true;
+      assignPathSelect.innerHTML = '<option value="">Loading paths…</option>';
+      if (assignPathMessage) assignPathMessage.classList.add("hidden");
+      if (btnConfirmAssignPath) btnConfirmAssignPath.disabled = true;
+      if (btnRemoveAssignedPath) {
+        btnRemoveAssignedPath.classList.toggle("hidden", !currentWorkflowAssignment);
+      }
+
+      try {
+        const r = await fetch("/module/WFLWBLD/api");
+        const paths = await r.json();
+        if (!r.ok || paths.error) throw new Error(paths.error || "Failed to load approval paths.");
+        const publishedPaths = (paths || []).filter(path => path.latest_version_status === "Published");
+
+        if (!publishedPaths.length) {
+          assignPathSelect.innerHTML = '<option value="">No published approval paths available</option>';
+          if (assignPathMessage) {
+            assignPathMessage.textContent = "Publish an approval path before assigning it to a workbook.";
+            assignPathMessage.classList.remove("hidden");
+          }
+          return;
+        }
+
+        assignPathSelect.innerHTML = '<option value="">Choose approval path</option>' + publishedPaths.map(path => (
+          `<option value="${path.id}" ${currentWorkflowAssignment && parseInt(currentWorkflowAssignment.workflow_id) === parseInt(path.id) ? "selected" : ""}>${esc(path.name)} (${esc(path.code)})</option>`
+        )).join("");
+        assignPathSelect.disabled = false;
+        if (btnConfirmAssignPath) btnConfirmAssignPath.disabled = false;
+      } catch (err) {
+        assignPathSelect.innerHTML = '<option value="">Unable to load paths</option>';
+        if (assignPathMessage) {
+          assignPathMessage.textContent = err.message || "Failed to load approval paths.";
+          assignPathMessage.classList.remove("hidden");
+        }
+      }
+    }
+
+    function closeAssignPathModal() {
+      if (!assignPathModal) return;
+      assignPathModal.classList.add("hidden");
+      assignPathModal.classList.remove("flex");
+    }
+
+    async function assignSelectedPath() {
+      const selectedId = assignPathSelect && assignPathSelect.value ? parseInt(assignPathSelect.value) : null;
+      if (!selectedId) {
+        toast("Choose an approval path to assign.", "warn");
+        return;
+      }
+      try {
+        const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/workflow`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workflow_id: selectedId }),
+        });
+        const data = await r.json();
+        if (!r.ok || data.error) throw new Error(data.error || "Failed to assign approval path.");
+        closeAssignPathModal();
+        approvalTabLoaded = false;
+        await loadApprovalTab();
+        toast("Approval path assigned.");
+      } catch (err) {
+        toast(err.message || "Failed to assign approval path.", "error");
+      }
+    }
+
+    async function clearAssignedPath() {
+      try {
+        const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/workflow`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workflow_id: null }),
+        });
+        const data = await r.json();
+        if (!r.ok || data.error) throw new Error(data.error || "Failed to remove approval path.");
+        closeAssignPathModal();
+        approvalTabLoaded = false;
+        await loadApprovalTab();
+        toast("Approval path removed.", "warn");
+      } catch (err) {
+        toast(err.message || "Failed to remove approval path.", "error");
+      }
+    }
+
+    if (btnCloseAssignPath) btnCloseAssignPath.onclick = closeAssignPathModal;
+    if (btnCancelAssignPath) btnCancelAssignPath.onclick = closeAssignPathModal;
+    if (btnConfirmAssignPath) btnConfirmAssignPath.onclick = assignSelectedPath;
+    if (btnRemoveAssignedPath) btnRemoveAssignedPath.onclick = clearAssignedPath;
   }
 });
