@@ -26,6 +26,7 @@ from app.modules.FORMBLD.service import (
     get_form_sections,
     get_form_version,
     get_form_version_fields,
+    compose_preview_workbook_context,
     save_form_draft_fields,
     publish_form_version,
     create_new_form_version_draft
@@ -277,6 +278,34 @@ def get_version_details(version_id):
         }
     }
     return jsonify(data)
+
+
+@bp.route("/forms/<int:form_id>/preview-spoc", methods=["GET"])
+@require_permission("form", "manage_forms")
+def preview_spoc(form_id):
+    version_id = request.args.get("version_id", type=int)
+    form = get_form(form_id)
+    if not form:
+        return error_response("Form not found.", 404)
+
+    if version_id:
+        version = get_form_version(version_id)
+        if not version or version.form_id != form.id:
+            return error_response("Form version not found.", 404)
+    else:
+        version = (
+            FormVersion.query.filter_by(form_id=form.id)
+            .order_by(FormVersion.version_number.desc())
+            .first()
+        )
+
+    if not version:
+        return error_response("Form version not found.", 404)
+
+    try:
+        return jsonify(compose_preview_workbook_context(version.id))
+    except ValueError as e:
+        return error_response(str(e), 400)
 
 
 @bp.route("/api/version/<int:version_id>/fields", methods=["POST"])

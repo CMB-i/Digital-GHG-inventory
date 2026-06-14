@@ -6,6 +6,14 @@
   <!-- Toast notification container -->
   <div id="toast-container" class="fixed top-5 right-5 z-50 space-y-2 pointer-events-none"></div>
 
+  <!-- Workbook sheet manager breadcrumb (shown when opened from /workbooks/<id>) -->
+  <div id="fb-return-link-bar" class="hidden">
+    <a id="fb-return-link" href="#"
+      class="inline-flex items-center text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline">
+      ← Workbook
+    </a>
+  </div>
+
   <!-- 1. LIST VIEW -->
   <div id="list-view">
     <div class="text-xs text-slate-500 mb-2">Configuration · <strong class="text-indigo-600">All Workbooks</strong></div>
@@ -89,7 +97,7 @@
   <div id="step2-view" class="hidden space-y-4">
     <div class="flex items-center justify-between border-b border-slate-200 pb-4">
       <div class="flex items-center space-x-3">
-        <button onclick="showList()" class="inline-flex items-center text-xs text-slate-500 hover:text-slate-700 font-semibold">
+        <button id="btn-forms-back" onclick="showList()" class="inline-flex items-center text-xs text-slate-500 hover:text-slate-700 font-semibold">
           ← Forms
         </button>
         <span class="text-slate-300">|</span>
@@ -102,7 +110,7 @@
           Save Draft
         </button>
         <button onclick="openPreviewFromBuilder()" class="btn btn-neutral btn-sm">
-          Preview as SPOC
+          Preview
         </button>
         <button id="btn-publish-form" class="btn btn-primary btn-sm">
           Publish Form
@@ -130,8 +138,8 @@
         <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div class="px-4 py-3 bg-slate-50 border-b border-slate-200/80 flex items-center justify-between">
             <div>
-              <h2 class="text-xs font-semibold text-slate-700 uppercase tracking-wider">Sheets / Sections</h2>
-              <p class="text-[10px] text-slate-400 mt-0.5">Choose where fields appear for the SPOC.</p>
+              <h2 class="text-xs font-semibold text-slate-700 uppercase tracking-wider">Sections in this sheet</h2>
+              <p id="sections-panel-subtext" class="text-[10px] text-slate-400 mt-0.5">Choose column groups within this sheet.</p>
             </div>
             <button type="button" id="btn-add-section" class="btn btn-primary btn-sm">
               Add
@@ -147,17 +155,47 @@
       <!-- Center Panel: Active Section Field List -->
       <div class="space-y-4 min-w-0">
         <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div class="px-5 py-3.5 bg-slate-50 border-b border-slate-200/80 flex items-center justify-between">
+          <div class="px-5 py-3.5 bg-slate-50 border-b border-slate-200/80 flex items-center justify-between gap-4">
             <div>
               <h2 id="workspace-section-title" class="text-xs font-semibold text-slate-700 uppercase tracking-wider">Workbook Fields</h2>
               <p id="workspace-section-meta" class="mt-0.5 text-[10px] text-slate-400">Rows follow the configured field order.</p>
             </div>
-            <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold flex-shrink-0">BUILDER</span>
+            <div class="flex flex-shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+              <button type="button" id="workspace-tab-fields" class="rounded-md bg-[#1a3a6b] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm">
+                <span id="tab-fields-label">All Workbook Fields</span>
+              </button>
+              <button type="button" id="workspace-tab-preview" class="rounded-md px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:bg-slate-50 hover:text-[#1a3a6b]">
+                Preview
+              </button>
+            </div>
           </div>
           
           <div id="form-workspace" class="p-6 min-h-[400px] border-b border-slate-100 space-y-4">
             <div class="text-center py-16 text-slate-400 italic text-sm">
               Loading form preview...
+            </div>
+          </div>
+
+          <div id="builder-preview-panel" class="hidden border-b border-slate-100">
+            <div class="border-b border-slate-100 bg-white px-5 py-2 text-xs font-medium text-slate-500">
+              This is how your SPOC will see this workbook.
+            </div>
+            <div class="max-h-[560px] overflow-auto p-4">
+              <div id="builder-preview-empty" class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm font-semibold text-slate-500">
+                Loading preview...
+              </div>
+              <div id="builder-preview-table-wrap" class="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                <table class="min-w-full border-collapse">
+                  <thead id="builder-preview-workbook-head" class="bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500"></thead>
+                  <tbody id="builder-preview-workbook-body" class="divide-y divide-slate-100 text-sm text-slate-700"></tbody>
+                </table>
+              </div>
+              <div id="builder-preview-static-wrap" class="mt-5 hidden overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                <table class="min-w-full border-collapse">
+                  <thead id="builder-preview-static-head" class="hidden"></thead>
+                  <tbody id="builder-preview-static-body" class="divide-y divide-slate-100 text-sm text-slate-700"></tbody>
+                </table>
+              </div>
             </div>
           </div>
 
@@ -373,20 +411,35 @@
 </div>
 
 <!-- SPOC Preview Overlay Modal -->
-<div id="preview-overlay" class="fixed inset-0 bg-navy/50 backdrop-blur-sm z-50 flex items-start justify-center hidden p-6 overflow-y-auto">
-  <div class="bg-white rounded-xl border border-slate-200 shadow-xl max-w-3xl w-full overflow-hidden transition-all transform scale-100">
-    <div class="px-6 py-4 bg-indigo-900 text-white flex items-center justify-between">
-      <h3 class="text-sm font-bold tracking-wider uppercase">Preview as SPOC</h3>
-      <button onclick="closePreview()" class="text-indigo-200 hover:text-white font-bold text-xs uppercase underline">Close ✕</button>
+<div id="preview-overlay" class="fixed inset-0 bg-navy/50 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4 overflow-hidden">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-[860px] overflow-hidden transition-all transform scale-100">
+    <div class="px-6 py-4 bg-white text-[#1a3a6b] border-b border-[#d0d8e4] flex items-center justify-between">
+      <h3 class="text-sm font-bold tracking-wider uppercase">Preview</h3>
+      <button onclick="closePreview()" class="text-2xl leading-none font-semibold text-[#1a3a6b] hover:text-[#c8102e]" aria-label="Close preview">&times;</button>
     </div>
-    <div class="p-6 space-y-4">
+    <div class="max-h-[75vh] overflow-y-auto p-6 space-y-4">
       <div>
         <h2 id="pv-title" class="text-lg font-bold text-slate-800">Form Preview</h2>
         <div id="pv-meta" class="text-xs text-slate-400 font-semibold mt-1">SWPL Goa · FY 2025–26 · May 2025</div>
       </div>
-      
-      <!-- Target Element for renderForm inside preview -->
-      <div id="preview-workspace-el" class="space-y-4"></div>
+
+      <div id="preview-workspace-el" class="space-y-5">
+        <div id="preview-empty" class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm font-semibold text-slate-500">
+          Loading preview...
+        </div>
+        <div id="preview-table-wrap" class="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <table class="min-w-full border-collapse">
+            <thead id="preview-workbook-head" class="bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500"></thead>
+            <tbody id="preview-workbook-body" class="divide-y divide-slate-100 text-sm text-slate-700"></tbody>
+          </table>
+        </div>
+        <div id="preview-static-wrap" class="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <table class="min-w-full border-collapse">
+            <thead id="preview-static-head" class="hidden"></thead>
+            <tbody id="preview-static-body" class="divide-y divide-slate-100 text-sm text-slate-700"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -394,6 +447,6 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/formula_runtime.js') }}"></script>
-<script src="{{ url_for('static', filename='js/form_renderer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/workbook_sheet.js') }}"></script>
 <script src="{{ url_for('static', filename='js/form_builder.js') }}"></script>
 {% endblock %}
