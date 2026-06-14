@@ -385,9 +385,19 @@ document.addEventListener("DOMContentLoaded", function () {
 
         const editUrl = buildEditUrl(sheet);
 
+        const vStatus = sheet.latest_version_status;
+        const statusBadge = vStatus === "Published"
+          ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-emerald-50 border border-emerald-200 text-emerald-700">Published</span>`
+          : vStatus === "Draft"
+            ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-amber-50 border border-amber-200 text-amber-700">Draft</span>`
+            : `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-100 text-slate-400">No version</span>`;
+
         card.innerHTML = `
           <div class="px-5 py-4 space-y-1.5">
-            <h3 class="font-bold text-slate-800 text-sm">${esc(sheet.sheet_label)}</h3>
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="font-bold text-slate-800 text-sm leading-snug">${esc(sheet.sheet_label)}</h3>
+              ${statusBadge}
+            </div>
             <p class="text-[10px] font-mono text-slate-400">${esc(sheet.form_code)}</p>
             <p class="text-xs text-slate-500">
               <span>${sheet.section_count} section${sheet.section_count !== 1 ? "s" : ""}</span>

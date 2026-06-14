@@ -16,6 +16,7 @@ document.addEventListener("DOMContentLoaded", function () {
   let isUnsaved = false;
   let pendingPrefill = null;
   let workspaceMode = "fields";
+  let isWorkbookContext = false;
 
   // View containers
   const listView = document.getElementById("list-view");
@@ -1340,6 +1341,10 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("prop-section-dropdown").classList.add("hidden");
     document.getElementById("prop-section-calculated").classList.add("hidden");
     document.getElementById("prop-section-file").classList.add("hidden");
+    const _fHint = document.getElementById("formula-publish-hint");
+    const _fOk   = document.getElementById("formula-status-ok");
+    if (_fHint) _fHint.classList.add("hidden");
+    if (_fOk)   _fOk.classList.add("hidden");
 
     const config = field.field_config || {};
 
@@ -1359,8 +1364,15 @@ document.addEventListener("DOMContentLoaded", function () {
     if (field.field_type === "calculated") {
       document.getElementById("prop-section-calculated").classList.remove("hidden");
       const formulaSelect = document.getElementById("prop-formula");
+      const formulaHint   = document.getElementById("formula-publish-hint");
+      const formulaOk     = document.getElementById("formula-status-ok");
       if (formulaSelect && config.formula_version_id) {
         formulaSelect.value = config.formula_version_id;
+        if (formulaHint) formulaHint.classList.add("hidden");
+        if (formulaOk)   formulaOk.classList.remove("hidden");
+      } else {
+        if (formulaHint) formulaHint.classList.remove("hidden");
+        if (formulaOk)   formulaOk.classList.add("hidden");
       }
     }
 
@@ -1712,37 +1724,39 @@ document.addEventListener("DOMContentLoaded", function () {
   btnPublishForm.onclick = function () {
     if (!selectedVersionId) return;
 
-    // 1. Perform client side validations
+    const noun = isWorkbookContext ? "sheet" : "form";
+
+    // 1. Client-side validations — actionable language
     const errors = [];
     const formObj = formsList.find(x => x.id === selectedFormId);
 
     if (currentFields.length === 0) {
-      errors.push("Form must contain at least one field.");
+      errors.push("Add at least one field before publishing.");
     }
 
     currentFields.forEach(f => {
       if (f.field_type === "calculated" && (!f.field_config || !f.field_config.formula_version_id)) {
-        errors.push(`Calculated field "${f.field_name}" must reference a published formula.`);
+        errors.push(`"${escapeHtml(f.field_name)}" is a calculated field — open its inspector and attach a published formula before publishing this ${noun}.`);
       }
       if (f.field_type === "dropdown" && dropdownOptionCount(f) === 0) {
-        errors.push(`Dropdown field "${f.field_name}" must have at least one option.`);
+        errors.push(`"${escapeHtml(f.field_name)}" is a dropdown with no options — add at least one option before publishing.`);
       }
     });
 
     if (!formObj || !formObj.sites || formObj.sites.length === 0) {
-      errors.push("Form must be applicable to at least one site.");
+      errors.push(`Assign this ${noun} to at least one site before publishing.`);
     }
 
     if (errors.length > 0) {
       publishErrorsList.innerHTML = errors.map(e => `<li>${e}</li>`).join("");
       publishErrors.classList.remove("hidden");
-      showToast("Please resolve all errors before publishing.", "error");
+      showToast(`Resolve all issues before publishing this ${noun}.`, "error");
       return;
     }
 
     publishErrors.classList.add("hidden");
 
-    if (!confirm("Are you sure you want to publish this form version? It will become active immediately.")) {
+    if (!confirm(`Publish this ${noun}? It will become active immediately and cannot be edited without creating a new draft.`)) {
       return;
     }
 
@@ -1753,16 +1767,20 @@ document.addEventListener("DOMContentLoaded", function () {
       .then(res => res.json())
       .then(resData => {
         if (resData.error) {
-          showToast(resData.error, "error");
+          // Server-side error → show in error panel, not just toast
+          publishErrorsList.innerHTML = `<li>${escapeHtml(resData.error)}</li>`;
+          publishErrors.classList.remove("hidden");
+          showToast(`Publish blocked — see errors above.`, "error");
         } else {
-          showToast("Form version published successfully!");
+          showToast(isWorkbookContext ? "Sheet published." : "Form version published.");
           isUnsaved = false;
-          showList();
+          // Reload version so status badge refreshes to Published; stay in builder
+          loadVersionDetails(selectedVersionId);
         }
       })
       .catch(err => {
-        console.error("Error publishing form:", err);
-        showToast("Failed to publish form.", "error");
+        console.error("Error publishing:", err);
+        showToast(`Failed to publish ${noun}. Please try again.`, "error");
       });
   };
 
@@ -1896,6 +1914,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const sectionSubtext  = document.getElementById("sections-panel-subtext");
 
     if (workbookId) {
+      isWorkbookContext = true;
       // Show workbook breadcrumb
       const bar  = document.getElementById("fb-return-link-bar");
       const link = document.getElementById("fb-return-link");
@@ -1909,9 +1928,9 @@ document.addEventListener("DOMContentLoaded", function () {
       }
       // Hide redundant "← Forms" button — breadcrumb is the only back nav
       if (formsBackBtn) formsBackBtn.classList.add("hidden");
-      // Relabel centre panel tab
+      // Relabel publish button, centre panel tab, left panel subtext
+      if (btnPublishForm) btnPublishForm.textContent = "Publish Sheet";
       if (tabFieldsLabel) tabFieldsLabel.textContent = "Fields in This Sheet";
-      // Relabel left panel subtext
       if (sectionSubtext) sectionSubtext.textContent = "Choose column groups within this sheet.";
     } else {
       // Standalone: redirect "← Forms" to /workbooks/ instead of old list view
