@@ -36,9 +36,14 @@ def get_list():
     sets = list_value_sets()
     result = []
     for s in sets:
-        # Determine latest and approved versions
+        # Determine current editable version for the MVP admin flow.
         all_versions = ValueSetVersion.query.filter_by(value_set_id=s.id).order_by(ValueSetVersion.version_number.desc()).all()
         latest_version = all_versions[0] if all_versions else None
+        current_version = (
+            ValueSetVersion.query.get(s.current_version_id)
+            if s.current_version_id else None
+        )
+        selected_version = current_version or latest_version
         
         approved_version = ValueSetVersion.query.filter_by(value_set_id=s.id, status="Approved").order_by(ValueSetVersion.version_number.desc()).first()
         
@@ -48,6 +53,9 @@ def get_list():
             "code": s.code,
             "description": s.description,
             "current_version_id": s.current_version_id,
+            "current_version_status": current_version.status if current_version else None,
+            "selected_version_id": selected_version.id if selected_version else None,
+            "selected_version_status": selected_version.status if selected_version else None,
             "latest_version_id": latest_version.id if latest_version else None,
             "latest_version_num": latest_version.version_number if latest_version else None,
             "latest_version_status": latest_version.status if latest_version else None,
@@ -68,8 +76,16 @@ def create():
     try:
         val_set = create_value_set(name, code, description, user.id)
         db.session.commit()
+        initial_version = ValueSetVersion.query.filter_by(
+            value_set_id=val_set.id
+        ).order_by(ValueSetVersion.version_number.desc()).first()
         return success_response(
-            data={"id": val_set.id, "name": val_set.name, "code": val_set.code},
+            data={
+                "id": val_set.id,
+                "name": val_set.name,
+                "code": val_set.code,
+                "version_id": initial_version.id if initial_version else None,
+            },
             message="Value set created successfully."
         )
     except ValueError as e:
@@ -119,9 +135,7 @@ def get_version_details(version_id):
 
     # Load permissions context
     from app.common.permissions import has_permission
-    can_approve = has_permission(user.id, "value_set", "approve")
     can_edit = has_permission(user.id, "value_set", "manage_forms")
-    is_submitter = version.submitted_by == user.id
 
     data = {
         "value_set": {
@@ -148,16 +162,15 @@ def get_version_details(version_id):
             "id": e.id,
             "entry_code": e.entry_code,
             "entry_label": e.entry_label,
+            "entry_value": e.entry_label,
             "display_order": e.display_order,
             "is_active": e.is_active,
         } for e in entries],
         "all_versions": version_list,
         "permissions": {
-            "can_edit": can_edit and version.status in ("Draft", "Rejected"),
-            "can_submit": can_edit and version.status in ("Draft", "Rejected"),
-            "can_approve": can_approve and version.status == "Submitted" and not is_submitter,
-            "can_reject": can_approve and version.status == "Submitted" and not is_submitter,
-            "can_create_version": can_edit and version.status == "Approved"
+            "can_edit": can_edit,
+            "can_publish": False,
+            "can_create_version": False,
         }
     }
     return jsonify(data)
@@ -188,6 +201,18 @@ def submit_version(version_id):
         submit_value_set_version(version_id, user.id)
         db.session.commit()
         return success_response(message="Value set version submitted for approval.")
+    except ValueError as e:
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/version/<int:version_id>/publish", methods=["POST"])
+@require_permission("value_set", "manage_forms")
+def publish_version(version_id):
+    user = current_user()
+    try:
+        approve_value_set_version(version_id, user.id)
+        db.session.commit()
+        return success_response(message="Value set version published.")
     except ValueError as e:
         return error_response(str(e), 400)
 

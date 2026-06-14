@@ -25,15 +25,14 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 
 
 def _get_active_valset_codes():
-    """Return the set of all entry_code values from currently approved value sets."""
-    approved = (
+    """Return entry_code values from the current Value Set versions used by Formula Builder."""
+    current_valsets = (
         ValueSet.query.filter_by(is_deleted=False)
         .join(ValueSetVersion, ValueSetVersion.id == ValueSet.current_version_id)
-        .filter(ValueSetVersion.status == "Approved")
         .all()
     )
     codes = set()
-    for vs in approved:
+    for vs in current_valsets:
         entries = ValueSetEntry.query.filter_by(
             value_set_version_id=vs.current_version_id,
             is_deleted=False,
@@ -60,17 +59,16 @@ def index():
 
     compatible_fields = get_formula_compatible_fields(selected_form_version_id)
     
-    # Load approved value sets for token constants insertion
+    # Load current value sets for token constants insertion.
     from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
-    approved_valsets = (
+    current_valsets = (
         ValueSet.query.filter_by(is_deleted=False)
         .join(ValueSetVersion, ValueSetVersion.id == ValueSet.current_version_id)
-        .filter(ValueSetVersion.status == "Approved")
         .all()
     )
     
     valset_options = []
-    for vs in approved_valsets:
+    for vs in current_valsets:
         entries = ValueSetEntry.query.filter_by(
             value_set_version_id=vs.current_version_id,
             is_deleted=False,

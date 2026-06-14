@@ -42,6 +42,7 @@ def create_value_set(name, code, description, user_id):
     )
     db.session.add(version)
     db.session.flush()
+    value_set.current_version_id = version.id
     
     return value_set
 
@@ -58,8 +59,6 @@ def add_or_update_entries(version_id, entries_list, user_id):
     version = get_value_set_version(version_id)
     if not version:
         raise ValueError("Value set version not found.")
-    if version.status not in ("Draft", "Rejected"):
-        raise ValueError("Cannot edit entries for a version that is not in Draft or Rejected status.")
         
     # Mark existing entries as deleted first
     existing_entries = ValueSetEntry.query.filter_by(
@@ -97,6 +96,11 @@ def add_or_update_entries(version_id, entries_list, user_id):
         )
         db.session.add(entry)
     
+    value_set = get_value_set(version.value_set_id)
+    if value_set:
+        value_set.current_version_id = version_id
+        value_set.updated_by = user_id
+
     db.session.flush()
     return get_value_set_entries(version_id)
 
@@ -122,13 +126,9 @@ def approve_value_set_version(version_id, user_id):
     version = get_value_set_version(version_id)
     if not version:
         raise ValueError("Value set version not found.")
-    if version.status != "Submitted":
-        raise ValueError("Only Submitted versions can be approved.")
-        
-    # Self-approval check
-    if version.submitted_by == user_id:
-        raise ValueError("Approver cannot be the same user who submitted the value set version.")
-        
+    if version.status not in ("Draft", "Submitted"):
+        raise ValueError("Only Draft or Submitted versions can be published.")
+
     # Set status
     version.status = "Approved"
     version.approved_by = user_id
