@@ -6,6 +6,29 @@ document.addEventListener("DOMContentLoaded", function () {
   // Track value set entry codes inserted via palette — used when building tokens for save/validate
   const insertedValsetCodes = new Set();
 
+  // Parse return-to params (set by form builder when opening from inspector)
+  const _fbUrlParams = new URLSearchParams(window.location.search);
+  const _returnTo = _fbUrlParams.get("return_to");
+  const _returnFieldId = _fbUrlParams.get("field_id");
+  const _returnFormId = _fbUrlParams.get("form_id");
+  const _returnVersionId = _fbUrlParams.get("version_id");
+
+  // Show back link when navigated from form builder
+  // href encodes the full return URL including form_id / version_id / field_id
+  // so clicking "← Back to workbook" re-opens the specific form+field, not just the list.
+  if (_returnTo) {
+    const bar = document.getElementById("fb-return-link-bar");
+    const link = document.getElementById("fb-return-link");
+    if (bar && link) {
+      const backParams = new URLSearchParams();
+      if (_returnFormId) backParams.set("form_id", _returnFormId);
+      if (_returnVersionId) backParams.set("version_id", _returnVersionId);
+      if (_returnFieldId) backParams.set("field_id", _returnFieldId);
+      link.href = backParams.toString() ? _returnTo + "?" + backParams.toString() : _returnTo;
+      bar.classList.remove("hidden");
+    }
+  }
+
   // View elements
   const listView = document.getElementById("list-view");
   const editorView = document.getElementById("editor-view");
@@ -504,7 +527,16 @@ document.addEventListener("DOMContentLoaded", function () {
         showToast(resData.error, "error");
       } else {
         showToast("Formula published successfully!");
-        showList();
+        if (_returnTo) {
+          const returnParams = new URLSearchParams();
+          returnParams.set("prefill_formula", selectedVersionId);
+          if (_returnFieldId) returnParams.set("field_id", _returnFieldId);
+          if (_returnFormId) returnParams.set("form_id", _returnFormId);
+          if (_returnVersionId) returnParams.set("version_id", _returnVersionId);
+          window.location.href = _returnTo + "?" + returnParams.toString();
+        } else {
+          showList();
+        }
       }
     } catch (err) {
       console.error("Error publishing formula:", err);

@@ -14,6 +14,7 @@ document.addEventListener("DOMContentLoaded", function () {
   let selectedFieldCode = null;
   let activeSectionCode = "";
   let isUnsaved = false;
+  let pendingPrefill = null;
 
   // View containers
   const listView = document.getElementById("list-view");
@@ -419,8 +420,11 @@ document.addEventListener("DOMContentLoaded", function () {
         });
         renderWorkflowsDropdown();
 
-        // 3. Load Forms List
-        loadForms();
+        // 3. Load Forms List, then check for return-URL prefill
+        return loadForms();
+      })
+      .then(() => {
+        checkUrlPrefill();
       })
       .catch(err => {
         console.error("Error initializing data:", err);
@@ -458,8 +462,8 @@ document.addEventListener("DOMContentLoaded", function () {
   // Fetch all forms on load or refresh
   function loadForms() {
     formsListBody.innerHTML = '<div class="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400 shadow-sm md:col-span-2 xl:col-span-3">Loading workbooks...</div>';
-    
-    fetch("/module/FORMBLD/api")
+
+    return fetch("/module/FORMBLD/api")
       .then(res => res.json())
       .then(data => {
         formsList = data;
@@ -708,6 +712,31 @@ document.addEventListener("DOMContentLoaded", function () {
           btnSaveLayout.classList.remove("hidden");
           btnPublishForm.classList.remove("hidden");
         }
+
+        // Resolve any pending prefill from return-URL navigation
+        if (pendingPrefill) {
+          const pending = pendingPrefill;
+          pendingPrefill = null;
+          const targetField = currentFields.find(f => f.field_code === pending.fieldCode);
+          if (targetField) {
+            selectedFieldCode = pending.fieldCode;
+            if (pending.formulaVersionId) {
+              targetField.field_config = targetField.field_config || {};
+              targetField.field_config.formula_version_id = pending.formulaVersionId;
+            }
+            openInspector(pending.fieldCode);
+            if (pending.formulaVersionId) {
+              const msg = document.getElementById("prefill-formula-msg");
+              if (msg) {
+                const formulaEntry = availableFormulas.find(f => f.current_version_id === pending.formulaVersionId);
+                const formulaName = formulaEntry ? formulaEntry.name : "Formula";
+                msg.textContent = `${formulaName} linked. Click Apply Changes to save.`;
+                msg.classList.remove("hidden");
+              }
+            }
+          }
+        }
+
       })
       .catch(err => {
         console.error("Error loading version details:", err);
@@ -1032,14 +1061,10 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("prop-section-dropdown").classList.add("hidden");
     document.getElementById("prop-section-calculated").classList.add("hidden");
     document.getElementById("prop-section-file").classList.add("hidden");
-    const calculatedIndicator = document.getElementById("prop-calculated-indicator");
-    if (calculatedIndicator) {
-      calculatedIndicator.classList.add("hidden");
-    }
 
     const config = field.field_config || {};
 
-    if (field.field_type === "number" || field.field_type === "integer" || field.field_type === "calculated") {
+    if (field.field_type === "number" || field.field_type === "integer") {
       document.getElementById("prop-section-numeric").classList.remove("hidden");
       document.getElementById("prop-unit").value = config.unit || "";
       document.getElementById("prop-min").value = config.min !== undefined ? config.min : "";
@@ -1053,8 +1078,10 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (field.field_type === "calculated") {
-      if (calculatedIndicator) {
-        calculatedIndicator.classList.remove("hidden");
+      document.getElementById("prop-section-calculated").classList.remove("hidden");
+      const formulaSelect = document.getElementById("prop-formula");
+      if (formulaSelect && config.formula_version_id) {
+        formulaSelect.value = config.formula_version_id;
       }
     }
 
@@ -1114,7 +1141,7 @@ document.addEventListener("DOMContentLoaded", function () {
     field.field_config.proof_required = document.getElementById("prop-proof-req").checked;
     field.field_config.help_text = document.getElementById("prop-help").value.trim();
 
-    if (field.field_type === "number" || field.field_type === "integer" || field.field_type === "calculated") {
+    if (field.field_type === "number" || field.field_type === "integer") {
       field.field_config.unit = document.getElementById("prop-unit").value.trim();
       
       const minVal = document.getElementById("prop-min").value;
@@ -1527,6 +1554,58 @@ document.addEventListener("DOMContentLoaded", function () {
       closePreview();
     }
   };
+
+  // Open Formula Builder nav button
+  const btnOpenFormulaBuilder = document.getElementById("btn-open-formula-builder");
+  if (btnOpenFormulaBuilder) {
+    btnOpenFormulaBuilder.onclick = function (e) {
+      e.preventDefault();
+      if (!selectedFormId || !selectedVersionId) return;
+      const url = "/module/FRMULA/?return_to=" + encodeURIComponent("/module/FORMBLD/") +
+        "&form_id=" + selectedFormId +
+        "&version_id=" + selectedVersionId +
+        "&field_id=" + encodeURIComponent(selectedFieldCode || "");
+      window.location.href = url;
+    };
+  }
+
+  // Open Value Sets nav button
+  const btnOpenValueSets = document.getElementById("btn-open-value-sets");
+  if (btnOpenValueSets) {
+    btnOpenValueSets.onclick = function (e) {
+      e.preventDefault();
+      if (!selectedFormId || !selectedVersionId) return;
+      const url = "/module/VALSET/?return_to=" + encodeURIComponent("/module/FORMBLD/") +
+        "&form_id=" + selectedFormId +
+        "&version_id=" + selectedVersionId +
+        "&field_id=" + encodeURIComponent(selectedFieldCode || "");
+      window.location.href = url;
+    };
+  }
+
+  // Check URL params for return-from-formula-builder or return-from-value-sets flow
+  function checkUrlPrefill() {
+    const params = new URLSearchParams(window.location.search);
+    const prefillFormulaVersionId = params.get("prefill_formula");
+    const fieldCode = params.get("field_id");
+    const formId = params.get("form_id");
+    const versionId = params.get("version_id");
+
+    if (!formId || !versionId) return;
+
+    if (prefillFormulaVersionId && fieldCode) {
+      pendingPrefill = {
+        formulaVersionId: parseInt(prefillFormulaVersionId, 10),
+        fieldCode: fieldCode
+      };
+    } else if (fieldCode) {
+      pendingPrefill = { fieldCode: fieldCode };
+    }
+
+    // Clean URL before navigating into the builder
+    window.history.replaceState({}, "", window.location.pathname);
+    editFormLayout(parseInt(formId, 10), parseInt(versionId, 10));
+  }
 
   // Run initial setup
   init();
