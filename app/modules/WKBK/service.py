@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 
 from app.database import db
-from app.modules.WKBK.model import Workbook, WorkbookForm
+from app.modules.WKBK.model import Workbook, WorkbookForm, WorkbookSite, WorkbookSiteSubmitter
 from app.modules.FORMBLD.model import Form, FormVersion, FormSection, FieldVersion
+from app.modules.SITEMST.model import Site
+from app.modules.USRMGMT.model import User
+from app.modules.ACCESS.model import AccessMatrix
 
 
 def _form_stats(form_id):
@@ -179,3 +182,131 @@ def get_addable_forms(workbook_id):
             "latest_version_status": latest.status if latest else None,
         })
     return result
+
+
+def get_workbook_sites(workbook_id):
+    rows = (
+        WorkbookSite.query.filter_by(workbook_id=workbook_id)
+        .order_by(WorkbookSite.created_at.asc())
+        .all()
+    )
+    result = []
+    for row in rows:
+        site = Site.query.filter_by(id=row.site_id, is_deleted=False).first()
+        if site:
+            result.append({"id": site.id, "name": site.name, "code": site.code})
+    return result
+
+
+def get_assignable_sites(workbook_id):
+    assigned_ids = {row.site_id for row in WorkbookSite.query.filter_by(workbook_id=workbook_id).all()}
+    sites = Site.query.filter_by(is_deleted=False).order_by(Site.name.asc()).all()
+    return [{"id": s.id, "name": s.name, "code": s.code} for s in sites if s.id not in assigned_ids]
+
+
+def add_site_to_workbook(workbook_id, site_id, created_by):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        raise ValueError("Workbook not found.")
+    site = Site.query.filter_by(id=site_id, is_deleted=False).first()
+    if not site:
+        raise ValueError("Site not found.")
+    existing = WorkbookSite.query.filter_by(workbook_id=workbook_id, site_id=site_id).first()
+    if existing:
+        raise ValueError("This site is already assigned to this workbook.")
+    row = WorkbookSite(workbook_id=workbook_id, site_id=site_id, created_by=created_by)
+    db.session.add(row)
+    db.session.flush()
+    return row
+
+
+def remove_site_from_workbook(workbook_id, site_id):
+    row = WorkbookSite.query.filter_by(workbook_id=workbook_id, site_id=site_id).first()
+    if not row:
+        raise ValueError("Site is not assigned to this workbook.")
+    WorkbookSiteSubmitter.query.filter_by(workbook_id=workbook_id, site_id=site_id).delete()
+    db.session.delete(row)
+    db.session.flush()
+
+
+def get_site_submitters(workbook_id, site_id):
+    rows = (
+        WorkbookSiteSubmitter.query
+        .filter_by(workbook_id=workbook_id, site_id=site_id)
+        .order_by(WorkbookSiteSubmitter.created_at.asc())
+        .all()
+    )
+    result = []
+    for row in rows:
+        user = User.query.filter_by(id=row.user_id, is_deleted=False, is_active=True).first()
+        if user:
+            result.append({"id": user.id, "full_name": user.full_name, "email": user.email})
+    return result
+
+
+def get_eligible_submitters(workbook_id, site_id):
+    already_assigned = {
+        row.user_id
+        for row in WorkbookSiteSubmitter.query.filter_by(
+            workbook_id=workbook_id, site_id=site_id
+        ).all()
+    }
+    rows = AccessMatrix.query.filter(
+        AccessMatrix.entity_type == "submission",
+        AccessMatrix.can_submit == True,
+        AccessMatrix.is_deleted == False,
+        db.or_(
+            db.and_(
+                AccessMatrix.scope_type == "site",
+                AccessMatrix.scope_site_id == site_id,
+            ),
+            AccessMatrix.scope_type == "global",
+        ),
+    ).all()
+    seen = set()
+    result = []
+    for row in rows:
+        if row.user_id in already_assigned or row.user_id in seen:
+            continue
+        seen.add(row.user_id)
+        user = User.query.filter_by(id=row.user_id, is_deleted=False, is_active=True).first()
+        if user:
+            result.append({"id": user.id, "full_name": user.full_name, "email": user.email})
+    result.sort(key=lambda u: u["full_name"].lower())
+    return result
+
+
+def add_site_submitter(workbook_id, site_id, user_id, created_by):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        raise ValueError("Workbook not found.")
+    site = Site.query.filter_by(id=site_id, is_deleted=False).first()
+    if not site:
+        raise ValueError("Site not found.")
+    ws = WorkbookSite.query.filter_by(workbook_id=workbook_id, site_id=site_id).first()
+    if not ws:
+        raise ValueError("Site is not assigned to this workbook.")
+    user = User.query.filter_by(id=user_id, is_deleted=False, is_active=True).first()
+    if not user:
+        raise ValueError("User not found or inactive.")
+    existing = WorkbookSiteSubmitter.query.filter_by(
+        workbook_id=workbook_id, site_id=site_id, user_id=user_id
+    ).first()
+    if existing:
+        raise ValueError("User is already a submitter for this site.")
+    row = WorkbookSiteSubmitter(
+        workbook_id=workbook_id, site_id=site_id, user_id=user_id, created_by=created_by,
+    )
+    db.session.add(row)
+    db.session.flush()
+    return row
+
+
+def remove_site_submitter(workbook_id, site_id, user_id):
+    row = WorkbookSiteSubmitter.query.filter_by(
+        workbook_id=workbook_id, site_id=site_id, user_id=user_id
+    ).first()
+    if not row:
+        raise ValueError("Submitter assignment not found.")
+    db.session.delete(row)
+    db.session.flush()

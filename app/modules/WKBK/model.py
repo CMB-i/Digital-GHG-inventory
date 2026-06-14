@@ -56,3 +56,45 @@ class WorkbookForm(db.Model):
         db.UniqueConstraint("workbook_id", "form_id", name="uq_workbook_form"),
         db.Index("idx_workbook_forms_workbook", "workbook_id", "display_order"),
     )
+
+
+class WorkbookSite(db.Model):
+    __tablename__ = "workbook_sites"
+
+    id = db.Column(db.Integer, primary_key=True)
+    workbook_id = db.Column(db.Integer, db.ForeignKey("workbooks.id"), nullable=False)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id"), nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint("workbook_id", "site_id", name="uq_workbook_site"),
+        db.Index("idx_workbook_sites_workbook", "workbook_id"),
+    )
+
+
+class WorkbookSiteSubmitter(db.Model):
+    __tablename__ = "workbook_site_submitters"
+
+    id = db.Column(db.Integer, primary_key=True)
+    workbook_id = db.Column(db.Integer, db.ForeignKey("workbooks.id"), nullable=False)
+    site_id = db.Column(db.Integer, db.ForeignKey("sites.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "workbook_id", "site_id", "user_id",
+            name="uq_workbook_site_submitter",
+        ),
+        db.Index("idx_wss_workbook_site", "workbook_id", "site_id"),
+    )

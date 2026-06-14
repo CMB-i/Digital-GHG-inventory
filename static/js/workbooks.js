@@ -181,6 +181,8 @@ document.addEventListener("DOMContentLoaded", function () {
   if (sheetsGrid && typeof WORKBOOK_ID !== "undefined") {
     let activeTab = "sheets";
     let approvalTabLoaded = false;
+    let sitesTabLoaded = false;
+    let activeSiteIdForSubmitters = null;
     let currentWorkflowAssignment = null;
 
     const tabSheets = document.getElementById("tab-sheets");
@@ -195,36 +197,35 @@ document.addEventListener("DOMContentLoaded", function () {
     const btnCancelAssignPath = document.getElementById("btn-cancel-assign-path");
     const btnConfirmAssignPath = document.getElementById("btn-confirm-assign-path");
     const btnRemoveAssignedPath = document.getElementById("btn-remove-assigned-path");
+    const tabSites = document.getElementById("tab-sites");
+    const panelSites = document.getElementById("tab-panel-sites");
+    const addSiteModal = document.getElementById("modal-add-site");
+    const addSiteList = document.getElementById("add-site-list");
+    const btnCloseAddSite = document.getElementById("btn-close-add-site");
+    const btnCloseAddSiteFooter = document.getElementById("btn-close-add-site-footer");
 
     loadSheets();
 
+    const TAB_ACTIVE   = "workbook-detail-tab border-b-2 border-indigo-600 px-1 pb-3 text-xs font-bold uppercase tracking-wider text-indigo-700";
+    const TAB_INACTIVE = "workbook-detail-tab border-b-2 border-transparent px-1 pb-3 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700";
+
     function setWorkbookTab(nextTab) {
       activeTab = nextTab;
-      const isSheets = activeTab === "sheets";
-
-      if (panelSheets) panelSheets.classList.toggle("hidden", !isSheets);
-      if (panelApprovalPath) panelApprovalPath.classList.toggle("hidden", isSheets);
-      if (btnAddSheet) btnAddSheet.classList.toggle("hidden", !isSheets);
+      if (panelSheets) panelSheets.classList.toggle("hidden", activeTab !== "sheets");
+      if (panelSites) panelSites.classList.toggle("hidden", activeTab !== "sites");
+      if (panelApprovalPath) panelApprovalPath.classList.toggle("hidden", activeTab !== "approval");
+      if (btnAddSheet) btnAddSheet.classList.toggle("hidden", activeTab !== "sheets");
       const btnPreviewWorkbook = document.getElementById("btn-preview-workbook");
-      if (btnPreviewWorkbook) btnPreviewWorkbook.classList.toggle("hidden", !isSheets);
-
-      if (tabSheets) {
-        tabSheets.className = isSheets
-          ? "workbook-detail-tab border-b-2 border-indigo-600 px-1 pb-3 text-xs font-bold uppercase tracking-wider text-indigo-700"
-          : "workbook-detail-tab border-b-2 border-transparent px-1 pb-3 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700";
-      }
-      if (tabApprovalPath) {
-        tabApprovalPath.className = !isSheets
-          ? "workbook-detail-tab border-b-2 border-indigo-600 px-1 pb-3 text-xs font-bold uppercase tracking-wider text-indigo-700"
-          : "workbook-detail-tab border-b-2 border-transparent px-1 pb-3 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700";
-      }
-
-      if (!isSheets && !approvalTabLoaded) {
-        loadApprovalTab();
-      }
+      if (btnPreviewWorkbook) btnPreviewWorkbook.classList.toggle("hidden", activeTab !== "sheets");
+      if (tabSheets) tabSheets.className = activeTab === "sheets" ? TAB_ACTIVE : TAB_INACTIVE;
+      if (tabSites) tabSites.className = activeTab === "sites" ? TAB_ACTIVE : TAB_INACTIVE;
+      if (tabApprovalPath) tabApprovalPath.className = activeTab === "approval" ? TAB_ACTIVE : TAB_INACTIVE;
+      if (activeTab === "approval" && !approvalTabLoaded) loadApprovalTab();
+      if (activeTab === "sites" && !sitesTabLoaded) loadSitesTab();
     }
 
     if (tabSheets) tabSheets.onclick = () => setWorkbookTab("sheets");
+    if (tabSites) tabSites.onclick = () => setWorkbookTab("sites");
     if (tabApprovalPath) tabApprovalPath.onclick = () => setWorkbookTab("approval");
 
     // ── Workbook Preview modal ────────────────────────────────────────────
@@ -851,5 +852,293 @@ document.addEventListener("DOMContentLoaded", function () {
     if (btnCancelAssignPath) btnCancelAssignPath.onclick = closeAssignPathModal;
     if (btnConfirmAssignPath) btnConfirmAssignPath.onclick = assignSelectedPath;
     if (btnRemoveAssignedPath) btnRemoveAssignedPath.onclick = clearAssignedPath;
+
+    // ── Sites tab ─────────────────────────────────────────────────────────────
+
+    async function loadSitesTab() {
+      sitesTabLoaded = true;
+      const content = document.getElementById("sites-tab-content");
+      if (!content) return;
+      content.innerHTML = `
+        <div class="rounded-xl border border-slate-200 bg-white p-6 text-center text-sm italic text-slate-400 shadow-sm">
+          Loading sites…
+        </div>
+      `;
+      try {
+        const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/sites`);
+        const sites = await r.json();
+        await renderSitesTab(sites);
+      } catch {
+        content.innerHTML = `
+          <div class="rounded-xl border border-rose-200 bg-rose-50 p-6 text-sm font-semibold text-rose-700 shadow-sm">
+            Failed to load sites.
+          </div>
+        `;
+      }
+    }
+
+    async function renderSitesTab(sites) {
+      const content = document.getElementById("sites-tab-content");
+      if (!content) return;
+
+      if (!sites.length) {
+        content.innerHTML = `
+          <div class="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
+            <p class="text-sm font-semibold text-slate-700">No sites assigned yet.</p>
+            <p class="mt-2 text-xs text-slate-400">Assign a site to this workbook to configure submitters.</p>
+            <button class="mt-5 inline-flex items-center rounded-lg bg-[#1a3a6b] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1e4280]"
+              id="btn-add-site-empty">+ Add Site</button>
+          </div>
+        `;
+        document.getElementById("btn-add-site-empty").onclick = openAddSiteModal;
+        return;
+      }
+
+      const submitterResults = await Promise.all(
+        sites.map(site =>
+          fetch(`/workbooks/api/${WORKBOOK_ID}/sites/${site.id}/submitters`)
+            .then(r => r.json())
+            .catch(() => [])
+        )
+      );
+
+      content.innerHTML = `
+        <div class="mb-4 flex items-center justify-between">
+          <h2 class="text-sm font-bold text-slate-600">Sites assigned to this workbook</h2>
+          <button id="btn-add-site-header"
+            class="inline-flex items-center rounded-lg bg-[#1a3a6b] px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-[#1e4280]">
+            + Add Site
+          </button>
+        </div>
+        <div id="sites-cards-grid" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"></div>
+      `;
+      document.getElementById("btn-add-site-header").onclick = openAddSiteModal;
+
+      const grid = document.getElementById("sites-cards-grid");
+      sites.forEach((site, i) => {
+        const submitters = submitterResults[i] || [];
+        const card = document.createElement("div");
+        card.className = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
+
+        const submitterRows = submitters.map(u => `
+          <div class="flex items-center justify-between text-xs py-1">
+            <span class="text-slate-700 font-medium">${esc(u.full_name)} · ${esc(u.email)}</span>
+            <button class="text-rose-600 hover:underline text-xs font-semibold"
+              onclick="removeSubmitter(${site.id}, ${u.id})">remove</button>
+          </div>
+        `).join("");
+
+        card.innerHTML = `
+          <div class="flex items-start justify-between mb-1">
+            <div>
+              <div class="font-bold text-slate-800 text-sm">${esc(site.name)}</div>
+              <div class="text-[10px] font-mono text-slate-400">${esc(site.code)}</div>
+            </div>
+            <button class="remove-site-btn text-slate-300 hover:text-rose-500 text-lg font-bold leading-none"
+              data-site-id="${site.id}" title="Remove site">×</button>
+          </div>
+          <hr class="my-3 border-slate-100">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Submitters</span>
+            <button class="text-xs font-semibold text-[#1a3a6b] hover:underline"
+              onclick="openAddSubmitterModal(${site.id}, ${JSON.stringify(site.name).replace(/"/g, '&quot;')})">+ Add</button>
+          </div>
+          <div class="space-y-0">
+            ${submitters.length ? submitterRows : '<p class="text-xs italic text-slate-400">No submitters assigned yet.</p>'}
+          </div>
+        `;
+
+        card.querySelector(".remove-site-btn").onclick = () => removeSiteFromWorkbook(site.id);
+        grid.appendChild(card);
+      });
+    }
+
+    async function removeSiteFromWorkbook(siteId) {
+      if (!confirm("Remove this site from the workbook? All submitter assignments for this site will also be removed.")) return;
+      try {
+        const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/sites/${siteId}`, { method: "DELETE" });
+        const data = await r.json();
+        if (!r.ok) { toast(data.error || "Failed to remove site.", "error"); return; }
+        toast("Site removed.", "warn");
+        sitesTabLoaded = false;
+        loadSitesTab();
+      } catch {
+        toast("Failed to remove site.", "error");
+      }
+    }
+
+    function openAddSiteModal() {
+      if (!addSiteModal) return;
+      addSiteModal.classList.remove("hidden");
+      addSiteModal.classList.add("flex");
+      loadAssignableSites();
+    }
+
+    async function loadAssignableSites() {
+      if (!addSiteList) return;
+      addSiteList.innerHTML = '<p class="text-xs text-slate-400 italic text-center py-6">Loading sites…</p>';
+      try {
+        const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/assignable-sites`);
+        const sites = await r.json();
+        if (!sites.length) {
+          addSiteList.innerHTML = '<p class="text-xs text-slate-400 italic text-center py-6">All sites are already assigned.</p>';
+          return;
+        }
+        addSiteList.innerHTML = "";
+        sites.forEach(site => {
+          const btn = document.createElement("button");
+          btn.className = "w-full text-left px-4 py-3 rounded-lg hover:bg-indigo-50 border border-transparent hover:border-indigo-200 transition-colors";
+          btn.innerHTML = `
+            <div class="font-semibold text-sm text-slate-800">${esc(site.name)}</div>
+            <div class="text-[10px] font-mono text-slate-400">${esc(site.code)}</div>
+          `;
+          btn.onclick = () => assignSite(site.id, btn);
+          addSiteList.appendChild(btn);
+        });
+      } catch {
+        addSiteList.innerHTML = '<p class="text-xs text-rose-600 text-center py-6">Failed to load sites.</p>';
+      }
+    }
+
+    async function assignSite(siteId, btn) {
+      btn.disabled = true;
+      btn.classList.add("opacity-50");
+      try {
+        const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/sites`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ site_id: siteId }),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          toast(data.error || "Failed to add site.", "error");
+          btn.disabled = false;
+          btn.classList.remove("opacity-50");
+          return;
+        }
+        toast("Site added.");
+        sitesTabLoaded = false;
+        closeAddSiteModal();
+        loadSitesTab();
+      } catch {
+        toast("Failed to add site.", "error");
+        btn.disabled = false;
+        btn.classList.remove("opacity-50");
+      }
+    }
+
+    function closeAddSiteModal() {
+      if (!addSiteModal) return;
+      addSiteModal.classList.add("hidden");
+      addSiteModal.classList.remove("flex");
+    }
+
+    if (btnCloseAddSite) btnCloseAddSite.onclick = closeAddSiteModal;
+    if (btnCloseAddSiteFooter) btnCloseAddSiteFooter.onclick = closeAddSiteModal;
+
+    // ── Submitters ────────────────────────────────────────────────────────────
+
+    function openAddSubmitterModal(siteId, siteName) {
+      activeSiteIdForSubmitters = siteId;
+      const titleEl = document.getElementById("add-submitter-modal-title");
+      if (titleEl) titleEl.textContent = `Add Submitter — ${siteName}`;
+      const modal = document.getElementById("modal-add-submitter");
+      if (!modal) return;
+      modal.classList.remove("hidden");
+      modal.classList.add("flex");
+      loadEligibleSubmitters(siteId);
+    }
+
+    async function loadEligibleSubmitters(siteId) {
+      const list = document.getElementById("eligible-submitters-list");
+      if (!list) return;
+      list.innerHTML = '<p class="text-xs italic text-slate-400 text-center py-4">Loading…</p>';
+      try {
+        const res = await fetch(`/workbooks/api/${WORKBOOK_ID}/sites/${siteId}/eligible-submitters`);
+        const users = await res.json();
+        if (!users.length) {
+          list.innerHTML = '<p class="text-xs italic text-slate-400 text-center py-4">All eligible submitters are already assigned, or no users have submission permission for this site.</p>';
+          return;
+        }
+        list.innerHTML = "";
+        users.forEach(user => {
+          const row = document.createElement("div");
+          row.className = "flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm";
+          row.innerHTML = `
+            <div>
+              <div class="font-semibold text-slate-800">${esc(user.full_name)}</div>
+              <div class="text-xs text-slate-400">${esc(user.email)}</div>
+            </div>
+            <button
+              class="rounded-lg bg-[#1a3a6b] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1e4280]"
+              onclick="addSubmitter(${siteId}, ${user.id}, this)">
+              Add
+            </button>
+          `;
+          list.appendChild(row);
+        });
+      } catch {
+        list.innerHTML = '<p class="text-xs text-rose-600 text-center py-4">Failed to load eligible submitters.</p>';
+      }
+    }
+
+    async function addSubmitter(siteId, userId, buttonEl) {
+      buttonEl.disabled = true;
+      buttonEl.textContent = "Adding…";
+      try {
+        const res = await fetch(`/workbooks/api/${WORKBOOK_ID}/sites/${siteId}/submitters`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: userId }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          toast(data.error || "Failed to add submitter.", "error");
+          buttonEl.disabled = false;
+          buttonEl.textContent = "Add";
+          return;
+        }
+        buttonEl.closest("div.flex").remove();
+        toast("Submitter added.");
+        sitesTabLoaded = false;
+        loadSitesTab();
+      } catch {
+        toast("Failed to add submitter.", "error");
+        buttonEl.disabled = false;
+        buttonEl.textContent = "Add";
+      }
+    }
+
+    async function removeSubmitter(siteId, userId) {
+      if (!confirm("Remove this submitter?")) return;
+      try {
+        const res = await fetch(`/workbooks/api/${WORKBOOK_ID}/sites/${siteId}/submitters/${userId}`, { method: "DELETE" });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || "Failed to remove submitter.", "error"); return; }
+        toast("Submitter removed.");
+        sitesTabLoaded = false;
+        loadSitesTab();
+      } catch {
+        toast("Failed to remove submitter.", "error");
+      }
+    }
+
+    const btnCloseAddSubmitter = document.getElementById("btn-close-add-submitter");
+    const btnCancelAddSubmitter = document.getElementById("btn-cancel-add-submitter");
+
+    function closeAddSubmitterModal() {
+      const modal = document.getElementById("modal-add-submitter");
+      if (!modal) return;
+      modal.classList.add("hidden");
+      modal.classList.remove("flex");
+      activeSiteIdForSubmitters = null;
+    }
+
+    if (btnCloseAddSubmitter) btnCloseAddSubmitter.addEventListener("click", closeAddSubmitterModal);
+    if (btnCancelAddSubmitter) btnCancelAddSubmitter.addEventListener("click", closeAddSubmitterModal);
+
+    window.openAddSubmitterModal = openAddSubmitterModal;
+    window.addSubmitter = addSubmitter;
+    window.removeSubmitter = removeSubmitter;
   }
 });

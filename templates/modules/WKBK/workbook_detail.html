@@ -49,6 +49,10 @@
         class="workbook-detail-tab border-b-2 border-indigo-600 px-1 pb-3 text-xs font-bold uppercase tracking-wider text-indigo-700">
         Sheets
       </button>
+      <button id="tab-sites" type="button"
+        class="workbook-detail-tab border-b-2 border-transparent px-1 pb-3 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700">
+        Sites
+      </button>
       <button id="tab-approval-path" type="button"
         class="workbook-detail-tab border-b-2 border-transparent px-1 pb-3 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700">
         Approval Path
@@ -62,6 +66,15 @@
     <div id="sheets-grid" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       <div class="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-400 shadow-sm">
         Loading sheets…
+      </div>
+    </div>
+  </div>
+
+  <!-- Sites tab -->
+  <div id="tab-panel-sites" class="hidden">
+    <div id="sites-tab-content">
+      <div class="rounded-xl border border-slate-200 bg-white p-6 text-center text-sm italic text-slate-400 shadow-sm">
+        Loading sites…
       </div>
     </div>
   </div>
@@ -145,6 +158,54 @@
       <button id="btn-confirm-assign-path" type="button"
         class="rounded-lg bg-[#1a3a6b] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#1e4280]">
         Assign Path
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Site Modal -->
+<div id="modal-add-site" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+  <div class="w-full max-w-lg rounded-xl bg-white shadow-2xl">
+    <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+      <div>
+        <h3 class="text-base font-bold text-slate-800">Add Site</h3>
+        <p class="mt-1 text-xs text-slate-500">Choose a site to assign to this workbook format.</p>
+      </div>
+      <button id="btn-close-add-site" type="button"
+        class="text-2xl font-bold leading-none text-[#1a3a6b] hover:text-slate-500">×</button>
+    </div>
+    <div id="add-site-list" class="max-h-80 overflow-y-auto px-4 py-3 space-y-1">
+      <p class="text-xs text-slate-400 italic text-center py-6">Loading sites…</p>
+    </div>
+    <div class="flex items-center justify-end border-t border-slate-100 bg-slate-50 px-6 py-4">
+      <button id="btn-close-add-site-footer" type="button"
+        class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+        Close
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Submitter Modal -->
+<div id="modal-add-submitter" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+  <div class="w-full max-w-lg rounded-xl bg-white shadow-2xl">
+    <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+      <div>
+        <h3 class="text-base font-bold text-slate-800" id="add-submitter-modal-title">Add Submitter</h3>
+        <p class="mt-1 text-xs text-slate-500">Choose a user to assign as a submitter for this site.</p>
+      </div>
+      <button id="btn-close-add-submitter" type="button"
+        class="text-2xl font-bold leading-none text-[#1a3a6b] hover:text-slate-500">×</button>
+    </div>
+    <div class="px-6 py-4">
+      <div id="eligible-submitters-list" class="space-y-2 max-h-72 overflow-y-auto">
+        <p class="text-xs italic text-slate-400 text-center py-4">Loading…</p>
+      </div>
+    </div>
+    <div class="flex justify-end border-t border-slate-100 bg-slate-50 px-6 py-4">
+      <button id="btn-cancel-add-submitter" type="button"
+        class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+        Close
       </button>
     </div>
   </div>
