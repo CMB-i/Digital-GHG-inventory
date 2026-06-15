@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request
+from flask import Blueprint, redirect, render_template, request
 
 from app.common.decorators import require_permission
 from app.database import db
@@ -11,6 +11,8 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 @bp.route("/")
 @require_permission("form", "manage_forms")
 def index():
+    if not request.args:
+        return redirect("/workbooks/")
     return render_template("modules/FORMBLD/form_builder.html", module_code=MODULE_CODE)
 
 
@@ -127,7 +129,7 @@ def create():
         except Exception:
             db.session.rollback()
             return error_response(
-                "Form was created but could not be attached "
+                "Sheet was created but could not be attached "
                 "to the workbook. Please add it manually.", 500
             )
 
@@ -394,7 +396,7 @@ def create_new_version(form_id):
         db.session.commit()
         return success_response(
             data={"version_id": new_version.id, "version_number": new_version.version_number},
-            message="New draft version created."
+            message="Draft version ready."
         )
     except ValueError as e:
         return error_response(str(e), 400)

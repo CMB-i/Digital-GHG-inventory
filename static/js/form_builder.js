@@ -9,12 +9,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
   let selectedFormId = null;
   let selectedVersionId = null;
+  let currentVersionStatus = null;
   let selectedFieldCode = null;
   let activeSectionCode = "";
   let isUnsaved = false;
   let pendingPrefill = null;
   let workspaceMode = "fields";
   let isWorkbookContext = false;
+  let builderIsEditable = true;
 
   // View containers
   const listView = document.getElementById("list-view");
@@ -31,6 +33,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const saveStatusText = document.getElementById("save-status-text");
   const btnSaveLayout = document.getElementById("btn-save-layout");
   const btnPublishForm = document.getElementById("btn-publish-form");
+  const btnEditAsDraft = document.getElementById("btn-edit-as-draft");
   const publishErrors = document.getElementById("publish-errors");
   const publishErrorsList = document.getElementById("publish-errors-list");
   const btnAddSection = document.getElementById("btn-add-section");
@@ -654,7 +657,7 @@ document.addEventListener("DOMContentLoaded", function () {
       builderFormTitle.textContent = form.display_name || form.name;
     }
 
-    loadVersionDetails(versionId);
+    return loadVersionDetails(versionId);
   };
 
   window.editWorkbookCard = function (formId, versionId, status) {
@@ -911,10 +914,11 @@ document.addEventListener("DOMContentLoaded", function () {
     closeInspector();
     publishErrors.classList.add("hidden");
 
-    fetch(`/module/FORMBLD/api/version/${versionId}`)
+    return fetch(`/module/FORMBLD/api/version/${versionId}`)
       .then(res => res.json())
       .then(data => {
         selectedVersionId = data.version.id;
+        currentVersionStatus = data.version.status;
         currentFields = data.fields || [];
         currentSections = data.sections || [];
         availableValueSets = data.available_value_sets || [];
@@ -926,7 +930,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
         // Set status badge and name
         builderFormTitle.textContent = data.form.display_name || data.form.name;
-        builderVersionBadge.textContent = `v${data.version.version_number} (${data.version.status})`;
+        builderVersionBadge.textContent = `V${data.version.version_number} ${data.version.status}`;
 
         let badgeClass = "bg-amber-100 text-amber-800";
         if (data.version.status === "Published") badgeClass = "bg-emerald-100 text-emerald-800";
@@ -946,14 +950,8 @@ document.addEventListener("DOMContentLoaded", function () {
         // Save status styling
         updateSaveStatusText();
 
-        // Setup actions depending on status
-        if (data.version.status !== "Draft") {
-          btnSaveLayout.classList.add("hidden");
-          btnPublishForm.classList.add("hidden");
-        } else {
-          btnSaveLayout.classList.remove("hidden");
-          btnPublishForm.classList.remove("hidden");
-        }
+        // Setup actions and editability depending on status
+        updateVersionActions();
 
         // Resolve any pending prefill from return-URL navigation
         if (pendingPrefill) {
@@ -972,7 +970,7 @@ document.addEventListener("DOMContentLoaded", function () {
               if (msg) {
                 const formulaEntry = availableFormulas.find(f => f.current_version_id === pending.formulaVersionId);
                 const formulaName = formulaEntry ? formulaEntry.name : "Formula";
-                msg.textContent = `${formulaName} linked. Click Apply Changes to save.`;
+                msg.textContent = `${formulaName} linked. Save Draft to persist this change.`;
                 msg.classList.remove("hidden");
               }
             }
@@ -1037,6 +1035,10 @@ document.addEventListener("DOMContentLoaded", function () {
     if (sortedSections.length === 0) {
       sectionsList.innerHTML = `${allRow}<p class="px-1 pt-1 text-[10px] text-slate-400 italic">No sections configured yet.</p>`;
       populateSectionDropdown();
+      if (!builderIsEditable) {
+        sectionsList.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = true; });
+        sectionsList.querySelectorAll(".section-move-up, .section-move-down, .section-delete").forEach(btn => { btn.disabled = true; });
+      }
       return;
     }
 
@@ -1085,6 +1087,10 @@ document.addEventListener("DOMContentLoaded", function () {
       })
       .join("");
     populateSectionDropdown();
+    if (!builderIsEditable) {
+      sectionsList.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = true; });
+      sectionsList.querySelectorAll(".section-move-up, .section-move-down, .section-delete").forEach(btn => { btn.disabled = true; });
+    }
   }
 
   function syncSectionsFromDom() {
@@ -1357,15 +1363,16 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
-  // Apply Changes from properties form
-  formFieldProperties.onsubmit = function (e) {
-    e.preventDefault();
-    if (!selectedFieldCode) return;
+  function applySelectedFieldChanges(options = {}) {
+    const render = options.render !== false;
+    const notify = options.notify === true;
+    if (!selectedFieldCode) return true;
 
     const fieldIdx = currentFields.findIndex(x => x.field_code === selectedFieldCode);
-    if (fieldIdx === -1) return;
+    if (fieldIdx === -1) return true;
 
     const field = currentFields[fieldIdx];
+    field.field_config = field.field_config || {};
     const previousSectionCode = field.section_code || "";
     const newCode = document.getElementById("prop-code").value.trim().toLowerCase().replace(/\s+/g, "_");
 
@@ -1373,7 +1380,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const dup = currentFields.find((x, idx) => x.field_code === newCode && idx !== fieldIdx);
     if (dup) {
       showToast(`Field code '${newCode}' is already used.`, "error");
-      return;
+      return false;
     }
 
     field.field_code = newCode;
@@ -1444,10 +1451,29 @@ document.addEventListener("DOMContentLoaded", function () {
     isUnsaved = true;
     normalizeFieldDisplayOrder();
     updateSaveStatusText();
-    renderSections();
-    renderWorkspace();
-    showToast("Field updated in workspace.");
+    if (render) {
+      renderSections();
+      renderWorkspace();
+      openInspector(newCode);
+    }
+    if (notify) {
+      showToast("Field updated in workspace.");
+    }
+    return true;
+  }
+
+  // Apply Changes from properties form
+  formFieldProperties.onsubmit = function (e) {
+    e.preventDefault();
+    applySelectedFieldChanges({ notify: true });
   };
+
+  formFieldProperties.addEventListener("input", function () {
+    applySelectedFieldChanges({ render: false });
+  });
+  formFieldProperties.addEventListener("change", function () {
+    applySelectedFieldChanges({ render: true });
+  });
 
   // Palette item clicks
   document.querySelectorAll(".palette-btn").forEach(btn => {
@@ -1654,37 +1680,93 @@ document.addEventListener("DOMContentLoaded", function () {
     };
   }
 
-  // Save Layout Draft
-  btnSaveLayout.onclick = function () {
+  function ensureEditableDraftIfNeeded() {
+    if (currentVersionStatus === "Draft") {
+      return Promise.resolve();
+    }
+    if (!selectedFormId) {
+      return Promise.reject(new Error("No sheet selected."));
+    }
+    return ensureDraftVersion(selectedFormId, true);
+  }
+
+  function updateVersionActions() {
+    const isDraft = currentVersionStatus === "Draft";
+    if (isDraft) {
+      if (btnEditAsDraft) btnEditAsDraft.classList.add("hidden");
+      btnSaveLayout.classList.remove("hidden");
+      btnPublishForm.classList.remove("hidden");
+    } else {
+      if (btnEditAsDraft) btnEditAsDraft.classList.remove("hidden");
+      btnSaveLayout.classList.add("hidden");
+      btnPublishForm.classList.add("hidden");
+    }
+    setBuilderEditable(isDraft);
+  }
+
+  function setBuilderEditable(isEditable) {
+    builderIsEditable = isEditable;
+    Array.from(formFieldProperties.elements).forEach(el => { el.disabled = !isEditable; });
+    document.querySelectorAll(".palette-btn").forEach(btn => { btn.disabled = !isEditable; });
+    if (btnDeleteField) btnDeleteField.disabled = !isEditable;
+    if (btnMoveUp) btnMoveUp.disabled = !isEditable;
+    if (btnMoveDown) btnMoveDown.disabled = !isEditable;
+    if (btnAddSection) btnAddSection.disabled = !isEditable;
+    if (sectionsList) {
+      sectionsList.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = !isEditable; });
+      sectionsList.querySelectorAll(".section-move-up, .section-move-down, .section-delete").forEach(btn => { btn.disabled = !isEditable; });
+    }
+  }
+
+  if (btnEditAsDraft) {
+    btnEditAsDraft.onclick = function () {
+      ensureEditableDraftIfNeeded().catch(() => {});
+    };
+  }
+
+  function saveDraftLayout() {
     if (!selectedVersionId) return;
+    if (!applySelectedFieldChanges({ render: false })) {
+      return Promise.reject(new Error("Resolve the field inspector errors before saving."));
+    }
     syncSectionsFromDom();
     normalizeSectionDisplayOrder();
     normalizeFieldDisplayOrder();
 
-    fetch(`/module/FORMBLD/api/version/${selectedVersionId}/fields`, {
+    return ensureEditableDraftIfNeeded().then(() => fetch(`/module/FORMBLD/api/version/${selectedVersionId}/fields`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fields: currentFields, sections: currentSections })
-    })
+    }))
       .then(res => res.json())
       .then(resData => {
         if (resData.error) {
           showToast(resData.error, "error");
+          throw new Error(resData.error);
         } else {
-          showToast("Form fields draft saved successfully.");
+          showToast("Sheet draft saved successfully.");
           isUnsaved = false;
-          loadVersionDetails(selectedVersionId);
+          return loadVersionDetails(selectedVersionId);
         }
       })
       .catch(err => {
         console.error("Error saving form fields:", err);
         showToast("Failed to save draft.", "error");
+        throw err;
       });
+  }
+
+  // Save Layout Draft
+  btnSaveLayout.onclick = function () {
+    saveDraftLayout().catch(() => {});
   };
 
   // Publish validation & submit
   btnPublishForm.onclick = function () {
     if (!selectedVersionId) return;
+    if (!applySelectedFieldChanges({ render: false })) {
+      return;
+    }
 
     const noun = isWorkbookContext ? "sheet" : "form";
 
@@ -1722,15 +1804,17 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
 
-    // Call publish API
-    fetch(`/module/FORMBLD/api/version/${selectedVersionId}/publish`, {
+    saveDraftLayout().then(() => fetch(`/module/FORMBLD/api/version/${selectedVersionId}/publish`, {
       method: "POST"
-    })
+    }))
       .then(res => res.json())
       .then(resData => {
         if (resData.error) {
+          const friendly = resData.error === "Only Draft versions can be published."
+            ? "This published sheet needs a draft version before changes can be published. A draft has been created for your edits."
+            : resData.error;
           // Server-side error → show in error panel, not just toast
-          publishErrorsList.innerHTML = `<li>${escapeHtml(resData.error)}</li>`;
+          publishErrorsList.innerHTML = `<li>${escapeHtml(friendly)}</li>`;
           publishErrors.classList.remove("hidden");
           showToast(`Publish blocked — see errors above.`, "error");
         } else {
@@ -1746,32 +1830,39 @@ document.addEventListener("DOMContentLoaded", function () {
       });
   };
 
-  // Create new version draft for published form
-  window.createNewDraft = function (formId) {
-    if (!confirm("Edit this published sheet? A draft will be prepared so the published version stays unchanged.")) return;
-
-    fetch(`/module/FORMBLD/api/${formId}/new-version`, {
+  function ensureDraftVersion(formId, showReadyToast = true) {
+    return fetch(`/module/FORMBLD/api/${formId}/new-version`, {
       method: "POST"
     })
       .then(res => res.json())
       .then(resData => {
         if (resData.error) {
           showToast(resData.error, "error");
+          throw new Error(resData.error);
         } else {
-          showToast("Workbook ready to edit.");
-          // Refresh list and open layout for editing
-          fetch("/module/FORMBLD/api")
+          if (showReadyToast) {
+            showToast("Draft version ready for editing.");
+          }
+          return fetch("/module/FORMBLD/api")
             .then(res => res.json())
             .then(data => {
               formsList = data;
-              editFormLayout(formId, resData.data.version_id);
+              return editFormLayout(formId, resData.data.version_id)
+                .then(() => resData.data);
             });
         }
       })
       .catch(err => {
         console.error("Error creating new draft version:", err);
         showToast("Failed to create draft version.", "error");
+        throw err;
       });
+  }
+
+  // Create new version draft for published form
+  window.createNewDraft = function (formId) {
+    if (!confirm("Edit this published sheet? A draft will be prepared so the published version stays unchanged.")) return;
+    ensureDraftVersion(formId);
   };
 
   // --- SPOC Preview Overlay Modal ---
@@ -1868,8 +1959,6 @@ document.addEventListener("DOMContentLoaded", function () {
     const formId = params.get("form_id");
     const versionId = params.get("version_id");
     const workbookId = params.get("workbook_id");
-    const workbookName = params.get("workbook_name");
-    const sheetLabel = params.get("sheet_label");
 
     const formsBackBtn    = document.getElementById("btn-builder-forms-back");
     const tabFieldsLabel  = document.getElementById("tab-fields-label");
@@ -1877,18 +1966,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (workbookId) {
       isWorkbookContext = true;
-      // Show workbook breadcrumb
+      // Show workbook return link
       const bar  = document.getElementById("fb-return-link-bar");
       const link = document.getElementById("fb-return-link");
       if (bar && link) {
         link.href = "/workbooks/" + workbookId;
-        const crumb = workbookName
-          ? (sheetLabel ? workbookName + " / " + sheetLabel : workbookName)
-          : "Workbook";
-        link.textContent = "← " + crumb;
+        link.textContent = "← Back to Workbook";
         bar.classList.remove("hidden");
       }
-      // Hide redundant "← Forms" button — breadcrumb is the only back nav
+      // Hide redundant sheet-list button — workbook link is the only back nav
       if (formsBackBtn) formsBackBtn.classList.add("hidden");
       // Relabel publish button, centre panel tab, left panel subtext
       if (btnPublishForm) btnPublishForm.textContent = "Publish Sheet";
@@ -1904,6 +1990,11 @@ document.addEventListener("DOMContentLoaded", function () {
           cb.checked = true;
         });
       }
+    } else if (formsBackBtn) {
+      formsBackBtn.textContent = "← Workbooks";
+      formsBackBtn.onclick = function () {
+        window.location.href = "/workbooks/";
+      };
     }
 
     if (!formId || !versionId) return;
