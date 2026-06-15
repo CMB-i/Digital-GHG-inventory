@@ -31,15 +31,17 @@
           </svg>
           Preview
         </button>
-        <button id="btn-add-sheet"
-          class="inline-flex items-center justify-center px-4 py-2 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-sm font-semibold rounded-lg shadow transition-colors">
-          <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-          </svg>
-          Add Sheet
+        <button id="btn-publish-workbook" disabled
+          class="inline-flex items-center justify-center px-4 py-2 bg-slate-200 text-slate-400 text-sm font-semibold rounded-lg cursor-not-allowed">
+          Publish Workbook
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- Workbook readiness checklist -->
+  <div id="wb-readiness" class="rounded-xl border border-slate-200 bg-white shadow-sm px-5 py-4">
+    <p class="text-xs text-slate-400 italic">Checking workbook readiness…</p>
   </div>
 
   <!-- Workbook detail tabs -->
@@ -62,7 +64,16 @@
 
   <!-- Sheets grid -->
   <div id="tab-panel-sheets">
-    <h2 class="text-sm font-bold text-slate-600 mb-3">Sheets in this workbook</h2>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-bold text-slate-600">Sheets in this workbook</h2>
+      <button id="btn-add-sheet"
+        class="inline-flex items-center justify-center px-3 py-1.5 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-xs font-semibold rounded-lg shadow transition-colors">
+        <svg class="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+        Add Sheet
+      </button>
+    </div>
     <div id="sheets-grid" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       <div class="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-400 shadow-sm">
         Loading sheets…

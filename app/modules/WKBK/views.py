@@ -24,6 +24,7 @@ from app.modules.WKBK.service import (
     get_eligible_submitters,
     add_site_submitter,
     remove_site_submitter,
+    check_workbook_readiness,
 )
 from app.modules.WFLWBLD.model import (
     Workflow, WorkflowVersion, WorkflowLevel, WorkflowLevelApprover,
@@ -323,6 +324,33 @@ def api_preview(workbook_id):
     ])
 
 
+@bp.route("/api/<int:workbook_id>/readiness", methods=["GET"])
+@require_permission("form", "manage_forms")
+def api_readiness(workbook_id):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+    checklist = check_workbook_readiness(workbook_id)
+    return jsonify({"workbook_status": wb.status, "checklist": checklist})
+
+
+@bp.route("/api/<int:workbook_id>/publish", methods=["POST"])
+@require_permission("form", "manage_forms")
+def api_publish_workbook(workbook_id):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+
+    checklist = check_workbook_readiness(workbook_id)
+    if not checklist["all_ok"]:
+        return jsonify({"error": "Workbook is not ready to publish.", "checklist": checklist}), 400
+
+    wb.status = "published"
+    wb.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return success_response(data={"status": wb.status, "checklist": checklist})
+
+
 # ── Chain builder helpers + routes ─────────────────────────────────────────────
 
 def _build_chain_payload(wb):
@@ -534,6 +562,38 @@ def api_save_site_chain(workbook_id, site_id):
         db.session.commit()
         return success_response(data=_build_chain_payload(wb))
 
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/<int:workbook_id>/chain/publish", methods=["POST"])
+@require_permission("form", "manage_forms")
+def api_publish_chain(workbook_id):
+    from app.modules.WFLWBLD.service import publish_workflow_version
+
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+
+    if not wb.workflow_id:
+        return error_response("No approval path configured for this workbook.", 400)
+
+    workflow = Workflow.query.filter_by(id=wb.workflow_id, is_deleted=False).first()
+    if not workflow:
+        return error_response("Approval path workflow not found.", 404)
+
+    draft_version = WorkflowVersion.query.filter_by(
+        workflow_id=workflow.id, published_at=None
+    ).first()
+    if not draft_version:
+        return error_response("No draft version to publish — the approval path is already published.", 400)
+
+    user = current_user()
+    try:
+        publish_workflow_version(draft_version.id, user.id)
+        db.session.commit()
+        return success_response(data=_build_chain_payload(wb))
     except ValueError as e:
         db.session.rollback()
         return error_response(str(e), 400)

@@ -310,3 +310,59 @@ def remove_site_submitter(workbook_id, site_id, user_id):
         raise ValueError("Submitter assignment not found.")
     db.session.delete(row)
     db.session.flush()
+
+
+def check_workbook_readiness(workbook_id):
+    from app.modules.FORMBLD.model import Form
+    from app.modules.WFLWBLD.model import Workflow
+
+    wb = get_workbook(workbook_id)
+    if not wb:
+        raise ValueError("Workbook not found.")
+
+    sheet_rows = WorkbookForm.query.filter_by(workbook_id=workbook_id).all()
+    published_sheets = sum(
+        1 for s in sheet_rows
+        if Form.query.filter_by(id=s.form_id, is_deleted=False).first()
+        and Form.query.filter_by(id=s.form_id, is_deleted=False).first().current_version_id is not None
+    )
+    sheets_ok = published_sheets > 0
+
+    site_rows = WorkbookSite.query.filter_by(workbook_id=workbook_id).all()
+    sites_ok = len(site_rows) > 0
+
+    submitters_ok = sites_ok and all(
+        WorkbookSiteSubmitter.query.filter_by(workbook_id=workbook_id, site_id=r.site_id).count() > 0
+        for r in site_rows
+    )
+
+    approval_path_ok = False
+    if wb.workflow_id:
+        wf = Workflow.query.filter_by(id=wb.workflow_id, is_deleted=False).first()
+        approval_path_ok = wf is not None and wf.current_version_id is not None
+
+    all_ok = sheets_ok and sites_ok and submitters_ok and approval_path_ok
+
+    return {
+        "sheets": {
+            "ok": sheets_ok,
+            "label": "Sheets",
+            "detail": f"{published_sheets} published sheet(s)" if sheets_ok else "Needs at least one published sheet",
+        },
+        "sites": {
+            "ok": sites_ok,
+            "label": "Sites",
+            "detail": f"{len(site_rows)} site(s) assigned" if sites_ok else "Needs at least one site",
+        },
+        "submitters": {
+            "ok": submitters_ok,
+            "label": "Submitters",
+            "detail": "All sites have submitters" if submitters_ok else "Every assigned site needs at least one submitter",
+        },
+        "approval_path": {
+            "ok": approval_path_ok,
+            "label": "Approval Path",
+            "detail": "Published approval path assigned" if approval_path_ok else "Needs a published approval path",
+        },
+        "all_ok": all_ok,
+    }
