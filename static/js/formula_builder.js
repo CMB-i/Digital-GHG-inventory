@@ -24,17 +24,13 @@ document.addEventListener("DOMContentLoaded", function () {
   const _returnVersionId = _fbUrlParams.get("version_id");
   const _openFormulaId = parseInt(_fbUrlParams.get("open_formula_id")) || null;
 
-  if (_returnTo) {
-    const bar = document.getElementById("fb-return-link-bar");
-    const link = document.getElementById("fb-return-link");
-    if (bar && link) {
-      const backParams = new URLSearchParams();
-      if (_returnFormId) backParams.set("form_id", _returnFormId);
-      if (_returnVersionId) backParams.set("version_id", _returnVersionId);
-      if (_returnFieldId) backParams.set("field_id", _returnFieldId);
-      link.href = backParams.toString() ? _returnTo + "?" + backParams.toString() : _returnTo;
-      bar.classList.remove("hidden");
-    }
+  function returnToUrl() {
+    if (!_returnTo) return "/module/FRMULA/";
+    const backParams = new URLSearchParams();
+    if (_returnFormId) backParams.set("form_id", _returnFormId);
+    if (_returnVersionId) backParams.set("version_id", _returnVersionId);
+    if (_returnFieldId) backParams.set("field_id", _returnFieldId);
+    return backParams.toString() ? _returnTo + "?" + backParams.toString() : _returnTo;
   }
 
   // ── Element refs ──────────────────────────────────────────────────────
@@ -63,13 +59,17 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnEditorBack = document.getElementById("btn-editor-back");
   if (btnEditorBack) {
     if (_returnTo) {
-      btnEditorBack.textContent = "← Back to workbook";
+      btnEditorBack.textContent = _returnTo.includes("/module/FORMBLD/")
+        ? "← Back to workbook"
+        : "← Formula Builder";
       btnEditorBack.onclick = function () {
-        const link = document.getElementById("fb-return-link");
-        window.location.href = (link && link.href) ? link.href : _returnTo;
+        window.location.href = returnToUrl();
       };
     } else {
-      btnEditorBack.onclick = function () { showList(); };
+      btnEditorBack.textContent = "← Formula Builder";
+      btnEditorBack.onclick = function () {
+        window.location.href = "/module/FRMULA/";
+      };
     }
   }
 

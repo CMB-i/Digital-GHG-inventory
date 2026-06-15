@@ -548,7 +548,7 @@ def create_new_form_version_draft(form_id, user_id):
         status="Draft"
     ).first()
     if pending_draft:
-        raise ValueError("A Draft version already exists. Work on that version first.")
+        return pending_draft
         
     max_ver = db.session.query(db.func.max(FormVersion.version_number)).filter_by(
         form_id=form_id
