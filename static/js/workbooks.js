@@ -126,16 +126,16 @@ document.addEventListener("DOMContentLoaded", function () {
 
     grid.innerHTML = "";
     data.forEach(wb => {
-      const statusColor =
-        wb.status === "published" ? "bg-emerald-100 text-emerald-700"
-          : "bg-amber-100 text-amber-700";
+      const isLive = wb.status === "published";
+      const statusLabel = isLive ? "Live" : "Draft";
+      const statusColor = isLive ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700";
       const card = document.createElement("div");
       card.className = "rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden hover:shadow-md transition-shadow";
       card.innerHTML = `
         <div class="px-5 py-4 space-y-2">
           <div class="flex items-start justify-between gap-2">
             <h3 class="font-bold text-slate-800 text-sm leading-snug">${esc(wb.name)}</h3>
-            <span class="shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${statusColor}">${esc(wb.status)}</span>
+            <span class="shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${statusColor}">${statusLabel}</span>
           </div>
           <p class="text-[10px] font-mono text-slate-400">${esc(wb.code)}</p>
           ${wb.description ? `<p class="text-xs text-slate-500 line-clamp-2">${esc(wb.description)}</p>` : ""}
@@ -144,18 +144,13 @@ document.addEventListener("DOMContentLoaded", function () {
             <span class="text-xs text-slate-500">Fields: <strong>${wb.field_count}</strong></span>
           </div>
         </div>
-        <div class="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+        <div class="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
           <a href="/workbooks/${wb.id}"
-            class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline">
-            Edit →
+            class="inline-flex items-center rounded-lg bg-[#1a3a6b] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1e4280] transition-colors">
+            ${isLive ? "Open Workbook →" : "Continue Setup →"}
           </a>
-          <div class="relative group">
-            <button class="text-slate-400 hover:text-slate-700 p-1 rounded" title="More options">•••</button>
-            <div class="absolute right-0 bottom-8 hidden group-hover:block bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[140px] z-10">
-              <button class="deactivate-btn block w-full text-left px-4 py-2 text-xs text-rose-600 hover:bg-rose-50"
-                data-id="${wb.id}">Deactivate</button>
-            </div>
-          </div>
+          <button class="deactivate-btn text-xs font-semibold text-slate-400 hover:text-rose-500 transition-colors"
+            data-id="${wb.id}">Deactivate</button>
         </div>`;
       card.querySelector(".deactivate-btn").onclick = async (e) => {
         const id = e.currentTarget.dataset.id;
@@ -197,6 +192,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const btnCloseAddSiteFooter = document.getElementById("btn-close-add-site-footer");
 
     loadSheets();
+    loadReadiness();
 
     const TAB_ACTIVE   = "workbook-detail-tab border-b-2 border-indigo-600 px-1 pb-3 text-xs font-bold uppercase tracking-wider text-indigo-700";
     const TAB_INACTIVE = "workbook-detail-tab border-b-2 border-transparent px-1 pb-3 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700";
@@ -206,9 +202,6 @@ document.addEventListener("DOMContentLoaded", function () {
       if (panelSheets) panelSheets.classList.toggle("hidden", activeTab !== "sheets");
       if (panelSites) panelSites.classList.toggle("hidden", activeTab !== "sites");
       if (panelApprovalPath) panelApprovalPath.classList.toggle("hidden", activeTab !== "approval");
-      if (btnAddSheet) btnAddSheet.classList.toggle("hidden", activeTab !== "sheets");
-      const btnPreviewWorkbook = document.getElementById("btn-preview-workbook");
-      if (btnPreviewWorkbook) btnPreviewWorkbook.classList.toggle("hidden", activeTab !== "sheets");
       if (tabSheets) tabSheets.className = activeTab === "sheets" ? TAB_ACTIVE : TAB_INACTIVE;
       if (tabSites) tabSites.className = activeTab === "sites" ? TAB_ACTIVE : TAB_INACTIVE;
       if (tabApprovalPath) tabApprovalPath.className = activeTab === "approval" ? TAB_ACTIVE : TAB_INACTIVE;
@@ -314,6 +307,30 @@ document.addEventListener("DOMContentLoaded", function () {
     previewClose.onclick  = () => previewModal.classList.add("hidden");
     previewBackdrop.onclick = () => previewModal.classList.add("hidden");
 
+    // ── Publish Workbook ──────────────────────────────────────────────────
+    const btnPublishWorkbook = document.getElementById("btn-publish-workbook");
+    if (btnPublishWorkbook) {
+      btnPublishWorkbook.addEventListener("click", async () => {
+        btnPublishWorkbook.disabled = true;
+        btnPublishWorkbook.textContent = "Publishing…";
+        try {
+          const res = await fetch(`/workbooks/api/${WORKBOOK_ID}/publish`, { method: "POST" });
+          const data = await res.json();
+          if (!res.ok) {
+            toast(data.error || "Failed to publish workbook.", "error");
+            if (data.checklist) renderReadiness({ workbook_status: "draft", checklist: data.checklist });
+            else await loadReadiness();
+            return;
+          }
+          toast("Workbook published — it is now Live.");
+          renderReadiness({ workbook_status: data.data.status, checklist: data.data.checklist });
+        } catch {
+          toast("Failed to publish workbook.", "error");
+          await loadReadiness();
+        }
+      });
+    }
+
     // ── Add Sheet panel ───────────────────────────────────────────────────
     const panel         = document.getElementById("panel-add-sheet");
     const backdrop      = document.getElementById("panel-backdrop");
@@ -380,7 +397,7 @@ document.addEventListener("DOMContentLoaded", function () {
             });
             const d = await r.json();
             if (d.error) { toast(d.error, "error"); btn.disabled = false; btn.classList.remove("opacity-50"); }
-            else { toast("Sheet added."); closePanel(); renderSheets(d.data.sheets); }
+            else { toast("Sheet added."); closePanel(); renderSheets(d.data.sheets); loadReadiness(); }
           } catch { toast("Failed to add sheet.", "error"); btn.disabled = false; btn.classList.remove("opacity-50"); }
         };
         formsList.appendChild(btn);
@@ -511,6 +528,73 @@ document.addEventListener("DOMContentLoaded", function () {
       } catch { toast("Failed to remove sheet.", "error"); }
     }
 
+    // ── Workbook readiness ────────────────────────────────────────────────
+
+    async function loadReadiness() {
+      try {
+        const res = await fetch(`/workbooks/api/${WORKBOOK_ID}/readiness`);
+        const data = await res.json();
+        renderReadiness(data);
+      } catch { /* fail silently — non-critical */ }
+    }
+
+    function renderReadiness(data) {
+      const el = document.getElementById("wb-readiness");
+      if (!el) return;
+
+      const isLive = data.workbook_status === "published";
+
+      const badge = document.getElementById("wb-status-badge");
+      if (badge) {
+        badge.className = isLive
+          ? "px-2 py-0.5 rounded-full font-bold text-[10px] uppercase bg-emerald-100 text-emerald-700"
+          : "px-2 py-0.5 rounded-full font-bold text-[10px] uppercase bg-amber-100 text-amber-800";
+        badge.textContent = isLive ? "Live" : "Draft";
+      }
+
+      const publishBtn = document.getElementById("btn-publish-workbook");
+      if (publishBtn) {
+        if (isLive) {
+          publishBtn.textContent = "Live";
+          publishBtn.disabled = true;
+          publishBtn.className = "inline-flex items-center justify-center px-4 py-2 bg-emerald-100 text-emerald-700 text-sm font-semibold rounded-lg cursor-default";
+        } else {
+          const canPublish = !!(data.checklist && data.checklist.all_ok);
+          publishBtn.disabled = !canPublish;
+          publishBtn.textContent = "Publish Workbook";
+          publishBtn.className = canPublish
+            ? "inline-flex items-center justify-center px-4 py-2 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-sm font-semibold rounded-lg shadow transition-colors"
+            : "inline-flex items-center justify-center px-4 py-2 bg-slate-200 text-slate-400 text-sm font-semibold rounded-lg cursor-not-allowed";
+        }
+      }
+
+      if (!data.checklist) { el.innerHTML = ""; return; }
+
+      const checks = [
+        data.checklist.sheets,
+        data.checklist.sites,
+        data.checklist.submitters,
+        data.checklist.approval_path,
+      ];
+
+      el.innerHTML = `
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider">Setup Checklist</h3>
+          ${isLive ? '<span class="text-xs text-emerald-600 font-semibold">All requirements met</span>' : ""}
+        </div>
+        <div class="flex flex-wrap gap-3">
+          ${checks.map(c => `
+            <div class="flex items-start gap-2 rounded-lg border ${c.ok ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"} px-3 py-2 text-xs min-w-[160px]">
+              <span class="mt-0.5 text-sm leading-none ${c.ok ? "text-emerald-500" : "text-amber-500"}">${c.ok ? "✓" : "○"}</span>
+              <div>
+                <div class="font-bold ${c.ok ? "text-emerald-700" : "text-amber-700"}">${esc(c.label)}</div>
+                <div class="mt-0.5 ${c.ok ? "text-emerald-600" : "text-amber-600"}">${esc(c.detail)}</div>
+              </div>
+            </div>
+          `).join("")}
+        </div>`;
+    }
+
     // ── Approval Path tab ─────────────────────────────────────────────────
 
     async function loadApprovalTab() {
@@ -564,6 +648,14 @@ document.addEventListener("DOMContentLoaded", function () {
           ? `<span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-700">Draft — not yet published</span>`
           : "";
 
+      const publishBtn = (chain.version_status === "Draft" && chain.version_id)
+        ? `<button type="button" id="publish-approval-path-btn"
+             class="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white
+                    hover:bg-emerald-700 disabled:opacity-40">
+             Publish Approval Path
+           </button>`
+        : "";
+
       content.innerHTML = `
         <div class="space-y-5">
           <div class="flex items-center justify-between">
@@ -574,10 +666,39 @@ document.addEventListener("DOMContentLoaded", function () {
                 Each site can have its own reviewer sequence.
               </p>
             </div>
-            ${statusBadge}
+            <div class="flex items-center gap-3">
+              ${statusBadge}
+              ${publishBtn}
+            </div>
           </div>
           <div id="approval-sites-list" class="space-y-4"></div>
         </div>`;
+
+      const publishBtnEl = document.getElementById("publish-approval-path-btn");
+      if (publishBtnEl) {
+        publishBtnEl.onclick = async () => {
+          publishBtnEl.disabled = true;
+          publishBtnEl.textContent = "Publishing…";
+          try {
+            const res = await fetch(`/workbooks/api/${WORKBOOK_ID}/chain/publish`, { method: "POST" });
+            const data = await res.json();
+            if (!res.ok) {
+              toast(data.error || "Failed to publish approval path.", "error");
+              publishBtnEl.disabled = false;
+              publishBtnEl.textContent = "Publish Approval Path";
+              return;
+            }
+            toast("Approval path published. Workbook is now ready for submission.");
+            approvalTabLoaded = false;
+            loadApprovalTab();
+            loadReadiness();
+          } catch {
+            toast("Failed to publish approval path.", "error");
+            publishBtnEl.disabled = false;
+            publishBtnEl.textContent = "Publish Approval Path";
+          }
+        };
+      }
 
       const list = document.getElementById("approval-sites-list");
       sites.forEach(site => {
@@ -803,6 +924,7 @@ document.addEventListener("DOMContentLoaded", function () {
         const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/sites`);
         const sites = await r.json();
         await renderSitesTab(sites);
+        loadReadiness();
       } catch {
         content.innerHTML = `
           <div class="rounded-xl border border-rose-200 bg-rose-50 p-6 text-sm font-semibold text-rose-700 shadow-sm">
