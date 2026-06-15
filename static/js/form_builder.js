@@ -4,11 +4,9 @@ document.addEventListener("DOMContentLoaded", function () {
   let currentSections = [];
   let availableValueSets = [];
   let availableFormulas = [];
-  let availableWorkflows = [];
   let activeSites = [];
   let sitesMap = {};
-  let workflowsMap = {};
-  
+
   let selectedFormId = null;
   let selectedVersionId = null;
   let selectedFieldCode = null;
@@ -22,7 +20,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const listView = document.getElementById("list-view");
   const step1View = document.getElementById("step1-view");
   const step2View = document.getElementById("step2-view");
-  
+
   // Table body in list-view
   const formsListBody = document.getElementById("forms-list-body");
 
@@ -70,7 +68,6 @@ document.addEventListener("DOMContentLoaded", function () {
   const dfGri = document.getElementById("df-gri");
   const dfSitesList = document.getElementById("df-sites-list");
   const dfFrequency = document.getElementById("df-frequency");
-  const dfWorkflow = document.getElementById("df-workflow");
   const dfDesc = document.getElementById("df-desc");
   const step1Title = document.getElementById("step1-title");
 
@@ -93,8 +90,8 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!container) return;
     const toast = document.createElement("div");
     toast.className = `p-4 rounded-xl shadow-lg border text-xs font-bold transition-all duration-300 transform translate-y-2 opacity-0 flex items-center justify-between ${
-      type === "success" 
-        ? "bg-emerald-50 border-emerald-200 text-emerald-800" 
+      type === "success"
+        ? "bg-emerald-50 border-emerald-200 text-emerald-800"
         : "bg-rose-50 border-rose-200 text-rose-800"
     }`;
     toast.innerHTML = `
@@ -103,12 +100,12 @@ document.addEventListener("DOMContentLoaded", function () {
     `;
     toast.querySelector("button").onclick = () => toast.remove();
     container.appendChild(toast);
-    
+
     // Animate in
     setTimeout(() => {
       toast.classList.remove("translate-y-2", "opacity-0");
     }, 10);
-    
+
     // Auto remove
     setTimeout(() => {
       toast.classList.add("translate-y-2", "opacity-0");
@@ -368,7 +365,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function refreshBuilderPreview() {
     if (!selectedFormId || !selectedVersionId) {
-      resetPreviewTarget(builderPreviewTarget(), "No form is currently loaded for preview.");
+      resetPreviewTarget(builderPreviewTarget(), "No sheet is currently loaded for preview.");
       return;
     }
     const target = builderPreviewTarget();
@@ -597,7 +594,7 @@ document.addEventListener("DOMContentLoaded", function () {
     step1View.classList.remove("hidden");
     document.body.classList.remove("builder-canvas-active");
 
-    step1Title.textContent = "New Form · Step 1 — Form Details";
+    step1Title.textContent = "New Sheet · Step 1 — Sheet Details";
     selectedFormId = null;
     selectedVersionId = null;
 
@@ -607,7 +604,6 @@ document.addEventListener("DOMContentLoaded", function () {
     dfName.value = "";
     dfGri.value = "";
     dfFrequency.value = "Monthly";
-    dfWorkflow.value = "";
     dfDesc.value = "";
 
     // Uncheck all sites
@@ -624,7 +620,7 @@ document.addEventListener("DOMContentLoaded", function () {
     step1View.classList.remove("hidden");
     document.body.classList.remove("builder-canvas-active");
 
-    step1Title.textContent = `Edit Form Details · ${form.display_name || form.name}`;
+    step1Title.textContent = `Edit Sheet Details · ${form.display_name || form.name}`;
     selectedFormId = formId;
     selectedVersionId = form.latest_version_id;
 
@@ -633,7 +629,6 @@ document.addEventListener("DOMContentLoaded", function () {
     dfName.value = form.display_name || form.name;
     dfGri.value = form.gri_code || "";
     dfFrequency.value = form.frequency || "Monthly";
-    dfWorkflow.value = form.workflow_id || "";
     dfDesc.value = form.description || "";
 
     // Check sites
@@ -684,20 +679,6 @@ document.addEventListener("DOMContentLoaded", function () {
           sitesMap[s.id] = s.name;
         });
         renderSitesCheckboxes();
-        
-        // 2. Fetch workflows
-        return fetch("/module/WFLWBLD/api");
-      })
-      .then(res => res.json())
-      .then(workflows => {
-        availableWorkflows = workflows;
-        workflowsMap = {};
-        workflows.forEach(w => {
-          workflowsMap[w.id] = w.name;
-        });
-        renderWorkflowsDropdown();
-
-        // 3. Load Forms List, then check for return-URL prefill
         return loadForms();
       })
       .then(() => {
@@ -726,19 +707,9 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
-  function renderWorkflowsDropdown() {
-    dfWorkflow.innerHTML = '<option value="">Select workflow...</option>';
-    availableWorkflows.forEach(w => {
-      const opt = document.createElement("option");
-      opt.value = w.id;
-      opt.textContent = `${w.name} (${w.code})`;
-      dfWorkflow.appendChild(opt);
-    });
-  }
-
   // Fetch all forms on load or refresh
   function loadForms() {
-    formsListBody.innerHTML = '<div class="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400 shadow-sm md:col-span-2 xl:col-span-3">Loading workbooks...</div>';
+    formsListBody.innerHTML = '<div class="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400 shadow-sm md:col-span-2 xl:col-span-3">Loading sheets...</div>';
 
     return fetch("/module/FORMBLD/api")
       .then(res => res.json())
@@ -749,7 +720,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (data.length === 0) {
           formsListBody.innerHTML = `
             <div class="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400 shadow-sm md:col-span-2 xl:col-span-3">
-              No workbooks created yet. Click "Create Workbook" to get started.
+              No sheets created yet. Click "Create Sheet" to get started.
             </div>
           `;
           return;
@@ -758,7 +729,7 @@ document.addEventListener("DOMContentLoaded", function () {
         data.forEach(form => {
           const card = document.createElement("article");
           card.className = "flex min-h-[220px] flex-col justify-between rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow-md";
-          
+
           // Map site IDs to names
           let sitesText = "None";
           let siteCountText = "No sites";
@@ -783,8 +754,8 @@ document.addEventListener("DOMContentLoaded", function () {
           let previewAction = "";
           let secondaryActions = [];
           if (form.latest_version_id) {
-            editAction = `<button onclick="editWorkbookCard(${form.id}, ${form.latest_version_id}, '${escapeHtml(status)}')" class="btn btn-primary btn-sm min-w-[72px]" aria-label="Edit workbook ${escapeHtml(form.display_name || form.name)}">Edit</button>`;
-            previewAction = `<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="btn btn-outline btn-sm min-w-[72px]" aria-label="Preview workbook ${escapeHtml(form.display_name || form.name)}">Preview</button>`;
+            editAction = `<button onclick="editWorkbookCard(${form.id}, ${form.latest_version_id}, '${escapeHtml(status)}')" class="btn btn-primary btn-sm min-w-[72px]" aria-label="Edit sheet ${escapeHtml(form.display_name || form.name)}">Edit</button>`;
+            previewAction = `<button onclick="openPreview(${form.id}, ${form.latest_version_id})" class="btn btn-outline btn-sm min-w-[72px]" aria-label="Preview sheet ${escapeHtml(form.display_name || form.name)}">Preview</button>`;
           }
           if (status === "Draft" && form.latest_version_id) {
             secondaryActions.push(`<button onclick="editFormDetails(${form.id})" class="block w-full px-3 py-1.5 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50">Edit details</button>`);
@@ -796,7 +767,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 <div class="min-w-0">
                   <h2 class="card-title truncate" title="${escapeHtml(form.display_name || form.name)}">${escapeHtml(form.display_name || form.name)}</h2>
                   <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-500">
-                    <span class="font-mono">${escapeHtml(form.gri_code || form.code || "Workbook")}</span>
+                    <span class="font-mono">${escapeHtml(form.gri_code || form.code || "Sheet")}</span>
                     <span>v${escapeHtml(form.latest_version_num || 1)}</span>
                   </div>
                 </div>
@@ -814,8 +785,8 @@ document.addEventListener("DOMContentLoaded", function () {
               </div>
             </div>
             <div class="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
-              <div class="text-[11px] font-semibold ${form.workflow_id ? "text-emerald-700" : "text-slate-400"}">
-                ${form.workflow_id ? "Workflow assigned" : "Workflow not assigned"}
+              <div class="text-[11px] font-semibold text-slate-400">
+                Sheet configuration
               </div>
               <div class="flex items-center gap-2">
                 ${editAction}
@@ -836,7 +807,7 @@ document.addEventListener("DOMContentLoaded", function () {
       })
       .catch(err => {
         console.error("Error loading forms:", err);
-        showToast("Error loading forms list.", "error");
+        showToast("Error loading sheets list.", "error");
       });
   }
 
@@ -848,7 +819,6 @@ document.addEventListener("DOMContentLoaded", function () {
     const code = dfCode.value.trim().toUpperCase().replace(/\s+/g, "_");
     const gri_code = dfGri.value.trim();
     const frequency = dfFrequency.value;
-    const workflow_id = dfWorkflow.value ? parseInt(dfWorkflow.value) : null;
     const description = dfDesc.value.trim();
 
     // Collect checked sites
@@ -868,11 +838,16 @@ document.addEventListener("DOMContentLoaded", function () {
       display_name: name,
       gri_code: gri_code,
       frequency: frequency,
-      workflow_id: workflow_id,
       sites: sites,
       description: description,
       description_text: description
     };
+
+    const wbParams = new URLSearchParams(window.location.search);
+    const contextWorkbookId = wbParams.get("workbook_id");
+    if (contextWorkbookId) {
+      payload.workbook_id = parseInt(contextWorkbookId);
+    }
 
     if (selectedFormId === null) {
       // Create new form
@@ -886,8 +861,8 @@ document.addEventListener("DOMContentLoaded", function () {
           if (resData.error) {
             showToast(resData.error, "error");
           } else {
-            showToast("Form details saved successfully.");
-            
+            showToast("Sheet details saved successfully.");
+
             // Reload list, find the form and open Step 2
             fetch("/module/FORMBLD/api")
               .then(res => res.json())
@@ -904,7 +879,7 @@ document.addEventListener("DOMContentLoaded", function () {
         })
         .catch(err => {
           console.error("Error creating form:", err);
-          showToast("Failed to create form.", "error");
+          showToast("Failed to create sheet.", "error");
         });
     } else {
       // Update form details
@@ -918,15 +893,15 @@ document.addEventListener("DOMContentLoaded", function () {
           if (resData.error) {
             showToast(resData.error, "error");
           } else {
-            showToast("Form details updated successfully.");
-            
+            showToast("Sheet details updated successfully.");
+
             // Go directly to layout canvas
             editFormLayout(selectedFormId, selectedVersionId);
           }
         })
         .catch(err => {
           console.error("Error updating form details:", err);
-          showToast("Failed to update form details.", "error");
+          showToast("Failed to update sheet details.", "error");
         });
     }
   };
@@ -935,7 +910,7 @@ document.addEventListener("DOMContentLoaded", function () {
   function loadVersionDetails(versionId) {
     closeInspector();
     publishErrors.classList.add("hidden");
-    
+
     fetch(`/module/FORMBLD/api/version/${versionId}`)
       .then(res => res.json())
       .then(data => {
@@ -952,24 +927,11 @@ document.addEventListener("DOMContentLoaded", function () {
         // Set status badge and name
         builderFormTitle.textContent = data.form.display_name || data.form.name;
         builderVersionBadge.textContent = `v${data.version.version_number} (${data.version.status})`;
-        
+
         let badgeClass = "bg-amber-100 text-amber-800";
         if (data.version.status === "Published") badgeClass = "bg-emerald-100 text-emerald-800";
         else if (data.version.status === "Archived") badgeClass = "bg-slate-100 text-slate-800";
         builderVersionBadge.className = `px-2 py-0.5 rounded-full font-bold uppercase text-[9px] ${badgeClass}`;
-
-        // Update workflow status badge and banner
-        const workflowStatusBadge = document.getElementById("builder-workflow-status");
-        const workflowWarningBanner = document.getElementById("workflow-warning-banner");
-        if (data.form.workflow_id) {
-          workflowStatusBadge.textContent = "Workflow: Assigned";
-          workflowStatusBadge.className = "px-2 py-0.5 rounded-full font-bold uppercase text-[9px] bg-emerald-100 text-emerald-800";
-          workflowWarningBanner.classList.add("hidden");
-        } else {
-          workflowStatusBadge.textContent = "Workflow: Not assigned";
-          workflowStatusBadge.className = "px-2 py-0.5 rounded-full font-bold uppercase text-[9px] bg-slate-100 text-slate-700 border border-slate-200";
-          workflowWarningBanner.classList.remove("hidden");
-        }
 
         // Populate dropdown options inside inspectors
         populateInspectorDropdowns();
@@ -1182,7 +1144,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const fields = fieldsForActiveSection();
     const countLabel = `${fields.length} field${fields.length === 1 ? "" : "s"}`;
     if (workspaceSectionTitle) {
-      workspaceSectionTitle.textContent = section ? section.name : "All workbook fields";
+      workspaceSectionTitle.textContent = section ? section.name : "All sheet fields";
     }
     if (workspaceSectionMeta) {
       workspaceSectionMeta.textContent = section
@@ -1193,7 +1155,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (fields.length === 0) {
       formWorkspace.innerHTML = `
         <div class="flex min-h-[260px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-6 py-12 text-center">
-          <div class="text-sm font-bold text-slate-700">No fields in this ${section ? "section" : "workbook"} yet</div>
+          <div class="text-sm font-bold text-slate-700">No fields in this ${section ? "section" : "sheet"} yet</div>
           <p class="mt-2 max-w-sm text-xs text-slate-400">Use the field palette on the left to add the next SPOC entry row.</p>
         </div>
       `;
@@ -1268,7 +1230,7 @@ document.addEventListener("DOMContentLoaded", function () {
       r.classList.add("border-slate-200", "bg-white");
       r.style.borderStyle = "";
     });
-    
+
     rowElement.classList.remove("border-slate-200", "bg-white");
     rowElement.classList.add("border-indigo-300", "bg-indigo-50/50", "ring-1", "ring-indigo-200");
     rowElement.style.borderStyle = "solid";
@@ -1434,10 +1396,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (field.field_type === "number" || field.field_type === "integer") {
       field.field_config.unit = document.getElementById("prop-unit").value.trim();
-      
+
       const minVal = document.getElementById("prop-min").value;
       field.field_config.min = minVal !== "" ? parseFloat(minVal) : undefined;
-      
+
       const maxVal = document.getElementById("prop-max").value;
       field.field_config.max = maxVal !== "" ? parseFloat(maxVal) : undefined;
 
@@ -1525,10 +1487,10 @@ document.addEventListener("DOMContentLoaded", function () {
   // Delete field
   btnDeleteField.onclick = function () {
     if (!selectedFieldCode) return;
-    if (!confirm("Are you sure you want to delete this field from the form layout?")) return;
+    if (!confirm("Are you sure you want to delete this field from the sheet layout?")) return;
 
     currentFields = currentFields.filter(x => x.field_code !== selectedFieldCode);
-    
+
     // Normalize display order numbers
     normalizeFieldDisplayOrder();
 
@@ -1786,7 +1748,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Create new version draft for published form
   window.createNewDraft = function (formId) {
-    if (!confirm("Edit this published workbook? A draft will be prepared so the published version stays unchanged.")) return;
+    if (!confirm("Edit this published sheet? A draft will be prepared so the published version stays unchanged.")) return;
 
     fetch(`/module/FORMBLD/api/${formId}/new-version`, {
       method: "POST"
@@ -1825,7 +1787,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!form) return;
 
     pvTitle.textContent = form.display_name || form.name;
-    
+
     let sitesText = "All Sites";
     if (form.sites && form.sites.length > 0) {
       sitesText = form.sites.map(sid => sitesMap[sid] || sid).join(", ");
@@ -1856,7 +1818,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (selectedFormId && selectedVersionId) {
       openPreview(selectedFormId, selectedVersionId);
     } else {
-      showToast("No form is currently loaded for preview.", "error");
+      showToast("No sheet is currently loaded for preview.", "error");
     }
   };
 
@@ -1909,7 +1871,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const workbookName = params.get("workbook_name");
     const sheetLabel = params.get("sheet_label");
 
-    const formsBackBtn    = document.getElementById("btn-forms-back");
+    const formsBackBtn    = document.getElementById("btn-builder-forms-back");
     const tabFieldsLabel  = document.getElementById("tab-fields-label");
     const sectionSubtext  = document.getElementById("sections-panel-subtext");
 
@@ -1932,13 +1894,15 @@ document.addEventListener("DOMContentLoaded", function () {
       if (btnPublishForm) btnPublishForm.textContent = "Publish Sheet";
       if (tabFieldsLabel) tabFieldsLabel.textContent = "Fields in This Sheet";
       if (sectionSubtext) sectionSubtext.textContent = "Choose column groups within this sheet.";
-    } else {
-      // Standalone: redirect "← Forms" to /workbooks/ instead of old list view
-      if (formsBackBtn) {
-        formsBackBtn.onclick = (e) => {
-          e.preventDefault();
-          window.location.href = "/workbooks/";
-        };
+      // Auto-trigger create flow when no existing form is being edited
+      if (!formId) {
+        startNew();
+
+        // WorkbookSite is the authoritative workbook-site assignment.
+        // Keep legacy site applicability populated so old save validation does not block sheet creation.
+        dfSitesList.querySelectorAll("input[type='checkbox']").forEach(cb => {
+          cb.checked = true;
+        });
       }
     }
 

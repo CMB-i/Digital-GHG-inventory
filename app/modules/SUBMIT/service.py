@@ -33,6 +33,9 @@ from app.modules.WKBK.model import (
 )
 
 
+LIVE_WORKBOOK_STATUSES = {"published", "live"}
+
+
 def _get_workflow_id_for_form(form_id):
     """
     Returns the workflow_id assigned to the active workbook that contains
@@ -62,6 +65,147 @@ def _get_workflow_id_for_form(form_id):
         )
 
     return None
+
+
+def _get_workflow_for_workbook(workbook):
+    if not workbook.workflow_id:
+        return None
+    return Workflow.query.filter_by(id=workbook.workflow_id, is_deleted=False).first()
+
+
+def _require_active_workbook(workbook_id):
+    try:
+        workbook_id = int(workbook_id)
+    except (TypeError, ValueError):
+        raise ValueError("A valid workbook is required.")
+
+    workbook = Workbook.query.filter_by(id=workbook_id, is_active=True).first()
+    if not workbook:
+        raise ValueError("Workbook not found.")
+    if str(workbook.status or "").strip().lower() not in LIVE_WORKBOOK_STATUSES:
+        raise ValueError("This workbook is not published for SPOC entry.")
+    return workbook
+
+
+def _require_workbook_site_submitter(user_id, workbook_id, site_id):
+    if not (
+        has_permission(user_id, "submission", "view", scope_site_id=site_id)
+        or has_permission(user_id, "submission", "submit", scope_site_id=site_id)
+    ):
+        raise ValueError("Permission denied: You cannot view submissions for this site.")
+
+    site_link = WorkbookSite.query.filter_by(
+        workbook_id=workbook_id,
+        site_id=site_id,
+    ).first()
+    if not site_link:
+        raise ValueError("This workbook is not assigned to the selected site.")
+
+    submitter = WorkbookSiteSubmitter.query.filter_by(
+        workbook_id=workbook_id,
+        site_id=site_id,
+        user_id=user_id,
+    ).first()
+    if not submitter:
+        raise ValueError(
+            "Permission denied: You are not assigned to submit this workbook for this site."
+        )
+
+
+def _require_workbook_runtime_access(user_id, workbook_id, site_id):
+    try:
+        site_id = int(site_id)
+    except (TypeError, ValueError):
+        raise ValueError("A valid site is required.")
+
+    workbook = _require_active_workbook(workbook_id)
+    site = Site.query.filter_by(id=site_id, is_deleted=False).first()
+    if not site:
+        raise ValueError("Site not found.")
+    _require_workbook_site_submitter(user_id, workbook.id, site_id)
+    return workbook, site
+
+
+def _workbook_sheet_rows(workbook_id):
+    return (
+        db.session.query(WorkbookForm, Form)
+        .join(Form, Form.id == WorkbookForm.form_id)
+        .filter(
+            WorkbookForm.workbook_id == workbook_id,
+            Form.is_deleted == False,
+            Form.current_version_id.is_not(None),
+        )
+        .order_by(WorkbookForm.display_order.asc(), WorkbookForm.id.asc())
+        .all()
+    )
+
+
+def _workbook_sheet_payload(workbook_form, form):
+    return {
+        "id": form.id,
+        "form_id": form.id,
+        "name": workbook_form.sheet_label or human_sheet_label(form),
+        "code": form.code,
+        "display_order": workbook_form.display_order,
+    }
+
+
+def _published_forms_for_workbook(workbook_id):
+    return [
+        (
+            form,
+            {
+                "sheet_label": workbook_form.sheet_label or human_sheet_label(form),
+                "display_order": workbook_form.display_order,
+                "workbook_id": workbook_id,
+            },
+        )
+        for workbook_form, form in _workbook_sheet_rows(workbook_id)
+    ]
+
+
+def _require_form_in_workbook(workbook_id, form_id):
+    try:
+        form_id = int(form_id)
+    except (TypeError, ValueError):
+        raise ValueError("A valid sheet is required.")
+
+    row = (
+        db.session.query(WorkbookForm, Form)
+        .join(Form, Form.id == WorkbookForm.form_id)
+        .filter(
+            WorkbookForm.workbook_id == workbook_id,
+            WorkbookForm.form_id == form_id,
+            Form.is_deleted == False,
+            Form.current_version_id.is_not(None),
+        )
+        .first()
+    )
+    if not row:
+        raise ValueError("Selected sheet is not attached to this workbook.")
+    return row
+
+
+def _user_workbook_for_site_form(user_id, site_id, form_id):
+    return (
+        db.session.query(Workbook)
+        .join(WorkbookForm, WorkbookForm.workbook_id == Workbook.id)
+        .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+        .join(
+            WorkbookSiteSubmitter,
+            (WorkbookSiteSubmitter.workbook_id == Workbook.id)
+            & (WorkbookSiteSubmitter.site_id == WorkbookSite.site_id),
+        )
+        .filter(
+            WorkbookForm.form_id == form_id,
+            WorkbookSite.site_id == site_id,
+            WorkbookSiteSubmitter.user_id == user_id,
+            Workbook.is_active == True,
+            db.func.lower(Workbook.status).in_(LIVE_WORKBOOK_STATUSES),
+        )
+        .order_by(Workbook.name.asc(), Workbook.id.asc())
+        .first()
+    )
 
 
 def _is_form_assigned_to_site(form_id, site_id):
@@ -678,15 +822,13 @@ def _row_editability(period, submission, can_edit_monthly):
 def get_annual_workbook_options(user_id):
     site_ids = _user_submission_site_ids(user_id)
     if not site_ids:
-        return {"sites": [], "forms_by_site": {}}
+        return {"sites": [], "forms_by_site": {}, "workbooks_by_site": {}}
 
-    # Apply WorkbookSiteSubmitter filter if user has explicit assignments
-    if _user_has_workbook_submitter_assignments(user_id):
-        workbook_site_ids = _get_user_workbook_site_ids(user_id)
-        site_ids = site_ids & workbook_site_ids
+    workbook_site_ids = _get_user_workbook_site_ids(user_id)
+    site_ids = site_ids & workbook_site_ids
 
     if not site_ids:
-        return {"sites": [], "forms_by_site": {}}
+        return {"sites": [], "forms_by_site": {}, "workbooks_by_site": {}}
 
     sites = Site.query.filter(
         Site.id.in_(site_ids),
@@ -694,16 +836,46 @@ def get_annual_workbook_options(user_id):
     ).order_by(Site.name.asc(), Site.id.asc()).all()
 
     forms_by_site = {}
+    workbooks_by_site = {}
     for site in sites:
-        forms_by_site[str(site.id)] = [
-            {
-                "id": form.id,
-                "name": human_sheet_label(form),
-                "code": form.code,
-                "workflow_id": metadata.get("workflow_id"),
-            }
-            for form, metadata in _published_forms_for_site_via_workbook(site.id)
-        ]
+        workbook_rows = (
+            db.session.query(Workbook)
+            .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+            .join(
+                WorkbookSiteSubmitter,
+                (WorkbookSiteSubmitter.workbook_id == Workbook.id)
+                & (WorkbookSiteSubmitter.site_id == WorkbookSite.site_id),
+            )
+            .filter(
+                WorkbookSite.site_id == site.id,
+                WorkbookSiteSubmitter.user_id == user_id,
+                Workbook.is_active == True,
+                db.func.lower(Workbook.status).in_(LIVE_WORKBOOK_STATUSES),
+            )
+            .order_by(Workbook.name.asc(), Workbook.id.asc())
+            .all()
+        )
+        site_workbooks = []
+        legacy_forms = []
+        for workbook in workbook_rows:
+            sheets = [
+                _workbook_sheet_payload(workbook_form, form)
+                for workbook_form, form in _workbook_sheet_rows(workbook.id)
+            ]
+            if not sheets:
+                continue
+            site_workbooks.append({
+                "id": workbook.id,
+                "workbook_id": workbook.id,
+                "name": workbook.name,
+                "code": workbook.code,
+                "sheet_count": len(sheets),
+                "sheets": sheets,
+            })
+            legacy_forms.extend(sheets)
+
+        workbooks_by_site[str(site.id)] = site_workbooks
+        forms_by_site[str(site.id)] = legacy_forms
 
     return {
         "sites": [
@@ -715,46 +887,29 @@ def get_annual_workbook_options(user_id):
             for site in sites
         ],
         "forms_by_site": forms_by_site,
+        "workbooks_by_site": workbooks_by_site,
     }
 
 
-def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
+def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, selected_form_id=None):
     try:
         site_id = int(site_id)
-        form_id = int(form_id)
+        workbook_id = int(workbook_id)
         fy_start_year = int(fy_start_year)
     except (TypeError, ValueError):
-        raise ValueError("A valid site, form, and financial year are required.")
+        raise ValueError("A valid site, workbook, and financial year are required.")
 
-    if site_id not in _user_submission_site_ids(user_id):
-        raise ValueError("Permission denied: You cannot view submissions for this site.")
+    workbook, site = _require_workbook_runtime_access(user_id, workbook_id, site_id)
+    sheet_rows = _workbook_sheet_rows(workbook.id)
+    if not sheet_rows:
+        raise ValueError("This workbook has no published sheets.")
 
-    if not (
-        has_permission(user_id, "submission", "view", scope_site_id=site_id)
-        or has_permission(user_id, "submission", "submit", scope_site_id=site_id)
-    ):
-        raise ValueError("Permission denied: You cannot view submissions for this site.")
-
-    # Check WorkbookSiteSubmitter assignment if user has explicit assignments configured
-    if _user_has_workbook_submitter_assignments(user_id):
-        workbook_site_ids = _get_user_workbook_site_ids(user_id)
-        if site_id not in workbook_site_ids:
-            raise ValueError(
-                "Permission denied: You are not assigned to submit "
-                "this workbook for this site."
-            )
-
-    site = Site.query.filter_by(id=site_id, is_deleted=False).first()
-    if not site:
-        raise ValueError("Site not found.")
-
-    form = Form.query.filter_by(id=form_id, is_deleted=False).first()
-    if not form or not form.current_version_id:
-        raise ValueError("Published form not found.")
-
-    metadata = _parse_form_metadata(form)
-    if site_id not in (metadata.get("sites") or []):
-        raise ValueError("This form is not assigned to the selected site.")
+    sheet_payloads = [
+        _workbook_sheet_payload(workbook_form, sheet_form)
+        for workbook_form, sheet_form in sheet_rows
+    ]
+    selected_id = int(selected_form_id) if selected_form_id else sheet_payloads[0]["id"]
+    workbook_form, form = _require_form_in_workbook(workbook.id, selected_id)
 
     fields = _field_payload(form.current_version_id)
     sections = _sections_payload(form)
@@ -776,7 +931,7 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
 
     submissions = Submission.query.filter(
         Submission.site_id == site_id,
-        Submission.form_id == form_id,
+        Submission.form_id == form.id,
         Submission.is_deleted == False,
         Submission.reporting_period_id.in_([period.id for period in periods] or [0]),
     ).all()
@@ -820,11 +975,18 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
             "name": site.name,
             "code": site.code,
         },
+        "workbook": {
+            "id": workbook.id,
+            "name": workbook.name,
+            "code": workbook.code,
+            "workflow_id": workbook.workflow_id,
+        },
+        "forms": sheet_payloads,
         "selected_form": {
             "id": form.id,
-            "name": human_sheet_label(form),
+            "name": workbook_form.sheet_label or human_sheet_label(form),
             "code": form.code,
-            "workflow_id": metadata.get("workflow_id"),
+            "workflow_id": workbook.workflow_id,
         },
         "fields": fields,
         "sections": sections,
@@ -833,13 +995,14 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
     }
 
 
-def save_annual_workbook_values(user_id, site_id, form_id, fy_start_year, values):
+def save_annual_workbook_values(user_id, site_id, workbook_id, form_id, fy_start_year, values):
     try:
         site_id = int(site_id)
+        workbook_id = int(workbook_id)
         form_id = int(form_id)
         fy_start_year = int(fy_start_year)
     except (TypeError, ValueError):
-        raise ValueError("A valid site, form, and financial year are required.")
+        raise ValueError("A valid site, workbook, sheet, and financial year are required.")
 
     if not isinstance(values, dict):
         raise ValueError("Values must be submitted as an object.")
@@ -847,20 +1010,12 @@ def save_annual_workbook_values(user_id, site_id, form_id, fy_start_year, values
     if not (
         has_permission(user_id, "submission", "edit", scope_site_id=site_id)
         or has_permission(user_id, "submission", "create", scope_site_id=site_id)
+        or has_permission(user_id, "submission", "submit", scope_site_id=site_id)
     ):
         raise ValueError("Permission denied: You cannot edit annual workbook values for this site.")
 
-    site = Site.query.filter_by(id=site_id, is_deleted=False).first()
-    if not site:
-        raise ValueError("Site not found.")
-
-    form = Form.query.filter_by(id=form_id, is_deleted=False).first()
-    if not form or not form.current_version_id:
-        raise ValueError("Published form not found.")
-
-    metadata = _parse_form_metadata(form)
-    if site_id not in (metadata.get("sites") or []):
-        raise ValueError("This form is not assigned to the selected site.")
+    workbook, _site = _require_workbook_runtime_access(user_id, workbook_id, site_id)
+    _workbook_form, form = _require_form_in_workbook(workbook.id, form_id)
 
     months = _fy_months(fy_start_year)
     open_period_exists = ReportingPeriod.query.filter(
@@ -1019,25 +1174,24 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
     }
 
 
-def compose_calculation_results(site_id, fy_start_year, user_id):
+def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
     """
     Computes read-only calculated field results across all forms for a site and FY.
     Provides preview vs reportable calculation separation, handling missing values safely.
     """
     try:
         site_id = int(site_id)
+        workbook_id = int(workbook_id)
         fy_start_year = int(fy_start_year)
     except (TypeError, ValueError):
-        raise ValueError("A valid site and financial year are required.")
+        raise ValueError("A valid site, workbook, and financial year are required.")
 
-    if site_id not in _user_submission_site_ids(user_id):
-        raise ValueError("Permission denied: You cannot view submissions for this site.")
-
-    site = Site.query.filter_by(id=site_id, is_deleted=False).first()
-    if not site:
-        raise ValueError("Site not found.")
-
-    assigned = _published_forms_for_site(site_id)
+    workbook, site = _require_workbook_runtime_access(user_id, workbook_id, site_id)
+    assigned = _published_forms_for_workbook(workbook.id)
+    sheet_payloads = [
+        _workbook_sheet_payload(workbook_form, sheet_form)
+        for workbook_form, sheet_form in _workbook_sheet_rows(workbook.id)
+    ]
     if not assigned:
         return {
             "financial_year": {
@@ -1049,6 +1203,13 @@ def compose_calculation_results(site_id, fy_start_year, user_id):
                 "name": site.name,
                 "code": site.code,
             },
+            "workbook": {
+                "id": workbook.id,
+                "name": workbook.name,
+                "code": workbook.code,
+                "workflow_id": workbook.workflow_id,
+            },
+            "forms": sheet_payloads,
             "selected_form": {
                 "id": "calc_results",
                 "name": "Calculation Results",
@@ -1329,6 +1490,13 @@ def compose_calculation_results(site_id, fy_start_year, user_id):
             "name": site.name,
             "code": site.code,
         },
+        "workbook": {
+            "id": workbook.id,
+            "name": workbook.name,
+            "code": workbook.code,
+            "workflow_id": workbook.workflow_id,
+        },
+        "forms": sheet_payloads,
         "selected_form": {
             "id": "calc_results",
             "name": "Calculation Results",
@@ -1388,12 +1556,9 @@ def get_spoc_sheets_buckets(user_id):
     else:
         active_sites = Site.query.filter(Site.id.in_(allowed_site_ids), Site.is_deleted == False).all()
 
-    # Apply WorkbookSiteSubmitter filter if user has explicit assignments.
-    # Users with no assignments (admins, global users) bypass this filter.
-    if _user_has_workbook_submitter_assignments(user_id):
-        workbook_site_ids = _get_user_workbook_site_ids(user_id)
-        allowed_site_ids = allowed_site_ids & workbook_site_ids
-        active_sites = [s for s in active_sites if s.id in allowed_site_ids]
+    workbook_site_ids = _get_user_workbook_site_ids(user_id)
+    allowed_site_ids = allowed_site_ids & workbook_site_ids
+    active_sites = [s for s in active_sites if s.id in allowed_site_ids]
 
     sites_map = {site.id: site for site in active_sites}
 
@@ -1407,10 +1572,29 @@ def get_spoc_sheets_buckets(user_id):
     for f in published_forms:
         form_map[f.id] = f
     for site_id in allowed_site_ids:
-        site_forms = _published_forms_for_site_via_workbook(site_id)
-        for form, _ in site_forms:
-            form_map[form.id] = form
-            applicable_forms_by_site[site_id].append(form)
+        workbook_rows = (
+            db.session.query(Workbook)
+            .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+            .join(
+                WorkbookSiteSubmitter,
+                (WorkbookSiteSubmitter.workbook_id == Workbook.id)
+                & (WorkbookSiteSubmitter.site_id == WorkbookSite.site_id),
+            )
+            .filter(
+                WorkbookSite.site_id == site_id,
+                WorkbookSiteSubmitter.user_id == user_id,
+                Workbook.is_active == True,
+                db.func.lower(Workbook.status).in_(LIVE_WORKBOOK_STATUSES),
+            )
+            .all()
+        )
+        seen_forms = set()
+        for workbook in workbook_rows:
+            for _workbook_form, form in _workbook_sheet_rows(workbook.id):
+                form_map[form.id] = form
+                if form.id not in seen_forms:
+                    applicable_forms_by_site[site_id].append(form)
+                    seen_forms.add(form.id)
 
     # 3. Get all active submissions for allowed sites
     submissions = (
@@ -1454,6 +1638,9 @@ def get_spoc_sheets_buckets(user_id):
         
         if not site or not form or not period:
             continue
+        workbook = _user_workbook_for_site_form(user_id, sub.site_id, sub.form_id)
+        if not workbook:
+            continue
             
         submitted_combos.add((sub.site_id, sub.form_id, sub.reporting_period_id))
         
@@ -1463,6 +1650,8 @@ def get_spoc_sheets_buckets(user_id):
             "submission_id": sub.id,
             "package_id": sub.package_id,
             "site_id": sub.site_id,
+            "workbook_id": workbook.id,
+            "workbook_name": workbook.name,
             "form_name": human_sheet_label(form),
             "form_id": sub.form_id,
             "form_code": form.code,
@@ -1497,9 +1686,14 @@ def get_spoc_sheets_buckets(user_id):
         for period in open_periods:
             period_label = format_period_label(period.year, period.month)
             for form in applicable_forms_by_site[site_id]:
+                workbook = _user_workbook_for_site_form(user_id, site_id, form.id)
+                if not workbook:
+                    continue
                 combo = (site_id, form.id, period.id)
                 if combo not in submitted_combos:
                     not_started.append({
+                        "workbook_id": workbook.id,
+                        "workbook_name": workbook.name,
                         "form_id": form.id,
                         "form_name": human_sheet_label(form),
                         "form_code": form.code,
@@ -1518,7 +1712,7 @@ def get_spoc_sheets_buckets(user_id):
         "submitted": submitted
     }
 
-def create_draft_submission(site_id, form_id, reporting_period_id, user_id):
+def create_draft_submission(site_id, form_id, reporting_period_id, user_id, workbook_id=None):
     """
     Creates a new draft submission for the given site, form, and period.
     """
@@ -1534,19 +1728,24 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id):
     if period.status not in ("OPEN", "REOPENED"):
         raise ValueError(f"Cannot create a submission for a reporting period that is {period.status}.")
         
+    workbook = None
+
     # 3. Form check
     form = Form.query.filter_by(id=form_id, is_deleted=False).first()
     if not form or not form.current_version_id:
         raise ValueError("Published form version not found.")
-        
-    if not _is_form_assigned_to_site(form_id, site_id):
+
+    if workbook_id:
+        workbook, _site = _require_workbook_runtime_access(user_id, workbook_id, site_id)
+        _require_form_in_workbook(workbook.id, form_id)
+    elif not _is_form_assigned_to_site(form_id, site_id):
         raise ValueError(
             "This form is not assigned to the selected site. "
             "Check the workbook's Sites tab."
         )
 
     # 4. Workflow assignment
-    wf_id = _get_workflow_id_for_form(form_id)
+    wf_id = workbook.workflow_id if workbook else _get_workflow_id_for_form(form_id)
     if not wf_id:
         raise ValueError(
             "This form is not ready for submission: no approval path has been assigned to its workbook."
@@ -1637,7 +1836,7 @@ def get_or_create_submission_package(site_id, period_id, user_id, package_type="
     db.session.flush()
     return package
 
-def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=None, user_id=None, selected_form_id=None, values=None):
+def submit_monthly_workbook_package(site_id, workbook_id=None, period_id=None, year=None, month=None, user_id=None, selected_form_id=None, values=None):
     """
     Foundation package submit: groups assigned monthly form submissions for one site and period.
     Existing monthly submit logic remains the source of validation/routing/notifications.
@@ -1652,6 +1851,13 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
 
     if not has_permission(user_id, "submission", "submit", scope_site_id=site_id):
         raise ValueError("Permission denied: You do not have permission to submit this workbook package.")
+
+    workbook, _site = _require_workbook_runtime_access(user_id, workbook_id, site_id)
+    workflow = _get_workflow_for_workbook(workbook)
+    if not workflow or not workflow.current_version_id:
+        raise ValueError(
+            "This workbook is not ready for submission: no published approval path has been assigned."
+        )
 
     period = None
     if period_id:
@@ -1670,15 +1876,15 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
 
     assigned_forms = [
         form for form, _metadata
-        in _published_forms_for_site_via_workbook(site_id)
+        in _published_forms_for_workbook(workbook.id)
     ]
     if not assigned_forms:
-        raise ValueError("No published forms are assigned to this site.")
+        raise ValueError("No published sheets are assigned to this workbook.")
 
     assigned_form_ids = {form.id for form in assigned_forms}
     selected_form_id = int(selected_form_id) if selected_form_id else None
     if selected_form_id and selected_form_id not in assigned_form_ids:
-        raise ValueError("Selected form is not assigned to this site.")
+        raise ValueError("Selected sheet is not assigned to this workbook.")
 
     package = get_or_create_submission_package(site_id, period.id, user_id)
     included = []
@@ -1702,7 +1908,7 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
 
         if not submission and selected_form_id == form.id and _values_have_content(values):
             try:
-                submission = create_draft_submission(site_id, form.id, period.id, user_id)
+                submission = create_draft_submission(site_id, form.id, period.id, user_id, workbook_id=workbook.id)
                 created_from_payload = True
             except DuplicateSubmissionError as exc:
                 submission = Submission.query.get(exc.existing_id)
@@ -1728,6 +1934,8 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
             autosave_submission_values(submission.id, values or {}, user_id)
 
         submission.package_id = package.id
+        if submission.status in EDITABLE_SUBMISSION_STATUSES:
+            submission.workflow_version_id = workflow.current_version_id
         submission.updated_by = user_id
 
         if submission.status in EDITABLE_SUBMISSION_STATUSES:
@@ -2006,10 +2214,8 @@ def submit_submission(submission_id, user_id):
     if not has_permission(user_id, "submission", "submit", scope_site_id=submission.site_id):
         raise ValueError("Permission denied: You do not have permission to submit this sheet.")
 
-    # Confirm form has workflow assigned
     form = Form.query.get(submission.form_id)
-    wf_id = _get_workflow_id_for_form(submission.form_id)
-    if not wf_id:
+    if not submission.workflow_version_id:
         raise ValueError(
             "This submission cannot proceed: no approval path has been assigned to its workbook."
         )

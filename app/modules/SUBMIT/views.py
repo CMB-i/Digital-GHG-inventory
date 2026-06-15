@@ -122,8 +122,9 @@ def annual_workbook_data():
         data = compose_annual_workbook_data(
             user_id=user.id,
             site_id=request.args.get("site_id"),
-            form_id=request.args.get("form_id"),
+            workbook_id=request.args.get("workbook_id"),
             fy_start_year=request.args.get("fy"),
+            selected_form_id=request.args.get("form_id"),
         )
         return jsonify(data)
     except ValueError as e:
@@ -140,6 +141,7 @@ def annual_workbook_calculation_results():
     try:
         data = compose_calculation_results(
             site_id=request.args.get("site_id"),
+            workbook_id=request.args.get("workbook_id"),
             fy_start_year=request.args.get("fy"),
             user_id=user.id,
         )
@@ -160,6 +162,7 @@ def submit_annual_workbook_package():
     try:
         result = submit_monthly_workbook_package(
             site_id=data.get("site_id"),
+            workbook_id=data.get("workbook_id"),
             period_id=data.get("period_id"),
             year=data.get("year"),
             month=data.get("month"),
@@ -197,6 +200,7 @@ def save_annual_workbook_values_endpoint():
         result = save_annual_workbook_values(
             user_id=user.id,
             site_id=data.get("site_id"),
+            workbook_id=data.get("workbook_id"),
             form_id=data.get("form_id"),
             fy_start_year=data.get("fy"),
             values=data.get("values") or {},
@@ -225,7 +229,13 @@ def create_submission_endpoint():
     
     user = current_user()
     try:
-        sub = create_draft_submission(site_id, form_id, reporting_period_id, user.id)
+        sub = create_draft_submission(
+            site_id,
+            form_id,
+            reporting_period_id,
+            user.id,
+            workbook_id=data.get("workbook_id"),
+        )
         db.session.commit()
         return success_response(
             data={"submission_id": sub.id},
