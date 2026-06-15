@@ -28,7 +28,7 @@ from app.modules.WFLWBLD.service import (
     find_next_applicable_level,
     validate_workflow_path_for_site,
 )
-from app.modules.WKBK.model import Workbook, WorkbookForm
+from app.modules.WKBK.model import Workbook, WorkbookForm, WorkbookSite
 
 
 def _get_workflow_id_for_form(form_id):
@@ -60,6 +60,27 @@ def _get_workflow_id_for_form(form_id):
         )
 
     return None
+
+
+def _is_form_assigned_to_site(form_id, site_id):
+    """
+    Returns True if this form belongs to an active workbook
+    that is assigned to the given site via WorkbookSite.
+    WorkbookSite is the authoritative source for site eligibility.
+    """
+    row = (
+        db.session.query(WorkbookForm.id)
+        .join(Workbook, Workbook.id == WorkbookForm.workbook_id)
+        .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+        .filter(
+            WorkbookForm.form_id == form_id,
+            WorkbookSite.site_id == site_id,
+            Workbook.is_active == True,
+        )
+        .first()
+    )
+    return row is not None
+
 
 class DuplicateSubmissionError(Exception):
     def __init__(self, existing_id):
@@ -273,6 +294,33 @@ def _published_forms_for_site(site_id):
         if site_id in site_ids:
             assigned.append((form, metadata))
     return assigned
+
+
+def _published_forms_for_site_via_workbook(site_id):
+    """
+    Returns published forms assigned to this site via WorkbookSite.
+    This is the new authoritative lookup replacing form.description["sites"].
+    Returns list of (form, metadata) tuples for compatibility.
+    """
+    rows = (
+        db.session.query(Form)
+        .join(WorkbookForm, WorkbookForm.form_id == Form.id)
+        .join(Workbook, Workbook.id == WorkbookForm.workbook_id)
+        .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+        .filter(
+            WorkbookSite.site_id == site_id,
+            Workbook.is_active == True,
+            Form.is_deleted == False,
+            Form.current_version_id.is_not(None),
+        )
+        .order_by(Form.name.asc(), Form.id.asc())
+        .all()
+    )
+    result = []
+    for form in rows:
+        metadata = _parse_form_metadata(form)
+        result.append((form, metadata))
+    return result
 
 
 def _field_payload(form_version_id):
@@ -1306,15 +1354,13 @@ def get_spoc_sheets_buckets(user_id):
     
     for f in published_forms:
         form_map[f.id] = f
-        try:
-            parsed_desc = json.loads(f.description or "{}")
-        except Exception:
-            parsed_desc = {}
-        applicable_site_ids = parsed_desc.get("sites", [])
-        
-        for site_id in allowed_site_ids:
-            if site_id in applicable_site_ids:
-                applicable_forms_by_site[site_id].append(f)
+
+    # Use WorkbookSite as authoritative source for form-site eligibility
+    for site_id in allowed_site_ids:
+        site_forms = _published_forms_for_site_via_workbook(site_id)
+        for form, _ in site_forms:
+            form_map[form.id] = form
+            applicable_forms_by_site[site_id].append(form)
 
     # 3. Get all active submissions for allowed sites
     submissions = (
@@ -1443,14 +1489,12 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id):
     if not form or not form.current_version_id:
         raise ValueError("Published form version not found.")
         
-    try:
-        parsed_desc = json.loads(form.description or "{}")
-    except Exception:
-        parsed_desc = {}
-        
-    if site_id not in parsed_desc.get("sites", []):
-        raise ValueError("This form is not applicable to the selected site.")
-        
+    if not _is_form_assigned_to_site(form_id, site_id):
+        raise ValueError(
+            "This form is not assigned to the selected site. "
+            "Check the workbook's Sites tab."
+        )
+
     # 4. Workflow assignment
     wf_id = _get_workflow_id_for_form(form_id)
     if not wf_id:
@@ -1574,7 +1618,10 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
     if period.status not in EDITABLE_PERIOD_STATUSES:
         raise ValueError(f"Cannot submit a workbook package for a reporting period that is {period.status}.")
 
-    assigned_forms = [form for form, _metadata in _published_forms_for_site(site_id)]
+    assigned_forms = [
+        form for form, _metadata
+        in _published_forms_for_site_via_workbook(site_id)
+    ]
     if not assigned_forms:
         raise ValueError("No published forms are assigned to this site.")
 

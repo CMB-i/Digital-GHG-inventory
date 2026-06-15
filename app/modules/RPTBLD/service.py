@@ -7,6 +7,7 @@ from openpyxl.utils import get_column_letter
 
 from app.database import db
 from app.modules.RPTBLD.model import ReportTemplate
+from app.modules.WKBK.model import Workbook, WorkbookForm, WorkbookSite
 from app.common.permissions import has_permission
 from app.modules.ACCESS.model import AccessMatrix
 from app.modules.SITEMST.model import Site
@@ -385,13 +386,19 @@ def get_missing_submissions(user_id):
 
         # Check form applicability
         for f in published_forms:
-            try:
-                parsed_desc = json.loads(f.description or "{}")
-            except Exception:
-                parsed_desc = {}
-            applicable_site_ids = parsed_desc.get("sites", [])
-
-            if p.site_id not in applicable_site_ids:
+            # Use WorkbookSite as authoritative source
+            is_assigned = (
+                db.session.query(WorkbookForm.id)
+                .join(Workbook, Workbook.id == WorkbookForm.workbook_id)
+                .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+                .filter(
+                    WorkbookForm.form_id == f.id,
+                    WorkbookSite.site_id == p.site_id,
+                    Workbook.is_active == True,
+                )
+                .first()
+            )
+            if not is_assigned:
                 continue
 
             # Query actual submission
