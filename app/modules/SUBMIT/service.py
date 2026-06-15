@@ -28,7 +28,9 @@ from app.modules.WFLWBLD.service import (
     find_next_applicable_level,
     validate_workflow_path_for_site,
 )
-from app.modules.WKBK.model import Workbook, WorkbookForm, WorkbookSite
+from app.modules.WKBK.model import (
+    Workbook, WorkbookForm, WorkbookSite, WorkbookSiteSubmitter
+)
 
 
 def _get_workflow_id_for_form(form_id):
@@ -80,6 +82,32 @@ def _is_form_assigned_to_site(form_id, site_id):
         .first()
     )
     return row is not None
+
+
+def _get_user_workbook_site_ids(user_id):
+    rows = (
+        db.session.query(WorkbookSiteSubmitter.site_id)
+        .join(Workbook, Workbook.id == WorkbookSiteSubmitter.workbook_id)
+        .filter(
+            WorkbookSiteSubmitter.user_id == user_id,
+            Workbook.is_active == True,
+        )
+        .distinct()
+        .all()
+    )
+    return {row.site_id for row in rows}
+
+
+def _user_has_workbook_submitter_assignments(user_id):
+    return (
+        db.session.query(WorkbookSiteSubmitter.id)
+        .join(Workbook, Workbook.id == WorkbookSiteSubmitter.workbook_id)
+        .filter(
+            WorkbookSiteSubmitter.user_id == user_id,
+            Workbook.is_active == True,
+        )
+        .first()
+    ) is not None
 
 
 class DuplicateSubmissionError(Exception):
@@ -652,6 +680,14 @@ def get_annual_workbook_options(user_id):
     if not site_ids:
         return {"sites": [], "forms_by_site": {}}
 
+    # Apply WorkbookSiteSubmitter filter if user has explicit assignments
+    if _user_has_workbook_submitter_assignments(user_id):
+        workbook_site_ids = _get_user_workbook_site_ids(user_id)
+        site_ids = site_ids & workbook_site_ids
+
+    if not site_ids:
+        return {"sites": [], "forms_by_site": {}}
+
     sites = Site.query.filter(
         Site.id.in_(site_ids),
         Site.is_deleted == False,
@@ -698,6 +734,15 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
         or has_permission(user_id, "submission", "submit", scope_site_id=site_id)
     ):
         raise ValueError("Permission denied: You cannot view submissions for this site.")
+
+    # Check WorkbookSiteSubmitter assignment if user has explicit assignments configured
+    if _user_has_workbook_submitter_assignments(user_id):
+        workbook_site_ids = _get_user_workbook_site_ids(user_id)
+        if site_id not in workbook_site_ids:
+            raise ValueError(
+                "Permission denied: You are not assigned to submit "
+                "this workbook for this site."
+            )
 
     site = Site.query.filter_by(id=site_id, is_deleted=False).first()
     if not site:
@@ -1340,22 +1385,27 @@ def get_spoc_sheets_buckets(user_id):
     if is_global:
         active_sites = Site.query.filter_by(is_deleted=False).all()
         allowed_site_ids = {site.id for site in active_sites}
-        sites_map = {site.id: site for site in active_sites}
     else:
         active_sites = Site.query.filter(Site.id.in_(allowed_site_ids), Site.is_deleted == False).all()
-        sites_map = {site.id: site for site in active_sites}
-        
+
+    # Apply WorkbookSiteSubmitter filter if user has explicit assignments.
+    # Users with no assignments (admins, global users) bypass this filter.
+    if _user_has_workbook_submitter_assignments(user_id):
+        workbook_site_ids = _get_user_workbook_site_ids(user_id)
+        allowed_site_ids = allowed_site_ids & workbook_site_ids
+        active_sites = [s for s in active_sites if s.id in allowed_site_ids]
+
+    sites_map = {site.id: site for site in active_sites}
+
     # 2. Get all published forms
     published_forms = Form.query.filter_by(is_deleted=False).filter(Form.current_version_id.is_not(None)).all()
-    
-    # Check form applicability per site
+
+    # Check form applicability per site using WorkbookSite as authoritative source
     applicable_forms_by_site = {site_id: [] for site_id in allowed_site_ids}
     form_map = {}
-    
+
     for f in published_forms:
         form_map[f.id] = f
-
-    # Use WorkbookSite as authoritative source for form-site eligibility
     for site_id in allowed_site_ids:
         site_forms = _published_forms_for_site_via_workbook(site_id)
         for form, _ in site_forms:

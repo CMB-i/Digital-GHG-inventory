@@ -384,9 +384,8 @@ def get_missing_submissions(user_id):
 
         period_label = format_period_label(p.year, p.month)
 
-        # Check form applicability
+        # Check form applicability using WorkbookSite as authoritative source
         for f in published_forms:
-            # Use WorkbookSite as authoritative source
             is_assigned = (
                 db.session.query(WorkbookForm.id)
                 .join(Workbook, Workbook.id == WorkbookForm.workbook_id)
