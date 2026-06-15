@@ -476,3 +476,72 @@ def resolve_review_issue(issue_id):
     except Exception as e:
         db.session.rollback()
         return error_response(str(e), 500)
+
+
+@bp.route("/api/submissions/<int:submission_id>/audit-logs")
+@require_login
+def get_submission_audit_logs(submission_id):
+    submission = Submission.query.get(submission_id)
+    if not submission or submission.is_deleted:
+        return error_response("Submission not found.", 404)
+
+    user = current_user()
+    has_view = has_permission(user.id, "submission", "view", scope_site_id=submission.site_id)
+    has_submit = has_permission(user.id, "submission", "submit", scope_site_id=submission.site_id)
+    has_approve = has_permission(user.id, "submission", "approve", scope_site_id=submission.site_id)
+    has_reject = has_permission(user.id, "submission", "reject", scope_site_id=submission.site_id)
+    if not (has_view or has_submit or has_approve or has_reject):
+        return error_response("Permission denied.", 403)
+
+    from app.modules.USRMGMT.model import User
+    from app.modules.AUDITL.model import AuditLog
+
+    actions = ApprovalAction.query.filter_by(submission_id=submission_id).all()
+    logs = AuditLog.query.filter_by(
+        entity_type="submission",
+        entity_id=str(submission_id),
+        action="SUBMIT"
+    ).all()
+
+    user_ids = {a.actor_id for a in actions} | {l.actor_user_id for l in logs if l.actor_user_id is not None}
+    users = User.query.filter(User.id.in_(user_ids)).all() if user_ids else []
+    user_map = {u.id: u.full_name for u in users}
+
+    events_raw = []
+    for log in logs:
+        new_vals = log.new_values or {}
+        old_vals = log.old_values or {}
+        new_status = new_vals.get("status")
+        old_status = old_vals.get("status")
+
+        if new_status == "Resubmitted" or old_status == "Changes Requested":
+            action_label = "Resubmitted"
+        else:
+            action_label = "Submitted"
+
+        dt = log.created_at
+        events_raw.append((dt, {
+            "timestamp": dt.isoformat(),
+            "actor": user_map.get(log.actor_user_id, "System"),
+            "action": action_label,
+            "level": None,
+            "comment": None,
+            "is_approval_action": False
+        }))
+
+    for act in actions:
+        dt = act.acted_at
+        events_raw.append((dt, {
+            "timestamp": dt.isoformat(),
+            "actor": user_map.get(act.actor_id, "System"),
+            "action": act.action,
+            "level": act.level_number,
+            "comment": act.comment,
+            "is_approval_action": True
+        }))
+
+    events_raw.sort(key=lambda x: x[0])
+    events = [item[1] for item in events_raw]
+
+    return success_response(data=events)
+

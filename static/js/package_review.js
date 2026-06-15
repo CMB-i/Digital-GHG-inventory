@@ -60,6 +60,85 @@ document.addEventListener("DOMContentLoaded", function () {
 
   const escapeHtml = window.WorkbookSheet.escapeHtml;
 
+  async function loadSheetAuditLogs(submissionId) {
+    const card = document.getElementById("sheet-audit-logs-card");
+    const timeline = document.getElementById("sheet-audit-logs-timeline");
+    if (!card || !timeline) return;
+
+    if (!submissionId) {
+      card.classList.add("hidden");
+      return;
+    }
+
+    timeline.innerHTML = `<div class="text-xs text-slate-500 py-2">Loading audit logs...</div>`;
+    card.classList.remove("hidden");
+
+    try {
+      const response = await fetch(`/module/APPROV/api/submissions/${submissionId}/audit-logs`);
+      if (!response.ok) throw new Error("Could not load audit logs.");
+      const resData = await response.json();
+      const events = resData.data || [];
+
+      if (!events.length) {
+        timeline.innerHTML = `<div class="text-xs text-slate-400 py-2 italic">No audit history recorded.</div>`;
+        return;
+      }
+
+      timeline.innerHTML = `
+        <div class="audit-timeline">
+          ${events.map(event => {
+            let badgeClass = "bg-slate-100 text-slate-800 border-slate-200";
+            let dotClass = "";
+            let bubbleClass = "bg-slate-50 border-slate-100 text-slate-700";
+
+            if (event.action === "Submitted" || event.action === "Resubmitted") {
+              badgeClass = "bg-indigo-50 text-indigo-700 border-indigo-200";
+              dotClass = "dot-submitted";
+            } else if (event.action === "Approve") {
+              badgeClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
+              dotClass = "dot-approved";
+              bubbleClass = "bg-[#def0e2] border-[#c0e6c7] text-[#1f6b34]";
+            } else if (event.action === "Request Changes") {
+              badgeClass = "bg-amber-50 text-amber-700 border-amber-200";
+              dotClass = "dot-changes-requested";
+              bubbleClass = "bg-[#fcf3d7] border-[#f5e4b3] text-[#8a6a13]";
+            } else if (event.action === "Reject") {
+              badgeClass = "bg-rose-50 text-rose-700 border-rose-200";
+              dotClass = "dot-rejected";
+              bubbleClass = "bg-[#fbe3e6] border-[#f6c2c8] text-[#9a1224]";
+            }
+
+            const displayAction = event.is_approval_action 
+              ? (event.action === "Approve" ? "L" + event.level + " Approved" 
+                : event.action === "Request Changes" ? "L" + event.level + " Requested Changes" 
+                : "L" + event.level + " Rejected")
+              : event.action;
+
+            return `
+              <div class="audit-timeline-item">
+                <div class="audit-timeline-dot ${dotClass}"></div>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="inline-flex items-center border rounded px-1.5 py-0.5 text-[10px] font-bold ${badgeClass}">
+                    ${escapeHtml(displayAction)}
+                  </span>
+                  <span class="text-[10px] text-slate-400 font-semibold">${formatDate(event.timestamp)}</span>
+                </div>
+                <div class="mt-1 text-xs font-semibold text-slate-700">${escapeHtml(event.actor)}</div>
+                ${event.comment ? `
+                  <div class="audit-comment-bubble ${bubbleClass}">
+                    <strong>Remark:</strong> "${escapeHtml(event.comment)}"
+                  </div>
+                ` : ""}
+              </div>
+            `;
+          }).join("")}
+        </div>
+      `;
+    } catch (err) {
+      timeline.innerHTML = `<div class="text-xs text-rose-500 py-2 font-semibold">Error: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
   function getStatusClass(status) {
     switch (status) {
       case "Approved":
@@ -85,6 +164,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function renderSheet(sheet) {
+    loadSheetAuditLogs(sheet.submission_id);
     sheetTitle.textContent = sheet.form_name;
     sheetMeta.textContent = `Full FY context · Submitted month highlighted · Submitted by ${sheet.submitted_by} on ${formatDate(sheet.submitted_at)}`;
     sheetStatus.className = `inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${getStatusClass(sheet.status)}`;
@@ -205,6 +285,8 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   async function loadCalculationResultsForReview() {
+    const card = document.getElementById("sheet-audit-logs-card");
+    if (card) card.classList.add("hidden");
     sheetTitle.textContent = "Calculation Results";
     sheetMeta.textContent = "Read-only calculation dashboard for this financial year.";
     sheetStatus.classList.add("hidden");
