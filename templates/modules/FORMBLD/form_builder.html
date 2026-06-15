@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Workbook Builder - Digital GHG Inventory{% endblock %}
+{% block title %}Sheet Builder - Digital GHG Inventory{% endblock %}
 
 {% block content %}
 <div class="space-y-4">
@@ -16,39 +16,36 @@
 
   <!-- 1. LIST VIEW -->
   <div id="list-view">
-    <div class="text-xs text-slate-500 mb-2">Configuration · <strong class="text-indigo-600">All Workbooks</strong></div>
+    <div class="text-xs text-slate-500 mb-2">Configuration · <strong class="text-indigo-600">Sheets</strong></div>
     <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-6">
       <div>
-        <h1 class="page-title">Workbook Builder</h1>
-        <p class="text-xs text-slate-500 mt-1">Configure workbook layouts, fields, validations, and workflow paths for ESG/GHG site reports.</p>
+        <h1 class="page-title">Sheet Builder</h1>
+        <p class="text-xs text-slate-500 mt-1">Configure sheet layouts, fields, and validations for ESG/GHG site reports.</p>
       </div>
       <button onclick="startNew()" class="btn btn-primary">
         <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
         </svg>
-        Create Workbook
+        Create Sheet
       </button>
     </div>
 
     <div id="forms-list-body" class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       <div class="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-400 shadow-sm md:col-span-2 xl:col-span-3">
-        Loading workbooks...
+        Loading sheets...
       </div>
     </div>
   </div>
 
   <!-- 2. STEP 1: FORM DETAILS VIEW -->
   <div id="step1-view" class="hidden max-w-2xl mx-auto">
-    <button onclick="showList()" class="text-label mb-4 text-indigo-600 hover:text-indigo-700 hover:underline">
-      ← Back to all forms
-    </button>
     <div class="bg-white rounded-xl border border-slate-200/80 shadow-md overflow-hidden">
       <div class="px-6 py-4 bg-slate-50 border-b border-slate-200/80">
-        <h2 id="step1-title" class="section-heading">New Form · Step 1 — Form Details</h2>
+        <h2 id="step1-title" class="section-heading">New Sheet · Step 1 — Sheet Details</h2>
       </div>
       <form id="form-details-submit" class="p-5 space-y-4 text-xs font-normal text-slate-700">
         <div>
-          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Form Name (Internal Code)</label>
+          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Sheet Code (Internal)</label>
           <input type="text" id="df-code" required placeholder="e.g. diesel_combustion" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border font-mono uppercase">
         </div>
         <div>
@@ -74,14 +71,7 @@
           </select>
         </div>
         <div>
-          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Approval Workflow (Optional)</label>
-          <select id="df-workflow" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
-            <option value="">Select workflow...</option>
-            <!-- Loaded dynamically -->
-          </select>
-        </div>
-        <div>
-          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Form Description</label>
+          <label class="block text-[10px] text-slate-400 uppercase tracking-wider mb-1">Sheet Description</label>
           <textarea id="df-desc" rows="2" placeholder="Briefly describe the reporting guidelines..." class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs p-3 border font-medium"></textarea>
         </div>
         <div class="pt-2 flex justify-end">
@@ -97,13 +87,12 @@
   <div id="step2-view" class="hidden space-y-4">
     <div class="flex items-center justify-between border-b border-slate-200 pb-4">
       <div class="flex items-center space-x-3">
-        <button id="btn-forms-back" onclick="showList()" class="inline-flex items-center text-xs text-slate-500 hover:text-slate-700 font-semibold">
+        <button id="btn-builder-forms-back" onclick="showList()" class="inline-flex items-center text-xs text-slate-500 hover:text-slate-700 font-semibold">
           ← Forms
         </button>
         <span class="text-slate-300">|</span>
         <h1 id="builder-form-title" class="page-title">Electricity Consumed</h1>
         <span id="builder-version-badge" class="px-2 py-0.5 rounded-full font-semibold uppercase text-[9px] bg-amber-100 text-amber-800">Draft</span>
-        <span id="builder-workflow-status" class="px-2 py-0.5 rounded-full font-semibold uppercase text-[9px]">Workflow: Loading...</span>
       </div>
       <div class="flex items-center space-x-2">
           <button id="btn-save-layout" class="btn btn-outline btn-sm">
@@ -113,7 +102,7 @@
           Preview
         </button>
         <button id="btn-publish-form" class="btn btn-primary btn-sm">
-          Publish Form
+          Publish Sheet
         </button>
       </div>
     </div>
@@ -126,14 +115,6 @@
           class="shrink-0 text-rose-400 hover:text-rose-700 text-sm font-bold leading-none">✕</button>
       </div>
       <ul id="publish-errors-list" class="list-disc pl-5 text-xs text-rose-700 space-y-1"></ul>
-    </div>
-
-    <!-- Workflow Warning Banner -->
-    <div id="workflow-warning-banner" class="hidden p-4 bg-amber-50 border border-amber-200 rounded-xl mb-4 text-xs text-amber-800 font-normal flex items-center space-x-2">
-      <svg class="h-5 w-5 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-      </svg>
-      <span>This form is published but not submission-ready until an approval workflow is assigned.</span>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-[280px_1fr_360px] gap-4 items-start">
@@ -176,7 +157,7 @@
           
           <div id="form-workspace" class="p-6 min-h-[400px] border-b border-slate-100 space-y-4">
             <div class="text-center py-16 text-slate-400 italic text-sm">
-              Loading form preview...
+              Loading sheet preview...
             </div>
           </div>
 

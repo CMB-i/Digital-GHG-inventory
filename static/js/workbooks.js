@@ -172,6 +172,7 @@ document.addEventListener("DOMContentLoaded", function () {
   // ══════════════════════════════════════════════════════════════════════════
   const sheetsGrid  = document.getElementById("sheets-grid");
   const btnAddSheet = document.getElementById("btn-add-sheet");
+  const btnReuseExistingSheet = document.getElementById("btn-reuse-existing-sheet");
 
   if (sheetsGrid && typeof WORKBOOK_ID !== "undefined") {
     let activeTab = "sheets";
@@ -341,22 +342,31 @@ document.addEventListener("DOMContentLoaded", function () {
 
     let allAddable = [];
 
+    function goToCreateSheet() {
+      const params = new URLSearchParams();
+      params.set("workbook_id", WORKBOOK_ID);
+      params.set("workbook_name", WORKBOOK_NAME);
+      window.location.href = "/module/FORMBLD/?" + params.toString();
+    }
+
     function openPanel() {
       panel.classList.remove("hidden");
       if (sheetLabel) sheetLabel.value = "";
       if (sheetSearch) sheetSearch.value = "";
+
       fetch(`/workbooks/api/${WORKBOOK_ID}/addable-forms`)
         .then(r => r.json())
         .then(data => {
           allAddable = data;
           renderAddable(data);
         })
-        .catch(() => { formsList.innerHTML = '<p class="text-xs text-rose-500 text-center py-6">Failed to load forms.</p>'; });
+        .catch(() => { formsList.innerHTML = '<p class="text-xs text-rose-500 text-center py-6">Failed to load sheets.</p>'; });
     }
 
     function closePanel() { panel.classList.add("hidden"); }
 
-    btnAddSheet.onclick    = openPanel;
+    btnAddSheet.onclick    = goToCreateSheet;
+    if (btnReuseExistingSheet) btnReuseExistingSheet.onclick = openPanel;
     backdrop.onclick       = closePanel;
     btnClosePanel.onclick  = closePanel;
 
@@ -370,7 +380,19 @@ document.addEventListener("DOMContentLoaded", function () {
     function renderAddable(forms) {
       formsList.innerHTML = "";
       if (!forms.length) {
-        formsList.innerHTML = '<p class="text-xs text-slate-400 italic text-center py-6">No matching forms.</p>';
+        if (!sheetSearch.value.trim()) {
+          formsList.innerHTML =
+            '<p class="text-xs text-slate-400 italic text-center py-4">' +
+            'All published sheets are already in this workbook.<br>' +
+            '<span class="text-[#1a3a6b] font-semibold">' +
+            'Use "Add Sheet" to create a new one.</span>' +
+            '</p>';
+        } else {
+          formsList.innerHTML =
+            '<p class="text-xs text-slate-400 italic text-center py-4">' +
+            'No matching sheets found.' +
+            '</p>';
+        }
         return;
       }
       forms.forEach(f => {
@@ -421,7 +443,7 @@ document.addEventListener("DOMContentLoaded", function () {
         sheetsGrid.innerHTML = `
           <div class="md:col-span-2 xl:col-span-3 rounded-xl border border-dashed border-slate-300 bg-white shadow-sm p-12 text-center space-y-3">
             <p class="text-sm font-semibold text-slate-600">No sheets yet.</p>
-            <p class="text-xs text-slate-400">Add existing forms as sheets to this workbook.</p>
+            <p class="text-xs text-slate-400">Create a sheet or reuse an existing published sheet.</p>
             <button class="inline-flex items-center px-3.5 py-1.5 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-xs font-semibold rounded-lg shadow transition"
               onclick="document.getElementById('btn-add-sheet').click()">
               + Add First Sheet
@@ -515,7 +537,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     async function removeSheet(formId, label) {
-      if (!confirm(`Remove "${label}" from this workbook?\n\nThe form itself will not be deleted.`)) return;
+      if (!confirm(`Remove "${label}" from this workbook?\n\nThe sheet definition itself will not be deleted.`)) return;
       try {
         const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/sheets/remove`, {
           method: "POST",

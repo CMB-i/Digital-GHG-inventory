@@ -83,7 +83,8 @@ def create():
     data = request.get_json() or {}
     name = data.get("name")
     code = data.get("code")
-    
+    workbook_id = data.get("workbook_id")
+
     # Serialize metadata in description
     import json
     metadata = {
@@ -100,12 +101,56 @@ def create():
     try:
         form = create_form(name, code, desc_str, user.id)
         db.session.commit()
-        return success_response(
-            data={"id": form.id, "name": form.name, "code": form.code},
-            message="Form created successfully."
-        )
     except ValueError as e:
         return error_response(str(e), 400)
+
+    if workbook_id:
+        try:
+            workbook_id = int(workbook_id)
+        except (TypeError, ValueError):
+            return error_response("Invalid workbook_id.", 400)
+
+        from app.modules.WKBK.model import Workbook
+        from app.modules.WKBK.service import add_sheet_to_workbook
+
+        wb = Workbook.query.filter_by(id=workbook_id, is_active=True).first()
+        if not wb:
+            db.session.rollback()
+            return error_response("Workbook not found or inactive.", 404)
+
+        try:
+            add_sheet_to_workbook(workbook_id=workbook_id, form_id=form.id, sheet_label=None)
+            db.session.commit()
+        except ValueError as e:
+            db.session.rollback()
+            return error_response(str(e), 400)
+        except Exception:
+            db.session.rollback()
+            return error_response(
+                "Form was created but could not be attached "
+                "to the workbook. Please add it manually.", 500
+            )
+
+        return success_response(
+            data={
+                "id": form.id,
+                "name": form.name,
+                "code": form.code,
+                "workbook_id": workbook_id,
+                "attached_to_workbook": True,
+            },
+            message="Form created and added to workbook."
+        )
+
+    return success_response(
+        data={
+            "id": form.id,
+            "name": form.name,
+            "code": form.code,
+            "attached_to_workbook": False,
+        },
+        message="Form created successfully."
+    )
 
 
 @bp.route("/api/<int:form_id>", methods=["PUT"])
