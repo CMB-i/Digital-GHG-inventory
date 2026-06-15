@@ -6,7 +6,7 @@ document.addEventListener("DOMContentLoaded", function () {
   let availableFormulas = [];
   let activeSites = [];
   let sitesMap = {};
-  
+
   let selectedFormId = null;
   let selectedVersionId = null;
   let selectedFieldCode = null;
@@ -20,7 +20,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const listView = document.getElementById("list-view");
   const step1View = document.getElementById("step1-view");
   const step2View = document.getElementById("step2-view");
-  
+
   // Table body in list-view
   const formsListBody = document.getElementById("forms-list-body");
 
@@ -90,8 +90,8 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!container) return;
     const toast = document.createElement("div");
     toast.className = `p-4 rounded-xl shadow-lg border text-xs font-bold transition-all duration-300 transform translate-y-2 opacity-0 flex items-center justify-between ${
-      type === "success" 
-        ? "bg-emerald-50 border-emerald-200 text-emerald-800" 
+      type === "success"
+        ? "bg-emerald-50 border-emerald-200 text-emerald-800"
         : "bg-rose-50 border-rose-200 text-rose-800"
     }`;
     toast.innerHTML = `
@@ -100,12 +100,12 @@ document.addEventListener("DOMContentLoaded", function () {
     `;
     toast.querySelector("button").onclick = () => toast.remove();
     container.appendChild(toast);
-    
+
     // Animate in
     setTimeout(() => {
       toast.classList.remove("translate-y-2", "opacity-0");
     }, 10);
-    
+
     // Auto remove
     setTimeout(() => {
       toast.classList.add("translate-y-2", "opacity-0");
@@ -729,7 +729,7 @@ document.addEventListener("DOMContentLoaded", function () {
         data.forEach(form => {
           const card = document.createElement("article");
           card.className = "flex min-h-[220px] flex-col justify-between rounded-xl border border-slate-200/80 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow-md";
-          
+
           // Map site IDs to names
           let sitesText = "None";
           let siteCountText = "No sites";
@@ -862,7 +862,7 @@ document.addEventListener("DOMContentLoaded", function () {
             showToast(resData.error, "error");
           } else {
             showToast("Sheet details saved successfully.");
-            
+
             // Reload list, find the form and open Step 2
             fetch("/module/FORMBLD/api")
               .then(res => res.json())
@@ -894,7 +894,7 @@ document.addEventListener("DOMContentLoaded", function () {
             showToast(resData.error, "error");
           } else {
             showToast("Sheet details updated successfully.");
-            
+
             // Go directly to layout canvas
             editFormLayout(selectedFormId, selectedVersionId);
           }
@@ -910,7 +910,7 @@ document.addEventListener("DOMContentLoaded", function () {
   function loadVersionDetails(versionId) {
     closeInspector();
     publishErrors.classList.add("hidden");
-    
+
     fetch(`/module/FORMBLD/api/version/${versionId}`)
       .then(res => res.json())
       .then(data => {
@@ -927,7 +927,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // Set status badge and name
         builderFormTitle.textContent = data.form.display_name || data.form.name;
         builderVersionBadge.textContent = `v${data.version.version_number} (${data.version.status})`;
-        
+
         let badgeClass = "bg-amber-100 text-amber-800";
         if (data.version.status === "Published") badgeClass = "bg-emerald-100 text-emerald-800";
         else if (data.version.status === "Archived") badgeClass = "bg-slate-100 text-slate-800";
@@ -1230,7 +1230,7 @@ document.addEventListener("DOMContentLoaded", function () {
       r.classList.add("border-slate-200", "bg-white");
       r.style.borderStyle = "";
     });
-    
+
     rowElement.classList.remove("border-slate-200", "bg-white");
     rowElement.classList.add("border-indigo-300", "bg-indigo-50/50", "ring-1", "ring-indigo-200");
     rowElement.style.borderStyle = "solid";
@@ -1396,10 +1396,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (field.field_type === "number" || field.field_type === "integer") {
       field.field_config.unit = document.getElementById("prop-unit").value.trim();
-      
+
       const minVal = document.getElementById("prop-min").value;
       field.field_config.min = minVal !== "" ? parseFloat(minVal) : undefined;
-      
+
       const maxVal = document.getElementById("prop-max").value;
       field.field_config.max = maxVal !== "" ? parseFloat(maxVal) : undefined;
 
@@ -1490,7 +1490,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!confirm("Are you sure you want to delete this field from the sheet layout?")) return;
 
     currentFields = currentFields.filter(x => x.field_code !== selectedFieldCode);
-    
+
     // Normalize display order numbers
     normalizeFieldDisplayOrder();
 
@@ -1787,7 +1787,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!form) return;
 
     pvTitle.textContent = form.display_name || form.name;
-    
+
     let sitesText = "All Sites";
     if (form.sites && form.sites.length > 0) {
       sitesText = form.sites.map(sid => sitesMap[sid] || sid).join(", ");
@@ -1897,6 +1897,12 @@ document.addEventListener("DOMContentLoaded", function () {
       // Auto-trigger create flow when no existing form is being edited
       if (!formId) {
         startNew();
+
+        // WorkbookSite is the authoritative workbook-site assignment.
+        // Keep legacy site applicability populated so old save validation does not block sheet creation.
+        dfSitesList.querySelectorAll("input[type='checkbox']").forEach(cb => {
+          cb.checked = true;
+        });
       }
     }
 
