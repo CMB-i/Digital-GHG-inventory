@@ -65,6 +65,11 @@ def _get_workflow_id_for_form(form_id):
 
 
 def _is_form_assigned_to_site(form_id, site_id):
+    """
+    Returns True if this form belongs to an active workbook
+    that is assigned to the given site via WorkbookSite.
+    WorkbookSite is the authoritative source for site eligibility.
+    """
     row = (
         db.session.query(WorkbookForm.id)
         .join(Workbook, Workbook.id == WorkbookForm.workbook_id)
@@ -320,6 +325,11 @@ def _published_forms_for_site(site_id):
 
 
 def _published_forms_for_site_via_workbook(site_id):
+    """
+    Returns published forms assigned to this site via WorkbookSite.
+    This is the new authoritative lookup replacing form.description["sites"].
+    Returns list of (form, metadata) tuples for compatibility.
+    """
     rows = (
         db.session.query(Form)
         .join(WorkbookForm, WorkbookForm.form_id == Form.id)

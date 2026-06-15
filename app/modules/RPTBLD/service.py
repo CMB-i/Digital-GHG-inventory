@@ -7,6 +7,7 @@ from openpyxl.utils import get_column_letter
 
 from app.database import db
 from app.modules.RPTBLD.model import ReportTemplate
+from app.modules.WKBK.model import Workbook, WorkbookForm, WorkbookSite
 from app.common.permissions import has_permission
 from app.modules.ACCESS.model import AccessMatrix
 from app.modules.SITEMST.model import Site
@@ -14,7 +15,6 @@ from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.FORMBLD.model import Form, Field, FieldVersion
 from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument
 from app.modules.SUBMIT.service import human_sheet_label
-from app.modules.WKBK.model import Workbook, WorkbookForm, WorkbookSite
 from app.modules.USRMGMT.model import User
 
 def list_report_templates(user_id):
