@@ -5,6 +5,8 @@ document.addEventListener("DOMContentLoaded", function () {
   const siteNameEl = document.getElementById("workbook-site-name");
   const fyLabelEl = document.getElementById("workbook-fy-label");
   const selectedStatusEl = document.getElementById("workbook-selected-status");
+  const workbookTitleEl = document.getElementById("annual-workbook-title");
+  const workbookBreadcrumbEl = document.getElementById("annual-workbook-breadcrumb");
   const lastSavedEl = document.getElementById("workbook-last-saved");
   const alertEl = document.getElementById("workbook-alert");
   const emptyEl = document.getElementById("workbook-empty");
@@ -46,11 +48,13 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   const state = {
-    options: { sites: [], forms_by_site: {} },
+    options: { sites: [], forms_by_site: {}, workbooks_by_site: {} },
     selectedSiteId: null,
+    selectedWorkbookId: null,
     selectedFormId: null,
     selectedFy: paramInt("fy") || defaultFyStartYear(),
     requestedSiteId: paramInt("site_id"),
+    requestedWorkbookId: paramInt("workbook_id"),
     requestedFormId: paramInt("form_id"),
     requestedMonth: paramInt("month"),
     workbook: null,
@@ -169,9 +173,17 @@ document.addEventListener("DOMContentLoaded", function () {
   function setEmpty(title, body) {
     tableWrap.classList.add("hidden");
     document.getElementById("calculated-results-section").classList.add("hidden");
+    formTabs.innerHTML = "";
     emptyTitleEl.textContent = title;
     emptyBodyEl.textContent = body;
     emptyEl.classList.remove("hidden");
+    siteNameEl.textContent = title;
+    lastSavedEl.textContent = body;
+    if (selectedStatusEl) {
+      selectedStatusEl.textContent = "Unavailable";
+      selectedStatusEl.className = "rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 border border-amber-200";
+    }
+    if (currentMonthEl) currentMonthEl.classList.add("hidden");
     btnSave.disabled = true;
     btnSubmit.disabled = true;
   }
@@ -220,8 +232,20 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function formsForSelectedSite() {
+    if (
+      state.workbook
+      && String(state.workbook.workbook?.id) === String(state.selectedWorkbookId)
+      && Array.isArray(state.workbook.forms)
+    ) {
+      return state.workbook.forms || [];
+    }
+    const workbook = workbooksForSelectedSite().find(item => String(item.id || item.workbook_id) === String(state.selectedWorkbookId));
+    return workbook ? (workbook.sheets || []) : [];
+  }
+
+  function workbooksForSelectedSite() {
     if (!state.selectedSiteId) return [];
-    return state.options.forms_by_site[String(state.selectedSiteId)] || [];
+    return state.options.workbooks_by_site[String(state.selectedSiteId)] || [];
   }
 
   function getFormStatusColor(formId) {
@@ -416,6 +440,11 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function renderHeader() {
     const site = state.options.sites.find(item => String(item.id) === String(state.selectedSiteId));
+    const workbookName = state.workbook && state.workbook.workbook
+      ? state.workbook.workbook.name
+      : "Annual Workbook";
+    if (workbookTitleEl) workbookTitleEl.textContent = workbookName;
+    if (workbookBreadcrumbEl) workbookBreadcrumbEl.textContent = workbookName;
     siteNameEl.textContent = site ? site.name : "Select a site";
     fyLabelEl.textContent = `FY ${state.selectedFy}-${String(state.selectedFy + 1).slice(-2)}`;
 
@@ -814,16 +843,62 @@ document.addEventListener("DOMContentLoaded", function () {
     state.options = await optsRes.json();
     state.dashboardData = sheetsRes.ok ? await sheetsRes.json() : null;
 
+    renderFyOptions();
+    renderSiteOptions();
+
+    const hasRequestedContext = Boolean(state.requestedSiteId && state.requestedWorkbookId);
+    const hasAnyWorkbook = Object.values(state.options.workbooks_by_site || {}).some(items => Array.isArray(items) && items.length);
+    if (!state.options.sites.length || !hasAnyWorkbook) {
+      if (hasRequestedContext) {
+        setEmpty(
+          "You are not assigned to this workbook for this site.",
+          "Ask an admin to add you as a submitter for this workbook/site."
+        );
+      } else {
+        setEmpty(
+          "No annual workbook is available.",
+          "Ask an admin to assign you as a submitter for a workbook and site."
+        );
+      }
+      return;
+    }
+
+    if (!state.requestedWorkbookId) {
+      setEmpty(
+        "Missing workbook context.",
+        "Open this workbook from My Workbooks so the workbook link includes a workbook ID."
+      );
+      return;
+    }
+
     const requestedSite = state.options.sites.find(site => parseInt(site.id) === state.requestedSiteId);
+    if (state.requestedSiteId && !requestedSite) {
+      setEmpty(
+        "You are not assigned to this workbook for this site.",
+        "Ask an admin to add you as a submitter for this workbook/site."
+      );
+      return;
+    }
     state.selectedSiteId = requestedSite
       ? requestedSite.id
       : (state.options.sites[0] ? state.options.sites[0].id : null);
+    const workbooks = workbooksForSelectedSite();
+    const requestedWorkbook = workbooks.find(workbook => parseInt(workbook.id || workbook.workbook_id) === state.requestedWorkbookId);
+    if (!requestedWorkbook) {
+      setEmpty(
+        "You are not assigned to this workbook for this site.",
+        "Ask an admin to add you as a submitter for this workbook/site."
+      );
+      return;
+    }
+    state.selectedWorkbookId = requestedWorkbook
+      ? (requestedWorkbook.id || requestedWorkbook.workbook_id)
+      : (workbooks[0] ? (workbooks[0].id || workbooks[0].workbook_id) : null);
     const firstForms = formsForSelectedSite();
     const requestedForm = firstForms.find(form => parseInt(form.id) === state.requestedFormId);
     state.selectedFormId = requestedForm
       ? requestedForm.id
       : (firstForms[0] ? firstForms[0].id : null);
-    renderFyOptions();
     renderSiteOptions();
     renderFormTabs();
     await loadWorkbook();
@@ -844,6 +919,10 @@ document.addEventListener("DOMContentLoaded", function () {
       setEmpty("No assigned sites", "You do not have site access for submissions.");
       return;
     }
+    if (!state.selectedWorkbookId) {
+      setEmpty("No assigned workbooks", "Published workbooks assigned to you for this site will appear from My Workbooks.");
+      return;
+    }
     if (!forms.length && state.selectedFormId !== "calc_results") {
       setEmpty("No sheets assigned", "Published sheets assigned to this site will appear as tabs.");
       return;
@@ -853,12 +932,12 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     let wbUrl = "";
-    let calcUrl = `/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${state.selectedSiteId}&fy=${state.selectedFy}`;
+    let calcUrl = `/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${state.selectedSiteId}&workbook_id=${state.selectedWorkbookId}&fy=${state.selectedFy}`;
     
     if (state.selectedFormId === "calc_results") {
       wbUrl = calcUrl;
     } else {
-      wbUrl = `/module/SUBMIT/api/annual-workbook?site_id=${state.selectedSiteId}&form_id=${state.selectedFormId}&fy=${state.selectedFy}`;
+      wbUrl = `/module/SUBMIT/api/annual-workbook?site_id=${state.selectedSiteId}&workbook_id=${state.selectedWorkbookId}&form_id=${state.selectedFormId}&fy=${state.selectedFy}`;
     }
 
     const [wbRes, calcRes] = await Promise.all([
@@ -867,7 +946,12 @@ document.addEventListener("DOMContentLoaded", function () {
     ]);
     
     const wbData = await parseJsonResponse(wbRes, "Could not load annual workbook.");
-    if (!wbRes.ok) throw new Error(wbData.error || "Could not load annual workbook.");
+    if (!wbRes.ok) {
+      const message = wbData.error || "Could not load annual workbook.";
+      setEmpty("Could not load annual workbook.", message);
+      showAlert(message, "error");
+      return;
+    }
 
     state.workbook = wbData;
     state.calculationResults = calcRes.ok ? await calcRes.json() : null;
@@ -918,6 +1002,7 @@ document.addEventListener("DOMContentLoaded", function () {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             site_id: state.workbook.site.id,
+            workbook_id: state.workbook.workbook.id,
             form_id: state.workbook.selected_form.id,
             fy: state.workbook.financial_year.start_year,
             values
@@ -944,6 +1029,7 @@ document.addEventListener("DOMContentLoaded", function () {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               site_id: state.workbook.site.id,
+              workbook_id: state.workbook.workbook.id,
               form_id: state.workbook.selected_form.id,
               reporting_period_id: row.period_id
             })
@@ -976,7 +1062,7 @@ document.addEventListener("DOMContentLoaded", function () {
       }
       
       // Reload calculations results to update calculated section
-      const calcUrl = `/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${state.selectedSiteId}&fy=${state.selectedFy}`;
+      const calcUrl = `/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${state.selectedSiteId}&workbook_id=${state.selectedWorkbookId}&fy=${state.selectedFy}`;
       const calcRes = await fetch(calcUrl);
       state.calculationResults = calcRes.ok ? await calcRes.json() : null;
 
@@ -1009,6 +1095,7 @@ document.addEventListener("DOMContentLoaded", function () {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           site_id: state.workbook.site.id,
+          workbook_id: state.workbook.workbook.id,
           period_id: row.period_id,
           year: row.year,
           month: row.month,
@@ -1062,6 +1149,7 @@ document.addEventListener("DOMContentLoaded", function () {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               site_id: state.workbook.site.id,
+              workbook_id: state.workbook.workbook.id,
               form_id: state.workbook.selected_form.id,
               reporting_period_id: row.period_id
             })
@@ -1102,6 +1190,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
   siteSelect.addEventListener("change", function () {
     state.selectedSiteId = siteSelect.value;
+    const workbooks = workbooksForSelectedSite();
+    state.selectedWorkbookId = workbooks[0] ? (workbooks[0].id || workbooks[0].workbook_id) : null;
+    state.workbook = null;
     const forms = formsForSelectedSite();
     state.selectedFormId = forms[0] ? forms[0].id : null;
     renderSiteOptions();

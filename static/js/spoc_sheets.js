@@ -29,12 +29,12 @@ document.addEventListener("DOMContentLoaded", function () {
     return month >= 4 ? year : year - 1;
   }
 
-  function workbookUrl(rowOrSite, formId = null, month = null) {
+  function workbookUrl(rowOrSite, workbookId = null, month = null) {
     const params = new URLSearchParams();
     params.set("site_id", rowOrSite.site_id || rowOrSite.id);
-    const targetFormId = formId || rowOrSite.form_id;
-    if (targetFormId) {
-      params.set("form_id", targetFormId);
+    const targetWorkbookId = workbookId || rowOrSite.workbook_id;
+    if (targetWorkbookId) {
+      params.set("workbook_id", targetWorkbookId);
     }
     const startYear = rowOrSite.year && rowOrSite.month
       ? fyForMonth(rowOrSite.year, rowOrSite.month)
@@ -161,42 +161,52 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     const sites = options.sites || [];
-    const formsBySite = options.forms_by_site || {};
+    const workbooksBySite = options.workbooks_by_site || {};
     const siteSummaries = new Map();
 
     sites.forEach((site) => {
-      const forms = formsBySite[String(site.id)] || [];
-      siteSummaries.set(String(site.id), {
-        id: site.id,
-        site_id: site.id,
-        name: site.name,
-        code: site.code,
-        assignedForms: forms.length,
-        firstFormId: forms[0] ? forms[0].id : null,
-        actionNeeded: 0,
-        underReview: 0,
-        approved: 0
+      const workbooks = workbooksBySite[String(site.id)] || [];
+      workbooks.forEach((workbook) => {
+        const key = `${site.id}:${workbook.id}`;
+        siteSummaries.set(key, {
+          id: key,
+          workbook_id: workbook.id || workbook.workbook_id,
+          workbook_name: workbook.name,
+          workbook_code: workbook.code,
+          site_name: site.name,
+          site_code: site.code,
+          sheet_count: workbook.sheet_count || (workbook.sheets ? workbook.sheets.length : 0),
+          site_id: site.id,
+          actionNeeded: 0,
+          underReview: 0,
+          approved: 0
+        });
       });
     });
 
     (data.action_needed || []).forEach((row) => {
       if (fyForMonth(row.year, row.month) !== currentFy) return;
-      const summary = siteSummaries.get(String(row.site_id));
-      if (summary) summary.actionNeeded += 1;
+      siteSummaries.forEach((summary) => {
+        if (String(summary.site_id) !== String(row.site_id)) return;
+        if (row.workbook_id && String(summary.workbook_id) !== String(row.workbook_id)) return;
+        summary.actionNeeded += 1;
+      });
     });
 
     (data.submitted || []).forEach((row) => {
       if (fyForMonth(row.year, row.month) !== currentFy) return;
-      const summary = siteSummaries.get(String(row.site_id));
-      if (!summary) return;
-      if (row.status === "Approved") {
-        summary.approved += 1;
-      } else if (["Submitted", "Under Review", "Resubmitted"].includes(row.status)) {
-        summary.underReview += 1;
-      }
+      siteSummaries.forEach((summary) => {
+        if (String(summary.site_id) !== String(row.site_id)) return;
+        if (row.workbook_id && String(summary.workbook_id) !== String(row.workbook_id)) return;
+        if (row.status === "Approved") {
+          summary.approved += 1;
+        } else if (["Submitted", "Under Review", "Resubmitted"].includes(row.status)) {
+          summary.underReview += 1;
+        }
+      });
     });
 
-    const summaries = Array.from(siteSummaries.values()).filter((summary) => summary.assignedForms > 0);
+    const summaries = Array.from(siteSummaries.values()).filter((summary) => summary.sheet_count > 0);
     if (!summaries.length) {
       workbookCards.innerHTML = `
         <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center md:col-span-2 xl:col-span-3">
@@ -212,17 +222,18 @@ document.addEventListener("DOMContentLoaded", function () {
         <div>
           <div class="flex items-start justify-between gap-3">
             <div>
-              <h3 class="text-sm font-semibold text-slate-900">${summary.name}</h3>
+              <h3 class="text-sm font-semibold text-slate-900">${summary.workbook_name}</h3>
+              <p class="mt-1 text-xs font-medium text-slate-500">${summary.site_name}${summary.site_code ? ` (${summary.site_code})` : ""}</p>
             </div>
             <span class="status-badge status-badge-info">${fyLabel(currentFy)}</span>
           </div>
           <p class="mt-4 text-[13px] text-slate-500">
-            ${summary.assignedForms} assigned ·
+            ${summary.sheet_count} sheet${summary.sheet_count === 1 ? "" : "s"} ·
             <span class="${summary.actionNeeded > 0 ? 'font-semibold text-amber-700' : 'text-slate-500'}">${summary.actionNeeded} action needed</span> ·
             ${summary.approved} completed
           </p>
         </div>
-        <a href="${workbookUrl(summary, summary.firstFormId)}" class="btn btn-outline btn-sm mt-5 justify-center">
+        <a href="${workbookUrl(summary, summary.workbook_id)}" class="btn btn-outline btn-sm mt-5 justify-center">
           Open workbook
         </a>
       </article>
