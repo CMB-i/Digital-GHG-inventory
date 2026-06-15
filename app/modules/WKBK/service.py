@@ -337,9 +337,19 @@ def check_workbook_readiness(workbook_id):
     )
 
     approval_path_ok = False
+    approval_path_detail = "Needs a published approval path"
     if wb.workflow_id:
+        from app.modules.WFLWBLD.model import WorkflowVersion
         wf = Workflow.query.filter_by(id=wb.workflow_id, is_deleted=False).first()
-        approval_path_ok = wf is not None and wf.current_version_id is not None
+        if wf and wf.current_version_id:
+            wfv = WorkflowVersion.query.filter_by(id=wf.current_version_id).first()
+            if wfv and wfv.published_at is not None:
+                approval_path_ok = True
+                approval_path_detail = "Published approval path assigned"
+            else:
+                approval_path_detail = "Approval path exists but is not yet published"
+        elif wf:
+            approval_path_detail = "Approval path has no current version"
 
     all_ok = sheets_ok and sites_ok and submitters_ok and approval_path_ok
 
@@ -362,7 +372,7 @@ def check_workbook_readiness(workbook_id):
         "approval_path": {
             "ok": approval_path_ok,
             "label": "Approval Path",
-            "detail": "Published approval path assigned" if approval_path_ok else "Needs a published approval path",
+            "detail": approval_path_detail,
         },
         "all_ok": all_ok,
     }
