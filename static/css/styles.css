@@ -1306,3 +1306,65 @@ body[data-theme="jsw-excel"] #form-tabs .workbook-tab:first-child {
 body.builder-canvas-active main > div {
   max-width: none !important;
 }
+
+/* Sheet Audit Logs Timeline Styles */
+.audit-timeline {
+  position: relative;
+  padding-left: 1.5rem;
+}
+
+.audit-timeline::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background-color: var(--ghg-row-border);
+}
+
+.audit-timeline-item {
+  position: relative;
+  margin-bottom: 1.25rem;
+}
+
+.audit-timeline-item:last-child {
+  margin-bottom: 0;
+}
+
+.audit-timeline-dot {
+  position: absolute;
+  left: -24px;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background-color: var(--ghg-faint);
+  border: 2px solid white;
+}
+
+.audit-timeline-dot.dot-submitted {
+  background-color: var(--ghg-navy);
+}
+
+.audit-timeline-dot.dot-approved {
+  background-color: var(--ghg-success-text);
+}
+
+.audit-timeline-dot.dot-changes-requested {
+  background-color: var(--ghg-warning-text);
+}
+
+.audit-timeline-dot.dot-rejected {
+  background-color: var(--ghg-danger-text);
+}
+
+.audit-comment-bubble {
+  position: relative;
+  margin-top: 0.375rem;
+  padding: 0.625rem;
+  border-radius: 4px;
+  font-size: 11px;
+  border-width: 1px;
+}
+
