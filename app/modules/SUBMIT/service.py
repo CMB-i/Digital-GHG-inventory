@@ -28,7 +28,9 @@ from app.modules.WFLWBLD.service import (
     find_next_applicable_level,
     validate_workflow_path_for_site,
 )
-from app.modules.WKBK.model import Workbook, WorkbookForm
+from app.modules.WKBK.model import (
+    Workbook, WorkbookForm, WorkbookSite, WorkbookSiteSubmitter
+)
 
 
 def _get_workflow_id_for_form(form_id):
@@ -60,6 +62,48 @@ def _get_workflow_id_for_form(form_id):
         )
 
     return None
+
+
+def _is_form_assigned_to_site(form_id, site_id):
+    row = (
+        db.session.query(WorkbookForm.id)
+        .join(Workbook, Workbook.id == WorkbookForm.workbook_id)
+        .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+        .filter(
+            WorkbookForm.form_id == form_id,
+            WorkbookSite.site_id == site_id,
+            Workbook.is_active == True,
+        )
+        .first()
+    )
+    return row is not None
+
+
+def _get_user_workbook_site_ids(user_id):
+    rows = (
+        db.session.query(WorkbookSiteSubmitter.site_id)
+        .join(Workbook, Workbook.id == WorkbookSiteSubmitter.workbook_id)
+        .filter(
+            WorkbookSiteSubmitter.user_id == user_id,
+            Workbook.is_active == True,
+        )
+        .distinct()
+        .all()
+    )
+    return {row.site_id for row in rows}
+
+
+def _user_has_workbook_submitter_assignments(user_id):
+    return (
+        db.session.query(WorkbookSiteSubmitter.id)
+        .join(Workbook, Workbook.id == WorkbookSiteSubmitter.workbook_id)
+        .filter(
+            WorkbookSiteSubmitter.user_id == user_id,
+            Workbook.is_active == True,
+        )
+        .first()
+    ) is not None
+
 
 class DuplicateSubmissionError(Exception):
     def __init__(self, existing_id):
@@ -273,6 +317,28 @@ def _published_forms_for_site(site_id):
         if site_id in site_ids:
             assigned.append((form, metadata))
     return assigned
+
+
+def _published_forms_for_site_via_workbook(site_id):
+    rows = (
+        db.session.query(Form)
+        .join(WorkbookForm, WorkbookForm.form_id == Form.id)
+        .join(Workbook, Workbook.id == WorkbookForm.workbook_id)
+        .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+        .filter(
+            WorkbookSite.site_id == site_id,
+            Workbook.is_active == True,
+            Form.is_deleted == False,
+            Form.current_version_id.is_not(None),
+        )
+        .order_by(Form.name.asc(), Form.id.asc())
+        .all()
+    )
+    result = []
+    for form in rows:
+        metadata = _parse_form_metadata(form)
+        result.append((form, metadata))
+    return result
 
 
 def _field_payload(form_version_id):
@@ -604,6 +670,14 @@ def get_annual_workbook_options(user_id):
     if not site_ids:
         return {"sites": [], "forms_by_site": {}}
 
+    # Apply WorkbookSiteSubmitter filter if user has explicit assignments
+    if _user_has_workbook_submitter_assignments(user_id):
+        workbook_site_ids = _get_user_workbook_site_ids(user_id)
+        site_ids = site_ids & workbook_site_ids
+
+    if not site_ids:
+        return {"sites": [], "forms_by_site": {}}
+
     sites = Site.query.filter(
         Site.id.in_(site_ids),
         Site.is_deleted == False,
@@ -650,6 +724,15 @@ def compose_annual_workbook_data(user_id, site_id, form_id, fy_start_year):
         or has_permission(user_id, "submission", "submit", scope_site_id=site_id)
     ):
         raise ValueError("Permission denied: You cannot view submissions for this site.")
+
+    # Check WorkbookSiteSubmitter assignment if user has explicit assignments configured
+    if _user_has_workbook_submitter_assignments(user_id):
+        workbook_site_ids = _get_user_workbook_site_ids(user_id)
+        if site_id not in workbook_site_ids:
+            raise ValueError(
+                "Permission denied: You are not assigned to submit "
+                "this workbook for this site."
+            )
 
     site = Site.query.filter_by(id=site_id, is_deleted=False).first()
     if not site:
@@ -1292,29 +1375,32 @@ def get_spoc_sheets_buckets(user_id):
     if is_global:
         active_sites = Site.query.filter_by(is_deleted=False).all()
         allowed_site_ids = {site.id for site in active_sites}
-        sites_map = {site.id: site for site in active_sites}
     else:
         active_sites = Site.query.filter(Site.id.in_(allowed_site_ids), Site.is_deleted == False).all()
-        sites_map = {site.id: site for site in active_sites}
-        
+
+    # Apply WorkbookSiteSubmitter filter if user has explicit assignments.
+    # Users with no assignments (admins, global users) bypass this filter.
+    if _user_has_workbook_submitter_assignments(user_id):
+        workbook_site_ids = _get_user_workbook_site_ids(user_id)
+        allowed_site_ids = allowed_site_ids & workbook_site_ids
+        active_sites = [s for s in active_sites if s.id in allowed_site_ids]
+
+    sites_map = {site.id: site for site in active_sites}
+
     # 2. Get all published forms
     published_forms = Form.query.filter_by(is_deleted=False).filter(Form.current_version_id.is_not(None)).all()
-    
-    # Check form applicability per site
+
+    # Check form applicability per site using WorkbookSite as authoritative source
     applicable_forms_by_site = {site_id: [] for site_id in allowed_site_ids}
     form_map = {}
-    
+
     for f in published_forms:
         form_map[f.id] = f
-        try:
-            parsed_desc = json.loads(f.description or "{}")
-        except Exception:
-            parsed_desc = {}
-        applicable_site_ids = parsed_desc.get("sites", [])
-        
-        for site_id in allowed_site_ids:
-            if site_id in applicable_site_ids:
-                applicable_forms_by_site[site_id].append(f)
+    for site_id in allowed_site_ids:
+        site_forms = _published_forms_for_site_via_workbook(site_id)
+        for form, _ in site_forms:
+            form_map[form.id] = form
+            applicable_forms_by_site[site_id].append(form)
 
     # 3. Get all active submissions for allowed sites
     submissions = (
@@ -1443,14 +1529,12 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id):
     if not form or not form.current_version_id:
         raise ValueError("Published form version not found.")
         
-    try:
-        parsed_desc = json.loads(form.description or "{}")
-    except Exception:
-        parsed_desc = {}
-        
-    if site_id not in parsed_desc.get("sites", []):
-        raise ValueError("This form is not applicable to the selected site.")
-        
+    if not _is_form_assigned_to_site(form_id, site_id):
+        raise ValueError(
+            "This form is not assigned to the selected site. "
+            "Check the workbook's Sites tab."
+        )
+
     # 4. Workflow assignment
     wf_id = _get_workflow_id_for_form(form_id)
     if not wf_id:
@@ -1574,7 +1658,10 @@ def submit_monthly_workbook_package(site_id, period_id=None, year=None, month=No
     if period.status not in EDITABLE_PERIOD_STATUSES:
         raise ValueError(f"Cannot submit a workbook package for a reporting period that is {period.status}.")
 
-    assigned_forms = [form for form, _metadata in _published_forms_for_site(site_id)]
+    assigned_forms = [
+        form for form, _metadata
+        in _published_forms_for_site_via_workbook(site_id)
+    ]
     if not assigned_forms:
         raise ValueError("No published forms are assigned to this site.")
 

@@ -14,6 +14,7 @@ from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.FORMBLD.model import Form, Field, FieldVersion
 from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument
 from app.modules.SUBMIT.service import human_sheet_label
+from app.modules.WKBK.model import Workbook, WorkbookForm, WorkbookSite
 from app.modules.USRMGMT.model import User
 
 def list_report_templates(user_id):
@@ -383,15 +384,20 @@ def get_missing_submissions(user_id):
 
         period_label = format_period_label(p.year, p.month)
 
-        # Check form applicability
+        # Check form applicability using WorkbookSite as authoritative source
         for f in published_forms:
-            try:
-                parsed_desc = json.loads(f.description or "{}")
-            except Exception:
-                parsed_desc = {}
-            applicable_site_ids = parsed_desc.get("sites", [])
-
-            if p.site_id not in applicable_site_ids:
+            is_assigned = (
+                db.session.query(WorkbookForm.id)
+                .join(Workbook, Workbook.id == WorkbookForm.workbook_id)
+                .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+                .filter(
+                    WorkbookForm.form_id == f.id,
+                    WorkbookSite.site_id == p.site_id,
+                    Workbook.is_active == True,
+                )
+                .first()
+            )
+            if not is_assigned:
                 continue
 
             # Query actual submission
