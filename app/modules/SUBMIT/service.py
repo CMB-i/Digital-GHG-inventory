@@ -702,7 +702,7 @@ def get_annual_workbook_options(user_id):
                 "code": form.code,
                 "workflow_id": metadata.get("workflow_id"),
             }
-            for form, metadata in _published_forms_for_site(site.id)
+            for form, metadata in _published_forms_for_site_via_workbook(site.id)
         ]
 
     return {
