@@ -292,8 +292,8 @@ document.addEventListener("DOMContentLoaded", function () {
     sheetStatus.classList.add("hidden");
     sheetFallbackLink.classList.add("hidden");
 
-    sheetHead.innerHTML = `<tr><td class="px-5 py-4 text-slate-500">Loading calculations...</td></tr>`;
-    sheetValues.innerHTML = "";
+    sheetHead.innerHTML = "";
+    sheetValues.innerHTML = `<tr><td class="px-5 py-8 text-center text-slate-400 text-sm">Loading calculations...</td></tr>`;
 
     try {
       const response = await fetch(`/module/APPROV/api/packages/${packageId}/calculation-results`);
@@ -301,22 +301,141 @@ document.addEventListener("DOMContentLoaded", function () {
       const payload = await response.json();
       const data = payload.data || payload;
 
-      const activeCalcRow = (data.rows || []).find(row => row.month === reviewData.package.month);
-      window.WorkbookSheet.render({
-        mode: "calc_results",
-        headEl: sheetHead,
-        bodyEl: sheetValues,
-        fields: data.fields || [],
-        sections: data.sections || [],
-        rows: (data.rows || []).map(row => ({
-          ...row,
-          editable: false,
-          is_active_period: row.month === reviewData.package.month
-        })),
-        selectedRowKey: activeCalcRow ? `${activeCalcRow.year}-${activeCalcRow.month}` : null,
+      const allFields = data.fields || [];
+      const rows = data.rows || [];
+
+      // Group fields by sheet/form
+      const sheetMap = {};
+      allFields.forEach(f => {
+        const key = String(f.form_id);
+        if (!sheetMap[key]) sheetMap[key] = { id: f.form_id, name: f.form_name || ("Sheet " + f.form_id), fields: [] };
+        sheetMap[key].fields.push(f);
       });
+      const sheets = Object.values(sheetMap);
+      let activeCalcSheet = sheets[0] || null;
+
+      function renderCalcView() {
+        const activeFields = activeCalcSheet ? activeCalcSheet.fields : [];
+
+        // Summary counts
+        let approvedTotal = null, previewTotal = null, cannotCalcCount = 0, needsInputCount = 0;
+        rows.forEach(row => {
+          activeFields.forEach(field => {
+            const cell = row.values ? row.values[field.field_code] : null;
+            if (!cell) { cannotCalcCount++; return; }
+            if (cell.status === "calculable") {
+              approvedTotal = (approvedTotal || 0) + Number(cell.reportable_value || 0);
+            } else if (cell.status === "pending_approval" || cell.status === "preview_only") {
+              previewTotal = (previewTotal || 0) + Number(cell.preview_value || 0);
+            } else if (cell.status === "missing_input") {
+              needsInputCount++;
+            } else if (cell.status === "not_configured") {
+              cannotCalcCount++;
+            }
+          });
+        });
+
+        // Build summary + sheet tabs + table into sheetHead/sheetValues
+        sheetHead.innerHTML = `
+          <tr>
+            <td colspan="3" class="px-0 py-0 border-0">
+              <div class="flex gap-6 px-5 py-4 border-b border-slate-200">
+                <div class="flex flex-col gap-0.5">
+                  <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Approved Total</div>
+                  <div class="text-2xl font-bold text-emerald-700">${approvedTotal !== null ? approvedTotal : "—"}</div>
+                </div>
+                <div class="w-px bg-slate-200 self-stretch"></div>
+                <div class="flex flex-col gap-0.5">
+                  <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview Total</div>
+                  <div class="text-2xl font-bold text-blue-700">${previewTotal !== null ? previewTotal : "—"}</div>
+                </div>
+                <div class="w-px bg-slate-200 self-stretch"></div>
+                <div class="flex flex-col gap-0.5">
+                  <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Cannot Calculate</div>
+                  <div class="text-2xl font-bold text-amber-700">${cannotCalcCount}</div>
+                </div>
+                <div class="w-px bg-slate-200 self-stretch"></div>
+                <div class="flex flex-col gap-0.5">
+                  <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Needs Input</div>
+                  <div class="text-2xl font-bold text-amber-700">${needsInputCount}</div>
+                </div>
+              </div>
+              ${sheets.length > 1 ? `
+              <div class="flex gap-2 px-5 py-3 border-b border-slate-200">
+                ${sheets.map(s => `
+                  <button type="button" data-sheet-id="${s.id}" class="calc-sheet-tab workbook-tab whitespace-nowrap ${String(s.id) === String(activeCalcSheet && activeCalcSheet.id) ? "workbook-tab-active" : "workbook-tab-inactive"}">
+                    ${escapeHtml(s.name)}
+                  </button>
+                `).join("")}
+              </div>` : ""}
+            </td>
+          </tr>
+          <tr>
+            <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider w-32">Month</th>
+            <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider">Result</th>
+            <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider w-36">Status</th>
+          </tr>
+        `;
+
+        // Bind sheet tab clicks
+        sheetHead.querySelectorAll(".calc-sheet-tab").forEach(btn => {
+          btn.addEventListener("click", function() {
+            activeCalcSheet = sheetMap[btn.dataset.sheetId] || activeCalcSheet;
+            renderCalcView();
+          });
+        });
+
+        // Rows
+        const currentMonth = reviewData && reviewData.package ? reviewData.package.month : null;
+        sheetValues.innerHTML = rows.map(row => {
+          const isActive = row.month === currentMonth || row.is_active_period;
+          const monthLabel = row.label || row.period_label ||
+            (row.month ? ["","January","February","March","April","May","June","July","August","September","October","November","December"][parseInt(row.month)] + " " + row.year : "—");
+
+          let rowValue = null, rowStatus = row.period_id ? "missing_input" : "no_period";
+          activeFields.forEach(field => {
+            const cell = row.values ? row.values[field.field_code] : null;
+            if (!cell) return;
+            if (cell.status === "calculable") {
+              rowValue = (rowValue || 0) + Number(cell.reportable_value || 0);
+              rowStatus = "calculable";
+            } else if ((cell.status === "pending_approval" || cell.status === "preview_only") && rowStatus !== "calculable") {
+              rowValue = (rowValue || 0) + Number(cell.preview_value || 0);
+              rowStatus = "preview";
+            } else if (cell.status === "missing_input" && rowStatus !== "calculable" && rowStatus !== "preview") {
+              rowStatus = "missing_input";
+            } else if (cell.status === "evaluation_error") {
+              rowStatus = "error";
+            }
+          });
+
+          const badge = {
+            calculable: `<span class="inline-flex items-center border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Approved</span>`,
+            preview: `<span class="inline-flex items-center border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">Preview</span>`,
+            missing_input: `<span class="inline-flex items-center border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Cannot calculate</span>`,
+            no_period: `<span class="inline-flex items-center border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500">Period missing</span>`,
+            error: `<span class="inline-flex items-center border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Error</span>`,
+          }[rowStatus] || "";
+
+          const valueHtml = rowValue !== null
+            ? `<span class="font-bold text-base ${rowStatus === "calculable" ? "text-emerald-700" : "text-blue-700"}">${rowValue}</span>`
+            : `<span class="text-slate-300">—</span>`;
+
+          return `
+            <tr class="border-b border-slate-100 ${isActive ? "font-semibold" : ""}">
+              <td class="border border-slate-200 px-4 py-2.5 text-sm ${isActive ? "text-slate-900" : "text-slate-500"}">${escapeHtml(monthLabel)}</td>
+              <td class="border border-slate-200 px-4 py-2.5">${valueHtml}</td>
+              <td class="border border-slate-200 px-4 py-2.5">${badge}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      renderCalcView();
+
     } catch (err) {
-      sheetHead.innerHTML = `<tr><td class="px-5 py-4 text-rose-500 font-bold">${escapeHtml(err.message)}</td></tr>`;
+      sheetHead.innerHTML = "";
+      sheetValues.innerHTML = `<tr><td colspan="3" class="px-5 py-4 text-rose-500 font-bold">${escapeHtml(err.message)}</td></tr>`;
     }
   }
 

@@ -386,7 +386,7 @@
     );
 
     return `
-      <td class="min-w-[180px] border align-top ${stateClass} ${interactiveClass}" data-cell-state="${escapeHtml(state)}" data-has-issues="${issues.length ? "true" : "false"}" data-row-locked="${rowLocked ? "true" : "false"}" data-submission-value-id="${valueId ? escapeHtml(valueId) : ""}" data-field-code="${escapeHtml(field.field_code)}" title="${escapeHtml(stateTitle)}">
+      <td class="border align-top ${stateClass} ${interactiveClass}" data-cell-state="${escapeHtml(state)}" data-has-issues="${issues.length ? "true" : "false"}" data-row-locked="${rowLocked ? "true" : "false"}" data-submission-value-id="${valueId ? escapeHtml(valueId) : ""}" data-field-code="${escapeHtml(field.field_code)}" title="${escapeHtml(stateTitle)}">
         <div class="relative min-h-[48px]">
           ${issues.length ? '<span class="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" data-cell-open="true" title="Cell has issues/comments"></span>' : ""}
           ${proof && fieldType !== "file" ? '<span class="absolute bottom-1 left-1 h-1.5 w-1.5 rounded-full bg-indigo-500" title="Proof attached"></span>' : ""}
@@ -598,7 +598,7 @@
           ${activeGroups.map((group) => {
             const isUngrouped = group.name.toLowerCase() === "ungrouped";
             return `
-              <th colspan="${getGroupColspan(group)}" class="${isUngrouped ? "bg-transparent border-0" : "border border-slate-200 bg-slate-100 font-extrabold text-slate-700"} px-3 py-1.5 text-center tracking-wide uppercase text-xs">
+              <th colspan="${getGroupColspan(group)}" class="${isUngrouped ? "bg-transparent border-0" : "border border-slate-200 font-extrabold"} px-3 py-1.5 text-center tracking-wide uppercase text-xs">
                 ${isUngrouped ? "" : escapeHtml(group.name)}
               </th>
             `;
@@ -607,7 +607,7 @@
         </tr>
         <tr>
           ${displayFields.map((field) => `
-            <th class="min-w-[180px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">
+            <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left">
               <div class="font-bold">${escapeHtml(field.field_name)}</div>
               <div class="mt-0.5 text-[10px] normal-case text-slate-300">
                 ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
@@ -622,7 +622,7 @@
         <tr>
           <th class="sticky left-0 z-20 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Month</th>
           ${displayFields.map((field) => `
-            <th class="min-w-[180px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">
+            <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left">
               <div class="font-bold">${escapeHtml(field.field_name)}</div>
               <div class="mt-0.5 text-[10px] normal-case text-slate-300">
                 ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}

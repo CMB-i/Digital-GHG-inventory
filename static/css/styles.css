@@ -1088,10 +1088,25 @@ body[data-theme="jsw-excel"] #workbook-table-wrap td[data-field-code] div.px-2.p
   padding: 0 !important;
 }
 
-body[data-theme="jsw-excel"] #workbook-table-wrap table,
 body[data-theme="jsw-excel"] #calculated-results-section table {
   table-layout: fixed !important;
   width: 100% !important;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap table {
+  table-layout: auto !important;
+  width: 100% !important;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap thead th {
+  min-width: 90px;
+  white-space: normal;
+  word-break: break-word;
+}
+
+body[data-theme="jsw-excel"] #workbook-table-wrap thead th[colspan] {
+  background: var(--ghg-navy) !important;
+  color: #fff !important;
 }
 
 /* Current month row background; the row outline is drawn by inset shadows below. */
