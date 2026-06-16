@@ -1162,7 +1162,7 @@ document.addEventListener("DOMContentLoaded", function () {
       formWorkspace.innerHTML = `
         <div class="flex min-h-[260px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-6 py-12 text-center">
           <div class="text-sm font-bold text-slate-700">No fields in this ${section ? "section" : "sheet"} yet</div>
-          <p class="mt-2 max-w-sm text-xs text-slate-400">Use the field palette on the left to add the next SPOC entry row.</p>
+          <p class="mt-2 max-w-sm text-xs text-slate-400">Use the field palette on the left to add the next data entry row.</p>
         </div>
       `;
       return;

@@ -276,7 +276,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       blocked = true;
       issues.push(final
-        ? `${level.level_name} needs an eligible final approver for ${site.name}.`
+        ? `${level.level_name} needs an eligible final reviewer for ${site.name}.`
         : `${level.level_name} needs an eligible reviewer for ${site.name}, or must be marked skippable.`
       );
       rows.push({
@@ -563,8 +563,8 @@ document.addEventListener("DOMContentLoaded", () => {
       <li class="flex gap-3">
         <span class="mt-1 h-2.5 w-2.5 rounded-full bg-slate-400"></span>
         <div>
-          <div class="text-sm font-semibold text-slate-800">SPOC</div>
-          <div class="text-xs text-slate-500">Workbook package is submitted for review.</div>
+          <div class="text-sm font-semibold text-slate-800">On submission</div>
+          <div class="text-xs text-slate-500">Package enters review.</div>
         </div>
       </li>
     `);
@@ -609,7 +609,7 @@ document.addEventListener("DOMContentLoaded", () => {
       `);
     }
 
-    const pathParts = ["SPOC"].concat(path.rows.map(row => (
+    const pathParts = ["On submission"].concat(path.rows.map(row => (
       row.status === "skipped" ? `${row.level.level_name} (skipped if empty)` : row.level.level_name
     )));
     if (!path.blocked && finalApprovalIndex() >= 0) {

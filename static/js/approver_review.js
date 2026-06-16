@@ -308,7 +308,7 @@ document.addEventListener("DOMContentLoaded", function () {
           return res.json();
         })
         .then((data) => {
-          alert("Submission returned to SPOC for changes.");
+          alert("Submission returned for changes.");
           window.location.href = "/module/APPROV/";
         })
         .catch(err => alert(err.message));

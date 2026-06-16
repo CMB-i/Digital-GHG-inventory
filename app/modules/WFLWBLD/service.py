@@ -4,8 +4,8 @@ from app.modules.WFLWBLD.model import Workflow, WorkflowVersion, WorkflowLevel, 
 from app.modules.USRMGMT.model import User
 
 NO_ELIGIBLE_PATH_MESSAGE = (
-    "This workflow has no eligible approver path for this submission site. "
-    "Please contact your administrator."
+    "This workflow has no eligible reviewer path for this submission site. "
+    "Please contact setup support."
 )
 
 
@@ -102,7 +102,7 @@ def find_next_applicable_level(workflow_version, site_id, after_level_number):
         if level.skip_if_empty:
             continue
         raise ValueError(
-            f"Workflow level '{level.level_name}' has no eligible approver for this submission site."
+            f"Workflow level '{level.level_name}' has no eligible reviewer for this submission site."
         )
 
     return None
@@ -160,7 +160,7 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
         if approval_mode not in ("ANY_ONE", "SEQUENTIAL"):
             raise ValueError(f"Invalid approval mode '{approval_mode}' for level {level_number}. Must be ANY_ONE or SEQUENTIAL.")
         if not approvers:
-            raise ValueError(f"At least one approver is required for level {level_number}.")
+            raise ValueError(f"At least one reviewer is required for level {level_number}.")
             
         lvl = WorkflowLevel(
             workflow_version_id=workflow_version_id,
@@ -185,12 +185,12 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
                 scope_site_id = None
                 
             if not u_id:
-                raise ValueError(f"User ID is required for approver in level {level_number}.")
+                raise ValueError(f"User ID is required for reviewer in level {level_number}.")
                 
             # Verify user exists and is active
             user = User.query.filter_by(id=u_id, is_deleted=False, is_active=True).first()
             if not user:
-                raise ValueError(f"Approver user with ID {u_id} does not exist or is inactive.")
+                raise ValueError(f"Reviewer user with ID {u_id} does not exist or is inactive.")
 
             if scope_site_id in ("", "null"):
                 scope_site_id = None
@@ -198,7 +198,7 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
                 try:
                     scope_site_id = int(scope_site_id)
                 except (TypeError, ValueError):
-                    raise ValueError(f"Invalid site scope for approver in level {level_number}.")
+                    raise ValueError(f"Invalid site scope for reviewer in level {level_number}.")
                 from app.modules.SITEMST.model import Site
                 site = Site.query.filter_by(id=scope_site_id, is_deleted=False).first()
                 if not site:
@@ -237,17 +237,17 @@ def publish_workflow_version(workflow_version_id, user_id):
     for lvl in levels:
         approvers = WorkflowLevelApprover.query.filter_by(workflow_level_id=lvl.id, is_deleted=False).all()
         if not approvers:
-            raise ValueError(f"Level '{lvl.level_name}' has no approvers assigned.")
+            raise ValueError(f"Level '{lvl.level_name}' has no reviewers assigned.")
             
         for app in approvers:
             user = User.query.filter_by(id=app.user_id, is_deleted=False, is_active=True).first()
             if not user:
-                raise ValueError(f"Approver user with ID {app.user_id} in level '{lvl.level_name}' is inactive or deleted.")
+                raise ValueError(f"Reviewer user with ID {app.user_id} in level '{lvl.level_name}' is inactive or deleted.")
                 
         if lvl.approval_mode == "SEQUENTIAL":
             seq_nums = [app.sequence_number for app in approvers]
             if any(s is None for s in seq_nums):
-                raise ValueError(f"All approvers in sequential level '{lvl.level_name}' must have a sequence number.")
+                raise ValueError(f"All reviewers in sequential level '{lvl.level_name}' must have a sequence number.")
             if len(seq_nums) != len(set(seq_nums)):
                 raise ValueError(f"Sequence numbers must be unique within sequential level '{lvl.level_name}'.")
                 
