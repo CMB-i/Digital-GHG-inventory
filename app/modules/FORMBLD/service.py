@@ -267,7 +267,7 @@ def compose_preview_workbook_context(form_version_id):
         },
         "site": {
             "id": None,
-            "name": "SPOC Preview",
+            "name": "Data Entry Preview",
             "code": "PREVIEW",
         },
         "selected_form": {

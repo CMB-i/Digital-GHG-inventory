@@ -83,7 +83,7 @@ def _require_active_workbook(workbook_id):
     if not workbook:
         raise ValueError("Workbook not found.")
     if str(workbook.status or "").strip().lower() not in LIVE_WORKBOOK_STATUSES:
-        raise ValueError("This workbook is not published for SPOC entry.")
+        raise ValueError("This workbook is not published for data entry.")
     return workbook
 
 
@@ -2227,8 +2227,8 @@ def submit_submission(submission_id, user_id):
     )
     if not first_applicable_level:
         raise ValueError(
-            "This workflow has no eligible approver path for this submission site. "
-            "Please contact your administrator."
+            "This workflow has no eligible reviewer path for this submission site. "
+            "Please contact setup support."
         )
         
     # Get form version fields

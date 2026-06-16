@@ -852,12 +852,12 @@ document.addEventListener("DOMContentLoaded", function () {
       if (hasRequestedContext) {
         setEmpty(
           "You are not assigned to this workbook for this site.",
-          "Ask an admin to add you as a submitter for this workbook/site."
+          "You are not assigned as a submitter for this workbook/site."
         );
       } else {
         setEmpty(
           "No annual workbook is available.",
-          "Ask an admin to assign you as a submitter for a workbook and site."
+          "No assigned workbook/site is available for your account."
         );
       }
       return;
@@ -875,7 +875,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (state.requestedSiteId && !requestedSite) {
       setEmpty(
         "You are not assigned to this workbook for this site.",
-        "Ask an admin to add you as a submitter for this workbook/site."
+        "You are not assigned as a submitter for this workbook/site."
       );
       return;
     }
@@ -887,7 +887,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!requestedWorkbook) {
       setEmpty(
         "You are not assigned to this workbook for this site.",
-        "Ask an admin to add you as a submitter for this workbook/site."
+        "You are not assigned as a submitter for this workbook/site."
       );
       return;
     }

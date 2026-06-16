@@ -693,7 +693,7 @@ def approve_submission(submission_id, user_id, comment=None):
         raise ValueError(f"Approval mode {lvl.approval_mode} is not supported in MVP.")
 
     if not is_user_eligible_level_approver(lvl, user_id, submission.site_id):
-        raise ValueError("You are not an assigned approver for the current workflow level.")
+        raise ValueError("You are not an assigned reviewer for the current workflow level.")
 
     # If SEQUENTIAL, verify it is this user's turn
     if lvl.approval_mode == "SEQUENTIAL":

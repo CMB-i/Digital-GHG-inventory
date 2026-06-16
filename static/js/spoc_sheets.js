@@ -211,7 +211,7 @@ document.addEventListener("DOMContentLoaded", function () {
       workbookCards.innerHTML = `
         <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center md:col-span-2 xl:col-span-3">
           <p class="text-sm font-bold text-slate-700">No annual workbook is available.</p>
-          <p class="mt-1 text-sm text-slate-500">Ask an admin to assign sheets and open reporting periods for your site.</p>
+          <p class="mt-1 text-sm text-slate-500">Ask your setup team to assign workbooks and open reporting periods for your site.</p>
         </div>
       `;
       return;

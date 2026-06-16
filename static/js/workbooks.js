@@ -684,7 +684,7 @@ document.addEventListener("DOMContentLoaded", function () {
             <div>
               <h2 class="text-sm font-bold text-slate-700">Approval Chain</h2>
               <p class="mt-1 text-xs text-slate-400">
-                Configure who approves workbook packages for each site.
+                Configure who reviews workbook packages for each site.
                 Each site can have its own reviewer sequence.
               </p>
             </div>
@@ -810,7 +810,7 @@ document.addEventListener("DOMContentLoaded", function () {
       const row = document.createElement("div");
       row.className = "flex items-center gap-0 min-w-max";
 
-      row.appendChild(buildStaticNode("SPOC submits", "Workbook package\nenters review."));
+      row.appendChild(buildStaticNode("On submission", "Package\nenters review."));
       row.appendChild(buildArrow());
 
       const regularSteps = steps.filter(s => s.level_type !== "final");
@@ -886,7 +886,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <div class="text-[9px] font-bold uppercase tracking-wider text-slate-400">Review Step</div>
         <select class="step-user-select block w-full rounded-lg border border-slate-300
                        bg-white px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500">
-          <option value="">Assign reviewer</option>
+          <option value="">Select reviewer</option>
           ${userOptions}
         </select>
         <button type="button"
@@ -919,7 +919,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <div class="text-[9px] font-bold uppercase tracking-wider text-emerald-600">Final Approval</div>
         <select class="final-user-select block w-full rounded-lg border border-emerald-200
                        bg-white px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-indigo-500">
-          <option value="">Assign approver</option>
+          <option value="">Select final reviewer</option>
           ${userOptions}
         </select>
         <div class="text-[10px] text-emerald-600 font-medium">Locks &amp; releases data</div>`;
