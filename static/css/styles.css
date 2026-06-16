@@ -476,6 +476,26 @@ body[data-theme="jsw-excel"] .ghg-sidebar .nav-link.active:hover {
 
 body[data-theme="jsw-excel"] .ghg-sidebar nav {
   padding: 12px 0;
+  scrollbar-width: thin;
+  scrollbar-color: #15305a transparent;
+}
+
+body[data-theme="jsw-excel"] .ghg-sidebar nav::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+body[data-theme="jsw-excel"] .ghg-sidebar nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+body[data-theme="jsw-excel"] .ghg-sidebar nav::-webkit-scrollbar-thumb {
+  background-color: #15305a;
+  border-radius: 9999px;
+}
+
+body[data-theme="jsw-excel"] .ghg-sidebar nav::-webkit-scrollbar-thumb:hover {
+  background-color: #0d233a;
 }
 
 body[data-theme="jsw-excel"] .ghg-sidebar nav > div {
