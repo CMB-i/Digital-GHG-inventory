@@ -28,6 +28,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
   const currentMonthEl = document.getElementById("workbook-current-month");
 
+  function syncTableColSpan() {
+    var card = document.getElementById("sheet-audit-logs-card");
+    if (!tableWrap) return;
+    var tableDiv = tableWrap.children[0];
+    if (!tableDiv) return;
+    var cardHidden = !card || card.classList.contains("hidden");
+    tableDiv.style.gridColumn = cardHidden ? "1 / -1" : "";
+  }
+
   function getMonthName(m) {
     const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     return months[parseInt(m, 10)] || "";
@@ -366,11 +375,13 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (!submissionId) {
       card.classList.add("hidden");
+      syncTableColSpan();
       return;
     }
 
     timeline.innerHTML = `<div class="text-xs text-slate-500 py-2">Loading audit logs...</div>`;
     card.classList.remove("hidden");
+    syncTableColSpan();
 
     try {
       const response = await fetch(`/module/APPROV/api/submissions/${submissionId}/audit-logs`);
@@ -482,7 +493,7 @@ document.addEventListener("DOMContentLoaded", function () {
       btnSubmit.disabled = true;
 
       const card = document.getElementById("sheet-audit-logs-card");
-      if (card) card.classList.add("hidden");
+      if (card) { card.classList.add("hidden"); syncTableColSpan(); }
       return;
     }
 
@@ -497,7 +508,7 @@ document.addEventListener("DOMContentLoaded", function () {
       btnSubmit.disabled = true;
 
       const card = document.getElementById("sheet-audit-logs-card");
-      if (card) card.classList.add("hidden");
+      if (card) { card.classList.add("hidden"); syncTableColSpan(); }
       return;
     }
 
@@ -524,6 +535,7 @@ document.addEventListener("DOMContentLoaded", function () {
         loadSheetAuditLogs(row.submission_id);
       } else {
         card.classList.add("hidden");
+        syncTableColSpan();
       }
     }
     
@@ -586,7 +598,11 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     emptyEl.classList.add("hidden");
-    tableWrap.classList.remove("hidden");
+    if (state.selectedFormId === "calc_results") {
+      tableWrap.classList.add("hidden");
+    } else {
+      tableWrap.classList.remove("hidden");
+    }
 
     const mode = state.selectedFormId === "calc_results" ? "calc_results" : "entry";
 
@@ -653,119 +669,153 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function renderCalculatedResultsSection(calcData) {
     const calcSection = document.getElementById("calculated-results-section");
-    const calcHead = document.getElementById("calc-head-tr");
-    const calcBody = document.getElementById("calc-body-rows");
-    if (!calcSection || !calcHead || !calcBody || !state.workbook) return;
+    const calcSummary = document.getElementById("calc-summary-cards");
+    const calcSheetTabs = document.getElementById("calc-sheet-tabs");
+    const calcBody = document.getElementById("calc-results-body");
+    if (!calcSection || !calcSummary || !calcBody) return;
 
-    const currentFormId = state.workbook.selected_form.id;
-    const calcFields = (calcData.fields || []).filter(f => String(f.form_id) === String(currentFormId));
-    
-    if (calcFields.length === 0 || state.selectedFormId === "calc_results") {
+    if (state.selectedFormId !== "calc_results") {
       calcSection.classList.add("hidden");
       return;
     }
 
     calcSection.classList.remove("hidden");
+    tableWrap.classList.add("hidden");
 
-    const getMonthName = (m) => {
-      const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      return months[parseInt(m, 10)] || "";
-    };
+    // Group fields by form/sheet
+    const allFields = calcData.fields || [];
+    const rows = calcData.rows || [];
 
-    calcHead.innerHTML = `
-      <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white w-[100px] min-w-[100px] max-w-[100px]">Month</th>
-      ${calcFields.map(field => `
-        <th class="border border-slate-300 px-3 py-2 text-left bg-navy text-white min-w-[180px]">
-          <div class="font-bold">${escapeHtml(field.field_name.split(" (")[0])}</div>
-          ${field.field_config && field.field_config.unit ? `<div class="text-[10px] text-slate-300 font-semibold normal-case">${escapeHtml(field.field_config.unit)}</div>` : ""}
-        </th>
-      `).join("")}
+    // Build sheet list from fields
+    const sheetMap = {};
+    allFields.forEach(f => {
+      const key = String(f.form_id);
+      if (!sheetMap[key]) sheetMap[key] = { id: f.form_id, name: f.form_name || ("Sheet " + f.form_id), fields: [] };
+      sheetMap[key].fields.push(f);
+    });
+    const sheets = Object.values(sheetMap);
+
+    // Pick active sheet tab (store on state)
+    if (!state._calcSheetTab || !sheetMap[String(state._calcSheetTab)]) {
+      state._calcSheetTab = sheets[0] ? sheets[0].id : null;
+    }
+    const activeFields = state._calcSheetTab ? (sheetMap[String(state._calcSheetTab)] || {}).fields || [] : [];
+
+    // Count statuses properly
+    let cannotCalcCount = 0, needsInputCount = 0;
+    rows.forEach(row => {
+      allFields.forEach(field => {
+        const cell = row.values ? row.values[field.field_code] : null;
+        if (!cell) { cannotCalcCount++; return; }
+        if (cell.status === "missing_input") needsInputCount++;
+        if (cell.status === "not_configured") cannotCalcCount++;
+      });
+    });
+
+    // Approved/preview totals per active sheet
+    let sheetApproved = null, sheetPreview = null;
+    rows.forEach(row => {
+      activeFields.forEach(field => {
+        const cell = row.values ? row.values[field.field_code] : null;
+        if (!cell) return;
+        if (cell.status === "calculable" && cell.reportable_value !== null) {
+          sheetApproved = (sheetApproved || 0) + Number(cell.reportable_value);
+        }
+        if ((cell.status === "pending_approval" || cell.status === "preview_only") && cell.preview_value !== null) {
+          sheetPreview = (sheetPreview || 0) + Number(cell.preview_value);
+        }
+      });
+    });
+
+    calcSummary.innerHTML = `
+      <div class="flex flex-col gap-0.5">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Approved Total</div>
+        <div class="text-2xl font-bold text-emerald-700">${sheetApproved !== null ? sheetApproved : "—"}</div>
+      </div>
+      <div class="w-px bg-slate-200 self-stretch"></div>
+      <div class="flex flex-col gap-0.5">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview Total</div>
+        <div class="text-2xl font-bold text-blue-700">${sheetPreview !== null ? sheetPreview : "—"}</div>
+      </div>
+      <div class="w-px bg-slate-200 self-stretch"></div>
+      <div class="flex flex-col gap-0.5">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Cannot Calculate</div>
+        <div class="text-2xl font-bold text-amber-700">${cannotCalcCount}</div>
+      </div>
+      <div class="w-px bg-slate-200 self-stretch"></div>
+      <div class="flex flex-col gap-0.5">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Needs Input</div>
+        <div class="text-2xl font-bold text-amber-700">${needsInputCount}</div>
+      </div>
     `;
 
-    const rows = calcData.rows || [];
-    calcBody.innerHTML = rows.map(row => {
-      const isApproved = row.submission_status === "Approved" || row.is_locked;
-      const rowClass = row.is_active_period 
-        ? "bg-white font-semibold active-reporting-row" 
-        : isApproved 
-          ? "bg-[#eef3fa]/50 opacity-85 text-slate-500"
-          : "bg-slate-50";
+    // Sheet tabs
+    if (calcSheetTabs) {
+      calcSheetTabs.innerHTML = sheets.map(sheet => {
+        const active = String(sheet.id) === String(state._calcSheetTab);
+        return `<button type="button" data-sheet-id="${sheet.id}" class="workbook-tab whitespace-nowrap ${active ? "workbook-tab-active" : "workbook-tab-inactive"}">${escapeHtml(sheet.name)}</button>`;
+      }).join("");
+      calcSheetTabs.querySelectorAll("button").forEach(btn => {
+        btn.addEventListener("click", function() {
+          state._calcSheetTab = btn.dataset.sheetId;
+          renderCalculatedResultsSection(calcData);
+        });
+      });
+    }
 
-      const status = row.submission_status || row.status || row.period_status || "Not Started";
-      let monthBgClass = "";
-      let lockSuffix = "";
-      if (row.is_active_period) {
-        monthBgClass = "bg-white text-[#1f2937] border-l-[3px] border-l-[#1a3a6b]";
-      } else if (status === "Approved") {
-        monthBgClass = "bg-[#e6f4ea] text-[#1f2937] border-l-4 border-l-[#137333]";
-        lockSuffix = " 🔒";
-      } else if (row.is_locked || status === "Locked") {
-        monthBgClass = "bg-[#f1f3f4] text-[#1f2937] border-l-4 border-l-[#5f6368]";
-        lockSuffix = " 🔒";
-      } else if (["Submitted", "Resubmitted", "Under Review"].includes(status)) {
-        monthBgClass = "bg-[#f3e8ff] text-[#1f2937] border-l-4 border-l-[#7000af]";
-      } else if (status === "Changes Requested" || status === "Rejected" || status === "Changes requested") {
-        if (status === "Rejected") {
-          monthBgClass = "bg-[#fff7ed] text-[#1f2937] border-l-4 border-l-[#ea580c]";
-        } else {
-          monthBgClass = "bg-[#fce8e6] text-[#1f2937] border-l-4 border-l-[#c5221f]";
+    // Rows
+    calcBody.innerHTML = rows.map(row => {
+      const monthLabel = row.label || row.period_label || getFullMonthYear(row.month, row.year);
+      const hasPeriod = Boolean(row.period_id);
+
+      // Aggregate result for this row across active sheet fields
+      let rowValue = null;
+      let rowStatus = hasPeriod ? "missing_input" : "no_period";
+      let warnings = [];
+
+      activeFields.forEach(field => {
+        const cell = row.values ? row.values[field.field_code] : null;
+        if (!cell) return;
+        if (cell.status === "calculable") {
+          rowValue = (rowValue || 0) + Number(cell.reportable_value || 0);
+          rowStatus = "calculable";
+        } else if (cell.status === "pending_approval" || cell.status === "preview_only") {
+          if (rowStatus !== "calculable") {
+            rowValue = (rowValue || 0) + Number(cell.preview_value || 0);
+            rowStatus = "preview";
+          }
+        } else if (cell.status === "missing_input") {
+          if (rowStatus !== "calculable" && rowStatus !== "preview") rowStatus = "missing_input";
+          if (Array.isArray(cell.warnings)) warnings.push(...cell.warnings);
+        } else if (cell.status === "evaluation_error") {
+          rowStatus = "error";
+          if (Array.isArray(cell.warnings)) warnings.push(...cell.warnings);
         }
-      } else if (status === "Draft") {
-        monthBgClass = "bg-[#e6fffa] text-[#1f2937] border-l-4 border-l-[#007a78]";
-      } else if (!row.period_id || row.period_status === "LOCKED") {
-        monthBgClass = "bg-[#f8f9fa] text-[#1f2937] opacity-60 border-l-4 border-l-[#70757a]";
-      } else {
-        monthBgClass = "bg-white text-[#1f2937] border-l-4 border-l-slate-300";
-      }
+      });
+
+      const badge = {
+        calculable: `<span class="inline-flex items-center border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Approved</span>`,
+        preview: `<span class="inline-flex items-center border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">Preview</span>`,
+        missing_input: `<span class="inline-flex items-center border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Cannot calculate</span>`,
+        no_period: `<span class="inline-flex items-center border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500">Period missing</span>`,
+        error: `<span class="inline-flex items-center border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Error</span>`,
+      }[rowStatus] || "";
+
+      const valueHtml = rowValue !== null
+        ? `<span class="font-bold text-base ${rowStatus === "calculable" ? "text-emerald-700" : "text-blue-700"}">${rowValue}</span>`
+        : `<span class="text-slate-300">—</span>`;
+
+      const isActive = row.is_active_period;
+      const rowBg = isActive ? "bg-white font-semibold" : "bg-white";
 
       return `
-        <tr class="${rowClass} border-b border-slate-200">
-          <td class="w-[100px] min-w-[100px] max-w-[100px] border border-slate-300 month-cell ${monthBgClass}">${escapeHtml(row.label || getMonthName(row.month) || row.period_label)}${lockSuffix}</td>
-          ${calcFields.map(field => {
-            const cell = row.values ? row.values[field.field_code] : null;
-            if (!cell) {
-              return `<td class="border border-slate-300 px-3 py-2.5 text-slate-400 italic bg-slate-100/50 min-w-[180px]">—</td>`;
-            }
-            if (cell.status === "not_configured") {
-              return `<td class="border border-slate-300 px-3 py-2.5 text-slate-400 italic bg-slate-100/50 min-w-[180px]">Not configured</td>`;
-            }
-            if (cell.status === "missing_input") {
-              const warningText = Array.isArray(cell.warnings) ? cell.warnings.join(" | ") : "Missing input";
-              return `
-                <td class="border border-slate-300 px-3 py-2.5 text-slate-500 bg-slate-100/50 min-w-[180px]">
-                  <div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 px-2 py-1">${escapeHtml(warningText)}</div>
-                </td>
-              `;
-            }
-            if (cell.status === "evaluation_error") {
-              const warningText = Array.isArray(cell.warnings) ? cell.warnings.join(" | ") : "Error";
-              return `
-                <td class="border border-slate-300 px-3 py-2.5 text-rose-700 bg-rose-50/50 min-w-[180px]">
-                  <div class="text-[11px] font-semibold">${escapeHtml(warningText)}</div>
-                </td>
-              `;
-            }
-            
-            const val = cell.reportable_value !== null ? cell.reportable_value : cell.preview_value;
-            const displayVal = val !== null ? val : "—";
-            const badge = cell.status === "calculable"
-              ? `<span class="inline-flex items-center rounded bg-emerald-50 px-1 py-0.5 text-[9px] font-bold text-emerald-600 border border-emerald-100">Approved</span>`
-              : `<span class="inline-flex items-center rounded bg-blue-50 px-1 py-0.5 text-[9px] font-bold text-blue-600 border border-blue-100">Preview</span>`;
-              
-            return `
-              <td class="border border-slate-300 px-3 py-2.5 font-semibold text-slate-900 bg-slate-50 min-w-[180px]">
-                <div class="flex items-center justify-between gap-2">
-                  <span>${escapeHtml(displayVal)}</span>
-                  ${badge}
-                </div>
-              </td>
-            `;
-          }).join("")}
+        <tr class="${rowBg} border-b border-slate-100">
+          <td class="border border-slate-200 px-4 py-2.5 text-sm ${isActive ? "font-semibold text-slate-900" : "text-slate-500"}">${escapeHtml(monthLabel)}</td>
+          <td class="border border-slate-200 px-4 py-2.5">${valueHtml}</td>
+          <td class="border border-slate-200 px-4 py-2.5">${badge}</td>
         </tr>
       `;
     }).join("");
-
-
   }
 
   function renderIssueList(issues) {
