@@ -165,7 +165,7 @@ def reject_value_set_version(version_id, user_id, reason):
         
     # Self-rejection check
     if version.submitted_by == user_id:
-        raise ValueError("Approver cannot be the same user who submitted the value set version.")
+        raise ValueError("Reviewer cannot be the same user who submitted the value set version.")
         
     version.status = "Rejected"
     version.rejected_by = user_id
