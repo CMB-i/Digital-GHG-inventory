@@ -296,10 +296,12 @@ document.addEventListener("DOMContentLoaded", function () {
     sheetValues.innerHTML = "";
 
     try {
-      const response = await fetch(`/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${reviewData.package.site_id}&fy=${reviewData.package.financial_year_start}`);
+      const response = await fetch(`/module/APPROV/api/packages/${packageId}/calculation-results`);
       if (!response.ok) throw new Error("Could not load calculation results.");
-      const data = await response.json();
+      const payload = await response.json();
+      const data = payload.data || payload;
 
+      const activeCalcRow = (data.rows || []).find(row => row.month === reviewData.package.month);
       window.WorkbookSheet.render({
         mode: "calc_results",
         headEl: sheetHead,
@@ -311,7 +313,7 @@ document.addEventListener("DOMContentLoaded", function () {
           editable: false,
           is_active_period: row.month === reviewData.package.month
         })),
-        selectedRowKey: data.rows.find(row => row.month === reviewData.package.month) ? `${reviewData.package.year || "row"}-${reviewData.package.month || "0"}` : null,
+        selectedRowKey: activeCalcRow ? `${activeCalcRow.year}-${activeCalcRow.month}` : null,
       });
     } catch (err) {
       sheetHead.innerHTML = `<tr><td class="px-5 py-4 text-rose-500 font-bold">${escapeHtml(err.message)}</td></tr>`;
