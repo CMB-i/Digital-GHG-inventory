@@ -95,9 +95,20 @@ def create_app(config_class=Config):
 
     @app.route("/")
     def index():
-        if current_user() is None:
+        user = current_user()
+        if user is None:
             return redirect(url_for("auth.login"))
-        return redirect(url_for("dashboard"))
+
+        has_sub = user_can(user, "submission", "create", "edit", "submit")
+        has_review = user_can(user, "submission", "approve", "reject")
+
+        if has_sub:
+            return redirect("/module/SUBMIT/")
+        elif has_review:
+            return redirect("/module/APPROV/")
+        else:
+            return redirect(url_for("dashboard"))
+
 
     @app.route("/dashboard")
     @require_login
