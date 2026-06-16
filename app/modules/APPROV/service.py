@@ -1031,6 +1031,297 @@ def raise_issue(submission_id, field_id, title, description, user_id):
 
     return issue
 
+def compose_package_calculation_results(package_id, user_id):
+    """
+    Computes read-only calculation results for a reviewer viewing a package.
+    Scoped to the package's site and financial year. Reads SubmissionValues
+    from submitted submissions across the FY. Blank/missing are preserved as
+    None and never coerced to zero.
+    """
+    from sqlalchemy import tuple_
+    from app.modules.FORMBLD.model import Field, Form
+    from app.modules.FORMBLD.service import get_form_version_fields
+    from app.modules.FRMULA.model import FormulaVersion
+    from app.modules.FRMULA.service import evaluate_formula
+    from app.modules.PERIOD.model import ReportingPeriod
+    from app.modules.SITEMST.model import Site
+    from app.modules.WKBK.model import Workbook, WorkbookForm
+    from app.modules.SUBMIT.service import (
+        human_sheet_label,
+        format_period_label,
+        get_approved_valsets_snapshot,
+    )
+
+    package = SubmissionPackage.query.get(package_id)
+    if not package or package.is_deleted:
+        raise ValueError("Package not found.")
+
+    review_data = compose_package_review_data(package.id, user_id)
+    if not review_data:
+        raise ValueError("Permission denied.")
+
+    site = Site.query.get(package.site_id)
+    period = ReportingPeriod.query.get(package.period_id)
+    if not site or not period:
+        raise ValueError("Package site or period not found.")
+
+    fy_start_year = period.year if period.month >= 4 else period.year - 1
+
+    pkg_subs = Submission.query.filter_by(package_id=package.id, is_deleted=False).all()
+    pkg_form_ids = list({sub.form_id for sub in pkg_subs if sub.form_id})
+
+    workbook = None
+    if pkg_form_ids:
+        workbook = (
+            db.session.query(Workbook)
+            .join(WorkbookForm, WorkbookForm.workbook_id == Workbook.id)
+            .filter(
+                WorkbookForm.form_id.in_(pkg_form_ids),
+                Workbook.is_active == True,
+            )
+            .first()
+        )
+
+    if not workbook:
+        return {"fields": [], "sections": [], "rows": []}
+
+    assigned_rows = (
+        db.session.query(WorkbookForm, Form)
+        .join(Form, Form.id == WorkbookForm.form_id)
+        .filter(
+            WorkbookForm.workbook_id == workbook.id,
+            Form.is_deleted == False,
+            Form.current_version_id.is_not(None),
+        )
+        .order_by(WorkbookForm.display_order.asc(), WorkbookForm.id.asc())
+        .all()
+    )
+    assigned = [(form, wf.display_order) for wf, form in assigned_rows]
+    if not assigned:
+        return {"fields": [], "sections": [], "rows": []}
+
+    all_form_ids = [form.id for form, _ in assigned]
+    all_fields = Field.query.filter(
+        Field.form_id.in_(all_form_ids or [0]),
+        Field.is_deleted == False,
+    ).all()
+    field_id_to_code = {f.id: f.field_code for f in all_fields}
+    form_display = {form.id: human_sheet_label(form) for form, _ in assigned}
+    field_code_to_form = {f.field_code: form_display.get(f.form_id, "Unknown Sheet") for f in all_fields}
+    field_code_to_name = {}
+
+    calculated_fields = []
+    for form, _ in assigned:
+        for fv, f in get_form_version_fields(form.current_version_id):
+            field_code_to_name[f.field_code] = fv.field_name
+            if fv.field_type == "calculated":
+                calculated_fields.append({"field": f, "version": fv, "form": form})
+
+    calculated_fields.sort(
+        key=lambda it: (human_sheet_label(it["form"]).lower(), it["field"].display_order)
+    )
+
+    serialized_fields = [
+        {
+            "id": it["field"].id,
+            "field_id": it["field"].id,
+            "field_version_id": it["version"].id,
+            "field_code": it["field"].field_code,
+            "field_name": f"{it['version'].field_name} ({human_sheet_label(it['form'])})",
+            "field_type": "calculated",
+            "field_config": it["version"].field_config or {},
+            "display_order": it["field"].display_order,
+            "form_id": it["form"].id,
+        }
+        for it in calculated_fields
+    ]
+
+    value_set_snapshot = get_approved_valsets_snapshot()
+
+    _FY_ORDER = (4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3)
+    months = [
+        {
+            "month": month,
+            "year": fy_start_year if month >= 4 else fy_start_year + 1,
+            "label": format_period_label(
+                fy_start_year if month >= 4 else fy_start_year + 1, month
+            ),
+            "period_label": format_period_label(
+                fy_start_year if month >= 4 else fy_start_year + 1, month
+            ),
+        }
+        for month in _FY_ORDER
+    ]
+
+    month_keys = [(it["year"], it["month"]) for it in months]
+    fy_periods = ReportingPeriod.query.filter(
+        ReportingPeriod.site_id == package.site_id,
+        ReportingPeriod.is_deleted == False,
+        tuple_(ReportingPeriod.year, ReportingPeriod.month).in_(month_keys),
+    ).all()
+    period_by_key = {(p.year, p.month): p for p in fy_periods}
+
+    fy_subs = Submission.query.filter(
+        Submission.site_id == package.site_id,
+        Submission.form_id.in_(all_form_ids or [0]),
+        Submission.is_deleted == False,
+        Submission.reporting_period_id.in_([p.id for p in fy_periods] or [0]),
+    ).all()
+    sub_by_period_form = {(sub.reporting_period_id, sub.form_id): sub for sub in fy_subs}
+
+    sub_ids = [s.id for s in fy_subs]
+    raw_values = (
+        SubmissionValue.query.filter(SubmissionValue.submission_id.in_(sub_ids)).all()
+        if sub_ids else []
+    )
+    values_by_sub_code = {}
+    for val in raw_values:
+        code = field_id_to_code.get(val.field_id)
+        if code:
+            values_by_sub_code.setdefault(val.submission_id, {})[code] = val
+
+    rows = []
+    for it in months:
+        p = period_by_key.get((it["year"], it["month"]))
+        row_values = {}
+
+        if not p:
+            for fi in calculated_fields:
+                row_values[fi["field"].field_code] = {
+                    "preview_value": None,
+                    "reportable_value": None,
+                    "status": "missing_input",
+                    "warnings": ["Reporting period not created for this month."],
+                }
+        else:
+            preview_vals = {}
+            reportable_vals = {}
+            cell_states = {}
+
+            for form, _ in assigned:
+                sub = sub_by_period_form.get((p.id, form.id))
+                if not sub:
+                    continue
+                for code, val in values_by_sub_code.get(sub.id, {}).items():
+                    raw = val.calculated_value if val.calculated_value is not None else val.raw_value
+                    is_approved = val.cell_state == "approved_locked" or sub.status == "Approved"
+                    cell_states[code] = "approved_locked" if is_approved else val.cell_state
+                    if raw is not None and raw != "":
+                        preview_vals[code] = raw
+                        if is_approved:
+                            reportable_vals[code] = raw
+
+            for _pass in range(3):
+                for fi in calculated_fields:
+                    f, fv, form_obj = fi["field"], fi["version"], fi["form"]
+                    code = f.field_code
+                    fver_id = fv.field_config.get("formula_version_id")
+                    if not fver_id:
+                        row_values[code] = {
+                            "preview_value": None, "reportable_value": None,
+                            "status": "not_configured", "warnings": ["Formula not configured."],
+                        }
+                        continue
+                    fver = FormulaVersion.query.get(fver_id)
+                    if not fver:
+                        row_values[code] = {
+                            "preview_value": None, "reportable_value": None,
+                            "status": "not_configured", "warnings": ["Formula version not found."],
+                        }
+                        continue
+
+                    tokens = list((fver.tokens or {}).keys())
+                    missing_prev = [t for t in tokens if t not in value_set_snapshot and t not in preview_vals]
+                    missing_rep = []
+                    unapproved_rep = []
+                    for t in tokens:
+                        if t not in value_set_snapshot:
+                            if t not in preview_vals:
+                                missing_rep.append(t)
+                            elif t not in reportable_vals:
+                                unapproved_rep.append(t)
+
+                    pv, ps, pw = None, "preview_only", []
+                    if missing_prev:
+                        ps = "missing_input"
+                        for dep in missing_prev:
+                            fn = field_code_to_form.get(dep)
+                            if fn and fn != human_sheet_label(form_obj):
+                                pw.append(f"Cannot calculate yet — [{fn}] value is missing")
+                            else:
+                                pw.append(f"Cannot calculate — waiting for {field_code_to_name.get(dep, dep)}.")
+                    else:
+                        try:
+                            pv = evaluate_formula(fver.expression, preview_vals, value_set_snapshot)
+                            unapp = [t for t in tokens if t not in value_set_snapshot and cell_states.get(t) != "approved_locked"]
+                            if unapp:
+                                ps = "preview_only"
+                                for dep in unapp:
+                                    pw.append(f"Input {field_code_to_name.get(dep, dep)} is submitted but not approved, preview only.")
+                            else:
+                                ps = "calculable"
+                        except Exception as exc:
+                            ps = "evaluation_error"
+                            pw.append(f"Evaluation error: {str(exc)}")
+
+                    rv, rs, rw = None, "calculable", []
+                    if missing_rep:
+                        rs = "missing_input"
+                        for dep in missing_rep:
+                            fn = field_code_to_form.get(dep)
+                            if fn and fn != human_sheet_label(form_obj):
+                                rw.append(f"Cannot calculate yet — [{fn}] value is missing")
+                            else:
+                                rw.append(f"Cannot calculate — waiting for {field_code_to_name.get(dep, dep)}.")
+                    elif unapproved_rep:
+                        rs = "pending_approval"
+                        for dep in unapproved_rep:
+                            rw.append(f"Input {field_code_to_name.get(dep, dep)} is not approved, preview only.")
+                    else:
+                        try:
+                            rv = evaluate_formula(fver.expression, reportable_vals, value_set_snapshot)
+                        except Exception as exc:
+                            rs = "evaluation_error"
+                            rw.append(f"Evaluation error: {str(exc)}")
+
+                    row_values[code] = {
+                        "preview_value": pv,
+                        "reportable_value": rv,
+                        "status": "calculable" if rs == "calculable" else ps,
+                        "warnings": list(set(pw + rw)),
+                    }
+                    if pv is not None:
+                        preview_vals[code] = pv
+                    if rv is not None:
+                        reportable_vals[code] = rv
+
+        row_sub = row_sub_status = None
+        row_locked = True
+        if p:
+            for form, _ in assigned:
+                sub = sub_by_period_form.get((p.id, form.id))
+                if sub:
+                    row_sub = sub.id
+                    row_sub_status = sub.status
+                    row_locked = sub.is_locked
+                    break
+
+        rows.append({
+            "month": it["month"],
+            "year": it["year"],
+            "label": it["label"],
+            "period_label": it["period_label"],
+            "period_id": p.id if p else None,
+            "period_status": p.status if p else None,
+            "submission_id": row_sub,
+            "submission_status": row_sub_status,
+            "is_locked": row_locked,
+            "values": row_values,
+        })
+
+    return {"fields": serialized_fields, "sections": [], "rows": rows}
+
+
 def resolve_issue(issue_id, user_id):
     """
     Resolves an open issue.

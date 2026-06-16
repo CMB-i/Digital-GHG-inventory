@@ -17,6 +17,7 @@ from app.modules.APPROV.service import (
     resolve_issue,
     get_package_summary_for_reviewer,
     compose_package_review_data,
+    compose_package_calculation_results,
     list_package_value_issues,
     add_package_value_issue,
     approve_package,
@@ -122,6 +123,20 @@ def get_package_review(package_id):
         return error_response("Permission denied.", 403)
 
     return success_response(data=review_data)
+
+@bp.route("/api/packages/<int:package_id>/calculation-results")
+@require_login
+def get_package_calculation_results(package_id):
+    user = current_user()
+    try:
+        data = compose_package_calculation_results(package_id, user.id)
+        return success_response(data=data)
+    except ValueError as e:
+        code = 403 if "Permission denied" in str(e) or "not found" in str(e).lower() else 400
+        return error_response(str(e), code)
+    except Exception as e:
+        return error_response(str(e), 500)
+
 
 @bp.route("/api/packages/<int:package_id>/approve", methods=["POST"])
 @require_login
