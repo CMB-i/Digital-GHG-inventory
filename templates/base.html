@@ -128,7 +128,7 @@
       {% set show_sidebar = nav_items | length > 0 %}
       {% if show_sidebar %}
       <!-- App Sidebar (220px) -->
-      <aside class="ghg-sidebar bg-navy text-white w-[220px] flex-shrink-0 border-r border-navy-dark min-h-[calc(100vh-56px)] flex flex-col z-10">
+      <aside class="ghg-sidebar bg-navy text-white w-[220px] flex-shrink-0 border-r border-navy-dark h-full flex flex-col z-10">
         <nav class="flex-1 p-2 space-y-1 overflow-y-auto">
           {% for group in nav_items %}
             <div class="space-y-0">

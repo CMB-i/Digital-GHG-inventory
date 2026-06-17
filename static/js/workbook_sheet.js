@@ -635,6 +635,18 @@
       `;
     }
 
+    let latestActiveRow = null;
+    let maxChron = -1;
+    rows.forEach(row => {
+      if (row.is_active_period) {
+        const chron = (row.year || 0) * 12 + (row.month || 0);
+        if (chron > maxChron) {
+          maxChron = chron;
+          latestActiveRow = row;
+        }
+      }
+    });
+
     let tbodyHtml = "";
     for (let idx = 0; idx < rows.length; idx++) {
       const row = rows[idx];
@@ -676,10 +688,12 @@
       }
 
       const trExtraClasses = (rowState === "not_open" ? " aw-row-not-open" : "") + ((rowState === "approved" || rowState === "locked") ? " aw-row-approved" : "");
+      const isLatestActiveAndNotStarted = (row === latestActiveRow) && (row.submission_status === "Not Started");
+      const blinkerHtml = isLatestActiveAndNotStarted ? ' <span class="month-blinker" title="Latest month to fill"></span>' : '';
       tbodyHtml += `
         <tr data-row-key="${escapeHtml(key)}" class="${rowClass} transition${trExtraClasses}">
           <td class="sticky left-0 z-10 align-middle month-cell ${monthBgClass}">
-            ${escapeHtml(getFullMonthYear(row.month, row.year))}${lockSuffix}
+            ${escapeHtml(getFullMonthYear(row.month, row.year))}${lockSuffix}${blinkerHtml}
           </td>
           ${displayFields.map((field) => renderCell(row, field, options)).join("")}
           ${!isCalcMode ? renderRemarksCell(row, fileField, options) : ""}

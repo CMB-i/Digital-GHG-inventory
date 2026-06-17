@@ -101,9 +101,10 @@ def create_app(config_class=Config):
         caps = build_user_capabilities(user)
         if caps["can_contribute"]:
             return redirect(url_for("submit.index"))
-        if caps["can_review"]:
+        elif caps["can_review"]:
             return redirect(url_for("approv.index"))
-        return redirect(url_for("dashboard"))
+        else:
+            return redirect(url_for("dashboard"))
 
     @app.route("/dashboard")
     @require_login

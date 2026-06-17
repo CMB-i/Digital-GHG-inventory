@@ -21,9 +21,9 @@
           {% for row in audit_logs %}
             <tr>
               <td class="px-4 py-3 whitespace-nowrap text-slate-700">{{ row.created_at|compact_local_datetime }}</td>
-              <td class="px-4 py-3 font-medium text-slate-900">{{ row.action }}</td>
-              <td class="px-4 py-3 text-slate-700">{{ row.entity_type }}{% if row.entity_id %} #{{ row.entity_id }}{% endif %}</td>
-              <td class="px-4 py-3 text-slate-700">{{ row.actor_user_id or "System" }}</td>
+              <td class="px-4 py-3 font-medium text-slate-900">{{ row.readable_action }}</td>
+              <td class="px-4 py-3 text-slate-700">{{ row.entity_details }}</td>
+              <td class="px-4 py-3 text-slate-700">{{ row.actor_name }}</td>
             </tr>
           {% endfor %}
         </tbody>
