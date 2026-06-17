@@ -251,6 +251,13 @@ def create_app(config_class=Config):
     def no_access():
         return render_template("no_access.html"), 403
 
+    with app.app_context():
+        from app.modules.NOTIFY.service import seed_default_notification_configs
+        try:
+            seed_default_notification_configs()
+        except Exception as e:
+            app.logger.warning(f"Failed to seed default notifications: {e}")
+
     return app
 
 
@@ -422,6 +429,11 @@ def build_nav_items(user):
                     "label": "Workflow Paths",
                     "href": "/module/WFLWBLD/",
                     "visible": capabilities["can_manage_setup"] and user_can(user, "workflow", "view"),
+                },
+                {
+                    "label": "Notification Config",
+                    "href": "/module/NOTIFY/manager",
+                    "visible": capabilities["can_manage_setup"] and user_can(user, "notification", "view"),
                 },
             ],
         },

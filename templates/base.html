@@ -106,6 +106,7 @@
     <div class="flex items-center gap-4">
       <span class="text-xs text-slate-300 font-normal">{{ current_user.full_name }}</span>
       {% include "partials/notification_bell.html" %}
+      <a href="{{ url_for('notify.settings') }}" class="border border-slate-400 hover:border-white text-[11px] px-2.5 py-1 text-slate-200 hover:text-white transition uppercase font-semibold tracking-wider">Settings</a>
       <a href="{{ url_for('auth.logout') }}" class="border border-slate-400 hover:border-white text-[11px] px-2.5 py-1 text-slate-200 hover:text-white transition uppercase font-semibold tracking-wider">Sign out</a>
     </div>
   </header>
@@ -155,6 +156,9 @@
       </div>
     </main>
   </div>
+
+  <!-- Toast Container for sliding notifications -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-[9999] flex flex-col gap-3 w-80 max-w-[calc(100vw-2rem)] pointer-events-none"></div>
 
   <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
   <script src="{{ url_for('static', filename='js/phone_input.js') }}"></script>

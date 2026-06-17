@@ -127,7 +127,7 @@ SUPPORTED_PERMISSION_FLAGS = {
     "period": {"can_view", "can_create", "can_edit", "can_delete", "can_reopen"},
     "value_set": {"can_view", "can_create", "can_edit", "can_delete", "can_approve", "can_reject", "can_manage_forms"},
     "formula": {"can_view", "can_create", "can_edit", "can_delete", "can_manage_forms"},
-    "notification": {"can_view"},
+    "notification": {"can_view", "can_create", "can_edit", "can_delete"},
     "audit": {"can_view", "can_export"},
 }
 

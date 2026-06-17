@@ -1,6 +1,10 @@
-from flask import Blueprint, jsonify, render_template
+from datetime import datetime, timezone
+from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
 from app.common.auth import current_user, require_login
+from app.common.decorators import require_permission
 from app.common.permissions import has_permission
+from app.database import db
+from app.modules.NOTIFY.model import NotificationConfig, UserNotificationPreference
 from app.modules.NOTIFY.service import (
     get_recent_notifications,
     get_unread_count,
@@ -74,7 +78,6 @@ def index():
     Renders the main notifications page listing all notifications for the user.
     """
     user = current_user()
-    # Fetch a larger list for the main page (e.g. 50 recent notifications)
     notifications = get_recent_notifications(user.id, limit=50)
 
     # Resolve links dynamically
@@ -161,3 +164,180 @@ def mark_all_read():
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@bp.route("/settings", methods=["GET", "POST"])
+@require_login
+def settings():
+    """
+    Enables users to manage their notification preferences (In-App, Desktop, Email, WhatsApp).
+    """
+    user = current_user()
+    from app.modules.NOTIFY.service import get_user_preferences
+    
+    pref = UserNotificationPreference.query.filter_by(user_id=user.id).first()
+    
+    if request.method == "POST":
+        if not pref:
+            pref = UserNotificationPreference(user_id=user.id)
+            db.session.add(pref)
+            
+        pref.pref_in_app = request.form.get("pref_in_app") == "on"
+        pref.pref_desktop = request.form.get("pref_desktop") == "on"
+        pref.pref_email = request.form.get("pref_email") == "on"
+        pref.pref_whatsapp = request.form.get("pref_whatsapp") == "on"
+        db.session.commit()
+        flash("Notification preferences updated.", "success")
+        return redirect(url_for("notify.settings"))
+        
+    if not pref:
+        pref = get_user_preferences(user.id)
+        
+    return render_template(
+        "modules/NOTIFY/settings.html",
+        module_code=MODULE_CODE,
+        pref=pref
+    )
+
+
+@bp.route("/manager")
+@require_permission("notification", "view")
+def manager():
+    """
+    Lists notification configurations for administrator review.
+    """
+    user = current_user()
+    configs = NotificationConfig.query.filter_by(is_deleted=False).order_by(NotificationConfig.id.asc()).all()
+    
+    from app.modules.USRMGMT.model import User
+    all_users = User.query.filter_by(is_deleted=False, is_active=True).order_by(User.full_name.asc()).all()
+    
+    perm_create = has_permission(user.id, "notification", "create")
+    perm_edit = has_permission(user.id, "notification", "edit")
+    perm_delete = has_permission(user.id, "notification", "delete")
+    
+    return render_template(
+        "modules/NOTIFY/manager.html",
+        module_code=MODULE_CODE,
+        configs=configs,
+        all_users=all_users,
+        perm_create=perm_create,
+        perm_edit=perm_edit,
+        perm_delete=perm_delete
+    )
+
+
+@bp.route("/manager/create", methods=["POST"])
+@require_permission("notification", "create")
+def manager_create():
+    """
+    Creates a new notification configuration.
+    """
+    user = current_user()
+    try:
+        name = request.form.get("name")
+        event_type = request.form.get("event_type")
+        message_template = request.form.get("message_template")
+        recipient_type = request.form.get("recipient_type")
+        
+        target_entity_type = request.form.get("target_entity_type") or None
+        target_permission = request.form.get("target_permission") or None
+        
+        selected_uids = request.form.getlist("recipient_user_ids")
+        recipient_user_ids = ",".join(selected_uids) if selected_uids else None
+        
+        dynamic_role = request.form.get("dynamic_role") or None
+        
+        selected_channels = request.form.getlist("channels")
+        channels = ",".join(selected_channels) if selected_channels else "in_app"
+        
+        is_active = request.form.get("is_active") == "on"
+        
+        config = NotificationConfig(
+            name=name,
+            event_type=event_type,
+            message_template=message_template,
+            recipient_type=recipient_type,
+            target_entity_type=target_entity_type,
+            target_permission=target_permission,
+            recipient_user_ids=recipient_user_ids,
+            dynamic_role=dynamic_role,
+            channels=channels,
+            is_active=is_active,
+            created_by=user.id,
+            updated_by=user.id
+        )
+        db.session.add(config)
+        db.session.commit()
+        flash("Notification configuration created.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error creating configuration: {e}", "error")
+        
+    return redirect(url_for("notify.manager"))
+
+
+@bp.route("/manager/edit/<int:config_id>", methods=["POST"])
+@require_permission("notification", "edit")
+def manager_edit(config_id):
+    """
+    Updates an existing notification configuration.
+    """
+    user = current_user()
+    config = NotificationConfig.query.filter_by(id=config_id, is_deleted=False).first()
+    if not config:
+        flash("Configuration not found.", "error")
+        return redirect(url_for("notify.manager"))
+        
+    try:
+        config.name = request.form.get("name")
+        config.event_type = request.form.get("event_type")
+        config.message_template = request.form.get("message_template")
+        config.recipient_type = request.form.get("recipient_type")
+        
+        config.target_entity_type = request.form.get("target_entity_type") or None
+        config.target_permission = request.form.get("target_permission") or None
+        
+        selected_uids = request.form.getlist("recipient_user_ids")
+        config.recipient_user_ids = ",".join(selected_uids) if selected_uids else None
+        
+        config.dynamic_role = request.form.get("dynamic_role") or None
+        
+        selected_channels = request.form.getlist("channels")
+        config.channels = ",".join(selected_channels) if selected_channels else "in_app"
+        
+        config.is_active = request.form.get("is_active") == "on"
+        config.updated_by = user.id
+        
+        db.session.commit()
+        flash("Notification configuration updated.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error updating configuration: {e}", "error")
+        
+    return redirect(url_for("notify.manager"))
+
+
+@bp.route("/manager/delete/<int:config_id>", methods=["POST"])
+@require_permission("notification", "delete")
+def manager_delete(config_id):
+    """
+    Soft deletes a notification configuration.
+    """
+    user = current_user()
+    config = NotificationConfig.query.filter_by(id=config_id, is_deleted=False).first()
+    if not config:
+        flash("Configuration not found.", "error")
+        return redirect(url_for("notify.manager"))
+        
+    try:
+        config.is_deleted = True
+        config.deleted_at = datetime.now(timezone.utc)
+        config.deleted_by = user.id
+        db.session.commit()
+        flash("Notification configuration deleted.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error deleting configuration: {e}", "error")
+        
+    return redirect(url_for("notify.manager"))
