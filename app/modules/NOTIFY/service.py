@@ -1,7 +1,15 @@
 import os
+import smtplib
 from datetime import datetime, timezone
+from email.mime.text import MIMEText
 from app.database import db
 from app.modules.NOTIFY.model import Notification, UserNotificationPreference, NotificationConfig
+
+try:
+    from twilio.rest import Client
+    TWILIO_AVAILABLE = True
+except ImportError:
+    TWILIO_AVAILABLE = False
 
 
 def create_notification(user_id, event_type, entity_type, entity_id, message, channel="in_app"):
@@ -43,45 +51,102 @@ def create_notifications_for_users(user_ids, event_type, entity_type, entity_id,
 
 def send_mock_email(to_email, subject, body):
     """
-    Simulates sending an email by logging to the console and writing to uploads/mock_emails.log
+    Sends a real email using SMTP configuration from environment variables,
+    falling back to file logging if not configured.
     """
-    log_dir = "/Users/shubhamindulkar/Digital-GHG-inventory/uploads"
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, "mock_emails.log")
+    smtp_server = os.getenv("SMTP_SERVER")
+    smtp_port = os.getenv("SMTP_PORT", 587)
+    smtp_user = os.getenv("SMTP_USERNAME")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    sender = os.getenv("SMTP_SENDER", smtp_user)
     
-    log_entry = (
-        f"========================================\n"
-        f"Timestamp: {datetime.now(timezone.utc).isoformat()}\n"
-        f"To: {to_email}\n"
-        f"Subject: {subject}\n"
-        f"Body:\n{body}\n"
-        f"========================================\n\n"
-    )
-    
-    with open(log_path, "a") as f:
-        f.write(log_entry)
-    print(f"[MOCK EMAIL SENT] To: {to_email} | Subject: {subject}")
+    if not smtp_server or not smtp_user or not smtp_password:
+        from flask import current_app
+        try:
+            log_dir = os.path.join(os.path.dirname(current_app.root_path), "uploads")
+        except RuntimeError:
+            log_dir = os.getenv("UPLOAD_FOLDER") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "uploads"))
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "mock_emails.log")
+        
+        log_entry = (
+            f"========================================\n"
+            f"Timestamp: {datetime.now(timezone.utc).isoformat()}\n"
+            f"To: {to_email}\n"
+            f"Subject: {subject}\n"
+            f"Body:\n{body}\n"
+            f"========================================\n\n"
+        )
+        
+        with open(log_path, "a") as f:
+            f.write(log_entry)
+        print(f"[MOCK EMAIL SENT] To: {to_email} | Subject: {subject}")
+        return
+
+    # Create live MIME message
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = sender
+    msg['To'] = to_email
+
+    try:
+        with smtplib.SMTP(smtp_server, int(smtp_port)) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(sender, [to_email], msg.as_string())
+        print(f"[EMAIL SENT] Successfully sent notification to {to_email}")
+    except Exception as e:
+        print(f"[EMAIL ERROR] Failed to send email to {to_email}: {e}")
 
 
 def send_mock_whatsapp(to_phone, body):
     """
-    Simulates sending a WhatsApp message by logging to the console and writing to uploads/mock_whatsapp.log
+    Sends a real WhatsApp message using Twilio client,
+    falling back to file logging if not configured.
     """
-    log_dir = "/Users/shubhamindulkar/Digital-GHG-inventory/uploads"
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, "mock_whatsapp.log")
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    from_whatsapp = os.getenv("TWILIO_SENDER")
     
-    log_entry = (
-        f"========================================\n"
-        f"Timestamp: {datetime.now(timezone.utc).isoformat()}\n"
-        f"To Phone: {to_phone}\n"
-        f"Message:\n{body}\n"
-        f"========================================\n\n"
-    )
-    
-    with open(log_path, "a") as f:
-        f.write(log_entry)
-    print(f"[MOCK WHATSAPP SENT] To: {to_phone} | Message: {body}")
+    if not TWILIO_AVAILABLE or not account_sid or not auth_token or not from_whatsapp:
+        from flask import current_app
+        try:
+            log_dir = os.path.join(os.path.dirname(current_app.root_path), "uploads")
+        except RuntimeError:
+            log_dir = os.getenv("UPLOAD_FOLDER") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "uploads"))
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "mock_whatsapp.log")
+        
+        log_entry = (
+            f"========================================\n"
+            f"Timestamp: {datetime.now(timezone.utc).isoformat()}\n"
+            f"To Phone: {to_phone}\n"
+            f"Message:\n{body}\n"
+            f"========================================\n\n"
+        )
+        
+        with open(log_path, "a") as f:
+            f.write(log_entry)
+        print(f"[MOCK WHATSAPP SENT] To: {to_phone} | Message: {body}")
+        return
+
+    # Clean phone format
+    formatted_phone = to_phone.strip()
+    if not formatted_phone.startswith("+"):
+        formatted_phone = f"+91{formatted_phone}"
+
+    to_whatsapp = f"whatsapp:{formatted_phone}"
+
+    try:
+        client = Client(account_sid, auth_token)
+        message = client.messages.create(
+            from_=from_whatsapp,
+            body=body,
+            to=to_whatsapp
+        )
+        print(f"[WHATSAPP SENT] Message SID: {message.sid} sent to {formatted_phone}")
+    except Exception as e:
+        print(f"[WHATSAPP ERROR] Failed to send to {formatted_phone}: {e}")
 
 
 def get_user_preferences(user_id):
@@ -323,14 +388,17 @@ def notify_spoc(submission_id, event_type, message):
     last_action = ApprovalAction.query.filter_by(submission_id=submission_id).order_by(ApprovalAction.created_at.desc()).first()
     reason = last_action.comments if last_action else ""
 
-    mapped_event_type = f"SUBMISSION_{event_type.upper()}"
-    if event_type.upper() not in ("SUBMISSION_APPROVED", "SUBMISSION_REJECTED", "SUBMISSION_CHANGES_REQUESTED"):
-        if event_type.upper() == "APPROVED":
-            mapped_event_type = "SUBMISSION_APPROVED"
-        elif event_type.upper() == "REJECTED":
-            mapped_event_type = "SUBMISSION_REJECTED"
-        elif event_type.upper() in ("CHANGES_REQUESTED", "CORRECTIONS_REQUESTED"):
-            mapped_event_type = "SUBMISSION_CHANGES_REQUESTED"
+    event_upper = event_type.upper()
+    mapping = {
+        "APPROVED": "SUBMISSION_APPROVED",
+        "SUBMISSION_APPROVED": "SUBMISSION_APPROVED",
+        "REJECTED": "SUBMISSION_REJECTED",
+        "SUBMISSION_REJECTED": "SUBMISSION_REJECTED",
+        "CHANGES_REQUESTED": "SUBMISSION_CHANGES_REQUESTED",
+        "CORRECTIONS_REQUESTED": "SUBMISSION_CHANGES_REQUESTED",
+        "SUBMISSION_CHANGES_REQUESTED": "SUBMISSION_CHANGES_REQUESTED",
+    }
+    mapped_event_type = mapping.get(event_upper, f"SUBMISSION_{event_upper}")
 
     context = {
         "site_id": submission.site_id,
@@ -393,6 +461,12 @@ def seed_default_notification_configs():
     if NotificationConfig.query.filter_by(is_deleted=False).count() > 0:
         return
         
+    from app.modules.USRMGMT.model import User
+    system_user = User.query.filter_by(is_deleted=False).order_by(User.id.asc()).first()
+    if not system_user:
+        return
+    user_id = system_user.id
+
     defaults = [
         {
             "name": "Pending Submission Review",
@@ -401,8 +475,8 @@ def seed_default_notification_configs():
             "recipient_type": "dynamic",
             "dynamic_role": "level_approvers",
             "channels": "in_app,desktop,email,whatsapp",
-            "created_by": 1,
-            "updated_by": 1
+            "created_by": user_id,
+            "updated_by": user_id
         },
         {
             "name": "Submission Approved Notification",
@@ -411,8 +485,8 @@ def seed_default_notification_configs():
             "recipient_type": "dynamic",
             "dynamic_role": "spoc",
             "channels": "in_app,desktop,email,whatsapp",
-            "created_by": 1,
-            "updated_by": 1
+            "created_by": user_id,
+            "updated_by": user_id
         },
         {
             "name": "Submission Rejected Notification",
@@ -421,8 +495,8 @@ def seed_default_notification_configs():
             "recipient_type": "dynamic",
             "dynamic_role": "spoc",
             "channels": "in_app,desktop,email,whatsapp",
-            "created_by": 1,
-            "updated_by": 1
+            "created_by": user_id,
+            "updated_by": user_id
         },
         {
             "name": "Submission Corrections Requested",
@@ -431,8 +505,8 @@ def seed_default_notification_configs():
             "recipient_type": "dynamic",
             "dynamic_role": "spoc",
             "channels": "in_app,desktop,email,whatsapp",
-            "created_by": 1,
-            "updated_by": 1
+            "created_by": user_id,
+            "updated_by": user_id
         },
         {
             "name": "Reporting Period Opened",
@@ -442,8 +516,8 @@ def seed_default_notification_configs():
             "target_entity_type": "submission",
             "target_permission": "create",
             "channels": "in_app,desktop,email,whatsapp",
-            "created_by": 1,
-            "updated_by": 1
+            "created_by": user_id,
+            "updated_by": user_id
         }
     ]
     

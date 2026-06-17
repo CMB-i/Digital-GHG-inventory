@@ -13,3 +13,12 @@ postgres_data/
 minio_data/
 
 *.log
+
+# Local files
+.claude/
+CLAUDE.md
+ESG_GHG_Platform_PRD_v3 (1).md
+ese_ghg.md
+graphify-out/
+scripts/test_admin_apis.py
+uploads/

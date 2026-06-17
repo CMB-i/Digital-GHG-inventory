@@ -135,7 +135,8 @@ def get_version_details(version_id):
 
     # Load permissions context
     from app.common.permissions import has_permission
-    can_edit = has_permission(user.id, "value_set", "manage_forms")
+    can_manage = has_permission(user.id, "value_set", "manage_forms")
+    can_approve = has_permission(user.id, "value_set", "approve")
 
     data = {
         "value_set": {
@@ -168,9 +169,10 @@ def get_version_details(version_id):
         } for e in entries],
         "all_versions": version_list,
         "permissions": {
-            "can_edit": can_edit,
-            "can_publish": False,
-            "can_create_version": False,
+            "can_edit": can_manage and version.status in ("Draft", "Rejected"),
+            "can_publish": can_manage and version.status in ("Draft", "Submitted"),
+            "can_create_version": can_manage and version.status == "Approved",
+            "can_approve": can_approve and version.status == "Submitted",
         }
     }
     return jsonify(data)

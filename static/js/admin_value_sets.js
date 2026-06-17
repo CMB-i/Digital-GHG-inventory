@@ -308,11 +308,17 @@ document.addEventListener("DOMContentLoaded", function () {
     btnSaveDraft.classList.toggle("hidden", !canEdit);
     btnSaveDraft.textContent = "Save Changes";
     btnAddEntry.classList.toggle("hidden", !canEdit);
-    btnReject.classList.add("hidden");
-    btnPublish.classList.add("hidden");
-    publishedNotice.classList.add("hidden");
-    rejectionNotice.classList.add("hidden");
-    rejectionNotice.innerHTML = "";
+    btnReject.classList.toggle("hidden", !permissions.can_approve);
+    btnPublish.classList.toggle("hidden", !permissions.can_publish);
+    publishedNotice.classList.toggle("hidden", !permissions.can_create_version);
+    
+    if (status === "rejected" && version.rejection_reason) {
+      rejectionNotice.textContent = `Rejection reason: ${version.rejection_reason}`;
+      rejectionNotice.classList.remove("hidden");
+    } else {
+      rejectionNotice.classList.add("hidden");
+      rejectionNotice.innerHTML = "";
+    }
 
     renderEntries(canEdit);
   }

@@ -311,10 +311,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Request desktop notifications permissions on page load if settings allow
-    if ("Notification" in window && Notification.permission === "default") {
-        // We prompt only if desktop is checked or when we need to show notifications
-    }
+
 
     // Initialize and start polling
     updateNotificationBell();

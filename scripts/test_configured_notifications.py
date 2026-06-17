@@ -61,7 +61,7 @@ def run_tests():
         print(f"Created test config ID: {test_config.id}")
 
         # 5. Clear mock logs before running dispatch
-        uploads_dir = Path("/Users/shubhamindulkar/Digital-GHG-inventory/uploads")
+        uploads_dir = PROJECT_ROOT / "uploads"
         email_log = uploads_dir / "mock_emails.log"
         whatsapp_log = uploads_dir / "mock_whatsapp.log"
         
