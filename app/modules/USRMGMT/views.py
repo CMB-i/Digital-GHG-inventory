@@ -117,7 +117,7 @@ def login():
             db.session.commit()
             session.clear()
             session["user_id"] = user.id
-            return redirect(request.args.get("next") or url_for("dashboard"))
+            return redirect(request.args.get("next") or url_for("index"))
         error = "Invalid email or password, or the user is inactive."
 
     return render_template("login.html", error=error)

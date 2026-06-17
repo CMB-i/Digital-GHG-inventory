@@ -95,8 +95,14 @@ def create_app(config_class=Config):
 
     @app.route("/")
     def index():
-        if current_user() is None:
+        user = current_user()
+        if user is None:
             return redirect(url_for("auth.login"))
+        caps = build_user_capabilities(user)
+        if caps["can_contribute"]:
+            return redirect(url_for("submit.index"))
+        if caps["can_review"]:
+            return redirect(url_for("approv.index"))
         return redirect(url_for("dashboard"))
 
     @app.route("/dashboard")
