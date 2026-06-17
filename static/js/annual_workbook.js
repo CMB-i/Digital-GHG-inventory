@@ -667,11 +667,50 @@ document.addEventListener("DOMContentLoaded", function () {
     return "bg-slate-100 text-slate-600 border-slate-200";
   }
 
+  function renderCalculatedCell(row, field) {
+    const cell = row.values ? row.values[field.field_code] : null;
+    const hasPeriod = Boolean(row.period_id);
+    
+    if (!cell) {
+      // period missing -> grey cell
+      return `<td class="border border-slate-200 px-4 py-2.5 bg-slate-100/60 text-slate-400 text-center select-none">—</td>`;
+    }
+
+    const status = cell.status || "missing_input";
+    const cellStatus = hasPeriod ? status : "no_period";
+    const val = cell.calculated_value;
+    const unit = field.field_config && field.field_config.unit ? ` ${field.field_config.unit}` : "";
+
+    let cellBgClass = "";
+    let valueHtml = "";
+
+    if (val !== null && val !== undefined) {
+      // calculated -> green cell
+      cellBgClass = "bg-emerald-50/80 text-emerald-900";
+      valueHtml = `<span class="font-bold text-sm text-[#065f46]">${escapeHtml(val)}${escapeHtml(unit)}</span>`;
+    } else if (cellStatus === "no_period") {
+      // period missing -> grey cell
+      cellBgClass = "bg-slate-100/60 text-slate-400";
+      valueHtml = `<span class="text-slate-400 select-none">—</span>`;
+    } else {
+      // can't calculate -> yellow cell
+      cellBgClass = "bg-yellow-50 text-amber-900";
+      valueHtml = `<span class="text-slate-400 select-none">—</span>`;
+    }
+
+    return `
+      <td class="border border-slate-200 px-4 py-2.5 text-center ${cellBgClass}">
+        ${valueHtml}
+      </td>
+    `;
+  }
+
   function renderCalculatedResultsSection(calcData) {
     const calcSection = document.getElementById("calculated-results-section");
     const calcSummary = document.getElementById("calc-summary-cards");
     const calcSheetTabs = document.getElementById("calc-sheet-tabs");
     const calcBody = document.getElementById("calc-results-body");
+    const calcHead = document.getElementById("calc-results-head");
     if (!calcSection || !calcSummary || !calcBody) return;
 
     if (state.selectedFormId !== "calc_results") {
@@ -763,56 +802,32 @@ document.addEventListener("DOMContentLoaded", function () {
       });
     }
 
+    // Dynamic headers
+    if (calcHead) {
+      calcHead.innerHTML = `
+        <tr>
+          <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider w-32">Month</th>
+          ${activeFields.map(field => `
+            <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider">
+              ${escapeHtml(field.field_name)}
+            </th>
+          `).join("")}
+        </tr>
+      `;
+    }
+
     // Rows
     calcBody.innerHTML = rows.map(row => {
       const monthLabel = row.label || row.period_label || getFullMonthYear(row.month, row.year);
-      const hasPeriod = Boolean(row.period_id);
-
-      // Aggregate result for this row across active sheet fields
-      let rowValue = null;
-      let rowStatus = hasPeriod ? "missing_input" : "no_period";
-      let warnings = [];
-
-      activeFields.forEach(field => {
-        const cell = row.values ? row.values[field.field_code] : null;
-        if (!cell) return;
-        if (cell.status === "calculable") {
-          rowValue = (rowValue || 0) + Number(cell.reportable_value || 0);
-          rowStatus = "calculable";
-        } else if (cell.status === "pending_approval" || cell.status === "preview_only") {
-          if (rowStatus !== "calculable") {
-            rowValue = (rowValue || 0) + Number(cell.preview_value || 0);
-            rowStatus = "preview";
-          }
-        } else if (cell.status === "missing_input") {
-          if (rowStatus !== "calculable" && rowStatus !== "preview") rowStatus = "missing_input";
-          if (Array.isArray(cell.warnings)) warnings.push(...cell.warnings);
-        } else if (cell.status === "evaluation_error") {
-          rowStatus = "error";
-          if (Array.isArray(cell.warnings)) warnings.push(...cell.warnings);
-        }
-      });
-
-      const badge = {
-        calculable: `<span class="inline-flex items-center border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Approved</span>`,
-        preview: `<span class="inline-flex items-center border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">Preview</span>`,
-        missing_input: `<span class="inline-flex items-center border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Cannot calculate</span>`,
-        no_period: `<span class="inline-flex items-center border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500">Period missing</span>`,
-        error: `<span class="inline-flex items-center border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Error</span>`,
-      }[rowStatus] || "";
-
-      const valueHtml = rowValue !== null
-        ? `<span class="font-bold text-base ${rowStatus === "calculable" ? "text-emerald-700" : "text-blue-700"}">${rowValue}</span>`
-        : `<span class="text-slate-300">—</span>`;
-
       const isActive = row.is_active_period;
       const rowBg = isActive ? "bg-white font-semibold" : "bg-white";
+
+      const fieldsCells = activeFields.map(field => renderCalculatedCell(row, field)).join("");
 
       return `
         <tr class="${rowBg} border-b border-slate-100">
           <td class="border border-slate-200 px-4 py-2.5 text-sm ${isActive ? "font-semibold text-slate-900" : "text-slate-500"}">${escapeHtml(monthLabel)}</td>
-          <td class="border border-slate-200 px-4 py-2.5">${valueHtml}</td>
-          <td class="border border-slate-200 px-4 py-2.5">${badge}</td>
+          ${fieldsCells}
         </tr>
       `;
     }).join("");

@@ -1252,7 +1252,7 @@ def compose_package_calculation_results(package_id, user_id):
                                 pw.append(f"Cannot calculate — waiting for {field_code_to_name.get(dep, dep)}.")
                     else:
                         try:
-                            pv = evaluate_formula(fver.expression, preview_vals, value_set_snapshot)
+                            pv = evaluate_formula(fver.expression, preview_vals, value_set_snapshot, tokens=fver.tokens)
                             unapp = [t for t in tokens if t not in value_set_snapshot and cell_states.get(t) != "approved_locked"]
                             if unapp:
                                 ps = "preview_only"
@@ -1279,7 +1279,7 @@ def compose_package_calculation_results(package_id, user_id):
                             rw.append(f"Input {field_code_to_name.get(dep, dep)} is not approved, preview only.")
                     else:
                         try:
-                            rv = evaluate_formula(fver.expression, reportable_vals, value_set_snapshot)
+                            rv = evaluate_formula(fver.expression, reportable_vals, value_set_snapshot, tokens=fver.tokens)
                         except Exception as exc:
                             rs = "evaluation_error"
                             rw.append(f"Evaluation error: {str(exc)}")

@@ -66,6 +66,8 @@
 
     <!-- Monthly Grid Table -->
     <div id="workbook-table-wrap" class="hidden p-5">
+      <!-- Calculated fields toggles container -->
+      <div id="calculated-fields-toggles" class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-semibold text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-200 hidden"></div>
       <div class="overflow-x-auto">
         <table class="min-w-full border-collapse">
           <thead id="workbook-head" class="bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500"></thead>
@@ -88,7 +90,7 @@
     <div class="p-5">
       <div id="calc-sheet-tabs" class="flex gap-2 mb-4 border-b border-slate-200 pb-0"></div>
       <table class="w-full border-collapse text-sm">
-        <thead>
+        <thead id="calc-results-head">
           <tr>
             <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider w-32">Month</th>
             <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider">Result</th>

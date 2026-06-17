@@ -1342,6 +1342,10 @@ document.addEventListener("DOMContentLoaded", function () {
         if (formulaHint) formulaHint.classList.remove("hidden");
         if (formulaOk)   formulaOk.classList.add("hidden");
       }
+      const hideCheck = document.getElementById("prop-calculated-hide-entry");
+      if (hideCheck) {
+        hideCheck.checked = !!config.hide_on_entry_sheet;
+      }
     }
 
     if (field.field_type === "file") {
@@ -1436,6 +1440,10 @@ document.addEventListener("DOMContentLoaded", function () {
           field.field_config.expression = "";
           field.field_config.tokens = [];
         }
+      }
+      const hideCheck = document.getElementById("prop-calculated-hide-entry");
+      if (hideCheck) {
+        field.field_config.hide_on_entry_sheet = hideCheck.checked;
       }
     }
 
