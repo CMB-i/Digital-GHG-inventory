@@ -522,6 +522,24 @@ body[data-theme="jsw-excel"] [class*="tabular-nums"] {
   box-shadow: none;
 }
 
+.ghg-sidebar nav {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.2) transparent;
+}
+
+.ghg-sidebar nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.ghg-sidebar nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ghg-sidebar nav::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.25);
+}
+
 .ghg-card {
   background: #fff;
   border: 1px solid var(--ghg-card-border);
