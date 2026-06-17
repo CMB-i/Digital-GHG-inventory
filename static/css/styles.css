@@ -1421,3 +1421,30 @@ body.builder-canvas-active main > div {
   border-width: 1px;
 }
 
+/* Red Pulsing Month Blinker Dot */
+@keyframes red-pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(237, 28, 36, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(237, 28, 36, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(237, 28, 36, 0);
+  }
+}
+
+.month-blinker {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background-color: #ed1c24;
+  border-radius: 50%;
+  margin-left: 8px;
+  vertical-align: middle;
+  animation: red-pulse 1.8s infinite;
+}
+
