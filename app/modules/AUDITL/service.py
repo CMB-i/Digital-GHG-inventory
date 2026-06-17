@@ -64,7 +64,7 @@ def resolve_entity_details(entity_type, entity_id):
                 workbook = (
                     db.session.query(Workbook)
                     .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
-                    .filter(WorkbookSite.site_id == sub.site_id, Workbook.is_active == True)
+                    .filter(WorkbookSite.site_id == sub.site_id, WorkbookSite.is_deleted == False, Workbook.is_active == True)
                     .first()
                 )
                 
@@ -95,7 +95,7 @@ def resolve_entity_details(entity_type, entity_id):
                 workbook = (
                     db.session.query(Workbook)
                     .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
-                    .filter(WorkbookSite.site_id == package.site_id, Workbook.is_active == True)
+                    .filter(WorkbookSite.site_id == package.site_id, WorkbookSite.is_deleted == False, Workbook.is_active == True)
                     .first()
                 )
                 
