@@ -528,7 +528,7 @@ document.addEventListener("DOMContentLoaded", function () {
         await saveSelectedRow();
         lastSavedTime = new Date();
         updateLastSavedText();
-      }, 2000);
+      }, 700);
     }
   }
 
@@ -837,7 +837,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }, 100);
   }
 
-  async function saveSelectedRow() {
+  async function saveSelectedRow({ reloadAfterSave = false } = {}) {
     if (isSaving) {
       savePending = true;
       return;
@@ -850,6 +850,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const shouldSaveWorkbookValues = state.dirtyWorkbookFields.size > 0;
     if (!shouldSaveMonthly && !shouldSaveWorkbookValues) {
       isSaving = false;
+      if (reloadAfterSave) await loadWorkbook();
       return;
     }
 
@@ -923,9 +924,13 @@ document.addEventListener("DOMContentLoaded", function () {
         row.values = saveData.data && saveData.data.values ? saveData.data.values : row.values;
         state.dirtyRows.delete(rowKey(row));
       }
-      
-      renderTable();
-      renderHeader();
+
+      if (reloadAfterSave) {
+        await loadWorkbook();
+      } else {
+        renderTable();
+        renderHeader();
+      }
     } catch (error) {
       showAlert(error.message, "error");
     } finally {
@@ -1063,10 +1068,30 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 
   btnSave.addEventListener("click", async function() {
-    await saveSelectedRow();
+    if (autosaveTimeout) {
+      clearTimeout(autosaveTimeout);
+      autosaveTimeout = null;
+    }
+    await saveSelectedRow({ reloadAfterSave: true });
     showAlert("Workbook draft saved.", "success");
   });
   btnSubmit.addEventListener("click", submitSelectedRow);
+
+  tableBody.addEventListener("focusout", function(e) {
+    const tag = e.target ? e.target.tagName : "";
+    if (tag !== "INPUT" && tag !== "SELECT" && tag !== "TEXTAREA") return;
+    const hasDirty = state.dirtyRows.size > 0 || state.dirtyWorkbookFields.size > 0;
+    if (!hasDirty) return;
+    if (autosaveTimeout) {
+      clearTimeout(autosaveTimeout);
+      autosaveTimeout = null;
+    }
+    saveSelectedRow().then(function() {
+      lastSavedTime = new Date();
+      updateLastSavedText();
+    });
+  });
+
   [btnCloseCellDetail, btnCancelCellDetail].forEach(button => {
     if (button) button.addEventListener("click", closeCellDetail);
   });
