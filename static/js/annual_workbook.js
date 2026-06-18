@@ -280,7 +280,7 @@ document.addEventListener("DOMContentLoaded", function () {
   function renderFormTabs() {
     const forms = formsForSelectedSite();
     formTabs.innerHTML = "";
-    if (!forms.length && state.selectedFormId !== "calc_results") {
+    if (!forms.length) {
       formTabs.innerHTML = '<span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">No assigned sheets</span>';
       return;
     }
@@ -306,22 +306,6 @@ document.addEventListener("DOMContentLoaded", function () {
       };
       formTabs.appendChild(button);
     });
-
-    // Append Calculation Results tab button
-    if (state.selectedSiteId) {
-      const calcButton = document.createElement("button");
-      calcButton.type = "button";
-      const calcActive = state.selectedFormId === "calc_results";
-      calcButton.className = `workbook-tab whitespace-nowrap ${
-        calcActive ? "workbook-tab-active" : "workbook-tab-inactive"
-      }`;
-      calcButton.textContent = "Calculation Results";
-      calcButton.onclick = function () {
-        state.selectedFormId = "calc_results";
-        loadWorkbook();
-      };
-      formTabs.appendChild(calcButton);
-    }
   }
 
   function checkRequiredFields() {
@@ -483,19 +467,7 @@ document.addEventListener("DOMContentLoaded", function () {
       btnSubmitEl.textContent = `Submit ${sheetName}`;
     }
 
-    if (state.selectedFormId === "calc_results") {
-      if (selectedStatusEl) {
-        selectedStatusEl.textContent = "Calculation Results";
-        selectedStatusEl.className = "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 border border-slate-200";
-      }
-      lastSavedEl.textContent = "Read-only calculation dashboard for this financial year.";
-      btnSave.disabled = true;
-      btnSubmit.disabled = true;
-
-      const card = document.getElementById("sheet-audit-logs-card");
-      if (card) { card.classList.add("hidden"); syncTableColSpan(); }
-      return;
-    }
+    // No calc_results case needed anymore
 
     const row = selectedRow();
     if (!row) {
@@ -598,13 +570,8 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     emptyEl.classList.add("hidden");
-    if (state.selectedFormId === "calc_results") {
-      tableWrap.classList.add("hidden");
-    } else {
-      tableWrap.classList.remove("hidden");
-    }
-
-    const mode = state.selectedFormId === "calc_results" ? "calc_results" : "entry";
+    tableWrap.classList.remove("hidden");
+    const mode = "entry";
 
     window.WorkbookSheet.render({
       mode: mode,
@@ -667,171 +634,7 @@ document.addEventListener("DOMContentLoaded", function () {
     return "bg-slate-100 text-slate-600 border-slate-200";
   }
 
-  function renderCalculatedCell(row, field) {
-    const cell = row.values ? row.values[field.field_code] : null;
-    const hasPeriod = Boolean(row.period_id);
-    
-    if (!cell) {
-      // period missing -> grey cell
-      return `<td class="border border-slate-200 px-4 py-2.5 bg-slate-100/60 text-slate-400 text-center select-none">—</td>`;
-    }
-
-    const status = cell.status || "missing_input";
-    const cellStatus = hasPeriod ? status : "no_period";
-    const val = cell.calculated_value;
-    const unit = field.field_config && field.field_config.unit ? ` ${field.field_config.unit}` : "";
-
-    let cellBgClass = "";
-    let valueHtml = "";
-
-    if (val !== null && val !== undefined) {
-      // calculated -> green cell
-      cellBgClass = "bg-emerald-50/80 text-emerald-900";
-      valueHtml = `<span class="font-bold text-sm text-[#065f46]">${escapeHtml(val)}${escapeHtml(unit)}</span>`;
-    } else if (cellStatus === "no_period") {
-      // period missing -> grey cell
-      cellBgClass = "bg-slate-100/60 text-slate-400";
-      valueHtml = `<span class="text-slate-400 select-none">—</span>`;
-    } else {
-      // can't calculate -> yellow cell
-      cellBgClass = "bg-yellow-50 text-amber-900";
-      valueHtml = `<span class="text-slate-400 select-none">—</span>`;
-    }
-
-    return `
-      <td class="border border-slate-200 px-4 py-2.5 text-center ${cellBgClass}">
-        ${valueHtml}
-      </td>
-    `;
-  }
-
-  function renderCalculatedResultsSection(calcData) {
-    const calcSection = document.getElementById("calculated-results-section");
-    const calcSummary = document.getElementById("calc-summary-cards");
-    const calcSheetTabs = document.getElementById("calc-sheet-tabs");
-    const calcBody = document.getElementById("calc-results-body");
-    const calcHead = document.getElementById("calc-results-head");
-    if (!calcSection || !calcSummary || !calcBody) return;
-
-    if (state.selectedFormId !== "calc_results") {
-      calcSection.classList.add("hidden");
-      return;
-    }
-
-    calcSection.classList.remove("hidden");
-    tableWrap.classList.add("hidden");
-
-    // Group fields by form/sheet
-    const allFields = calcData.fields || [];
-    const rows = calcData.rows || [];
-
-    // Build sheet list from fields
-    const sheetMap = {};
-    allFields.forEach(f => {
-      const key = String(f.form_id);
-      if (!sheetMap[key]) sheetMap[key] = { id: f.form_id, name: f.form_name || ("Sheet " + f.form_id), fields: [] };
-      sheetMap[key].fields.push(f);
-    });
-    const sheets = Object.values(sheetMap);
-
-    // Pick active sheet tab (store on state)
-    if (!state._calcSheetTab || !sheetMap[String(state._calcSheetTab)]) {
-      state._calcSheetTab = sheets[0] ? sheets[0].id : null;
-    }
-    const activeFields = state._calcSheetTab ? (sheetMap[String(state._calcSheetTab)] || {}).fields || [] : [];
-
-    // Count statuses properly
-    let cannotCalcCount = 0, needsInputCount = 0;
-    rows.forEach(row => {
-      allFields.forEach(field => {
-        const cell = row.values ? row.values[field.field_code] : null;
-        if (!cell) { cannotCalcCount++; return; }
-        if (cell.status === "missing_input") needsInputCount++;
-        if (cell.status === "not_configured") cannotCalcCount++;
-      });
-    });
-
-    // Approved/preview totals per active sheet
-    let sheetApproved = null, sheetPreview = null;
-    rows.forEach(row => {
-      activeFields.forEach(field => {
-        const cell = row.values ? row.values[field.field_code] : null;
-        if (!cell) return;
-        if (cell.status === "calculable" && cell.reportable_value !== null) {
-          sheetApproved = (sheetApproved || 0) + Number(cell.reportable_value);
-        }
-        if ((cell.status === "pending_approval" || cell.status === "preview_only") && cell.preview_value !== null) {
-          sheetPreview = (sheetPreview || 0) + Number(cell.preview_value);
-        }
-      });
-    });
-
-    calcSummary.innerHTML = `
-      <div class="flex flex-col gap-0.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Approved Total</div>
-        <div class="text-2xl font-bold text-emerald-700">${sheetApproved !== null ? sheetApproved : "—"}</div>
-      </div>
-      <div class="w-px bg-slate-200 self-stretch"></div>
-      <div class="flex flex-col gap-0.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview Total</div>
-        <div class="text-2xl font-bold text-blue-700">${sheetPreview !== null ? sheetPreview : "—"}</div>
-      </div>
-      <div class="w-px bg-slate-200 self-stretch"></div>
-      <div class="flex flex-col gap-0.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Cannot Calculate</div>
-        <div class="text-2xl font-bold text-amber-700">${cannotCalcCount}</div>
-      </div>
-      <div class="w-px bg-slate-200 self-stretch"></div>
-      <div class="flex flex-col gap-0.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Needs Input</div>
-        <div class="text-2xl font-bold text-amber-700">${needsInputCount}</div>
-      </div>
-    `;
-
-    // Sheet tabs
-    if (calcSheetTabs) {
-      calcSheetTabs.innerHTML = sheets.map(sheet => {
-        const active = String(sheet.id) === String(state._calcSheetTab);
-        return `<button type="button" data-sheet-id="${sheet.id}" class="workbook-tab whitespace-nowrap ${active ? "workbook-tab-active" : "workbook-tab-inactive"}">${escapeHtml(sheet.name)}</button>`;
-      }).join("");
-      calcSheetTabs.querySelectorAll("button").forEach(btn => {
-        btn.addEventListener("click", function() {
-          state._calcSheetTab = btn.dataset.sheetId;
-          renderCalculatedResultsSection(calcData);
-        });
-      });
-    }
-
-    // Dynamic headers
-    if (calcHead) {
-      calcHead.innerHTML = `
-        <tr>
-          <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider w-32">Month</th>
-          ${activeFields.map(field => `
-            <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider">
-              ${escapeHtml(field.field_name)}
-            </th>
-          `).join("")}
-        </tr>
-      `;
-    }
-
-    // Rows
-    calcBody.innerHTML = rows.map(row => {
-      const monthLabel = row.label || row.period_label || getFullMonthYear(row.month, row.year);
-      const isActive = row.is_active_period;
-      const rowBg = isActive ? "bg-white font-semibold" : "bg-white";
-
-      const fieldsCells = activeFields.map(field => renderCalculatedCell(row, field)).join("");
-
-      return `
-        <tr class="${rowBg} border-b border-slate-100">
-          <td class="border border-slate-200 px-4 py-2.5 text-sm ${isActive ? "font-semibold text-slate-900" : "text-slate-500"}">${escapeHtml(monthLabel)}</td>
-          ${fieldsCells}
-        </tr>
-      `;
-    }).join("");
-  }
+  // Calculated cells and results rendering removed completely as per user request
 
   function renderIssueList(issues) {
     if (!issues || !issues.length) {
@@ -988,22 +791,16 @@ document.addEventListener("DOMContentLoaded", function () {
       setEmpty("No assigned workbooks", "Published workbooks assigned to you for this site will appear from My Workbooks.");
       return;
     }
-    if (!forms.length && state.selectedFormId !== "calc_results") {
+    if (!forms.length) {
       setEmpty("No sheets assigned", "Published sheets assigned to this site will appear as tabs.");
       return;
     }
     if (!state.selectedFormId) {
-      state.selectedFormId = forms[0] ? forms[0].id : "calc_results";
+      state.selectedFormId = forms[0] ? forms[0].id : null;
     }
 
-    let wbUrl = "";
+    let wbUrl = `/module/SUBMIT/api/annual-workbook?site_id=${state.selectedSiteId}&workbook_id=${state.selectedWorkbookId}&form_id=${state.selectedFormId}&fy=${state.selectedFy}`;
     let calcUrl = `/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${state.selectedSiteId}&workbook_id=${state.selectedWorkbookId}&fy=${state.selectedFy}`;
-    
-    if (state.selectedFormId === "calc_results") {
-      wbUrl = calcUrl;
-    } else {
-      wbUrl = `/module/SUBMIT/api/annual-workbook?site_id=${state.selectedSiteId}&workbook_id=${state.selectedWorkbookId}&form_id=${state.selectedFormId}&fy=${state.selectedFy}`;
-    }
 
     const [wbRes, calcRes] = await Promise.all([
       fetch(wbUrl),
@@ -1032,9 +829,7 @@ document.addEventListener("DOMContentLoaded", function () {
       : (previousRow ? rowKey(previousRow) : (wbData.rows[0] ? rowKey(wbData.rows[0]) : null));
     
     renderTable();
-    if (state.calculationResults) {
-      renderCalculatedResultsSection(state.calculationResults);
-    }
+    // Calculated results section rendering removed
     renderHeader();
     scrollSelectedRowIntoView();
   }
@@ -1126,15 +921,7 @@ document.addEventListener("DOMContentLoaded", function () {
         state.dirtyRows.delete(rowKey(row));
       }
       
-      // Reload calculations results to update calculated section
-      const calcUrl = `/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${state.selectedSiteId}&workbook_id=${state.selectedWorkbookId}&fy=${state.selectedFy}`;
-      const calcRes = await fetch(calcUrl);
-      state.calculationResults = calcRes.ok ? await calcRes.json() : null;
-
       renderTable();
-      if (state.calculationResults) {
-        renderCalculatedResultsSection(state.calculationResults);
-      }
       renderHeader();
     } catch (error) {
       showAlert(error.message, "error");
