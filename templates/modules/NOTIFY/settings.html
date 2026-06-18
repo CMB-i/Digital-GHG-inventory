@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Notification Settings - Digital GHG Inventory{% endblock %}
+
+{% block content %}
+<section class="max-w-2xl mx-auto space-y-6">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold text-slate-800">Notification Settings</h1>
+      <p class="mt-1 text-sm text-slate-500">Configure your preferred channels for receiving system and workflow notifications.</p>
+    </div>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="space-y-2">
+        {% for category, message in messages %}
+        <div class="rounded border px-4 py-3 text-sm {% if category == 'error' %}border-red-200 bg-red-50 text-red-700{% else %}border-emerald-200 bg-emerald-50 text-emerald-700{% endif %}">
+          {{ message }}
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <form method="post" action="{{ url_for('notify.settings') }}" class="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+    <div class="p-6 space-y-6">
+      
+      <!-- In App Notifications -->
+      <div class="flex items-start justify-between pb-6 border-b border-slate-100">
+        <div class="space-y-0.5 pr-4">
+          <label for="pref_in_app" class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+            In-App Notifications
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">Recommended</span>
+          </label>
+          <p class="text-xs text-slate-500">Receive alerts via the notification bell icon inside the web application.</p>
+        </div>
+        <div class="flex items-center">
+          <input type="checkbox" id="pref_in_app" name="pref_in_app" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" {% if pref.pref_in_app %}checked{% endif %}>
+        </div>
+      </div>
+
+      <!-- Desktop Notifications -->
+      <div class="flex items-start justify-between pb-6 border-b border-slate-100">
+        <div class="space-y-0.5 pr-4">
+          <label for="pref_desktop" class="text-sm font-semibold text-slate-800">Desktop Push Notifications</label>
+          <p class="text-xs text-slate-500">Receive instant browser popup notifications on your screen even when the window is in the background.</p>
+          <p id="desktop-warning" class="hidden text-xs text-amber-600 font-medium mt-1">⚠️ Please enable browser notification permissions to activate desktop alerts.</p>
+        </div>
+        <div class="flex items-center">
+          <input type="checkbox" id="pref_desktop" name="pref_desktop" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" {% if pref.pref_desktop %}checked{% endif %}>
+        </div>
+      </div>
+
+      <!-- Email Notifications -->
+      <div class="flex items-start justify-between pb-6 border-b border-slate-100">
+        <div class="space-y-0.5 pr-4">
+          <label for="pref_email" class="text-sm font-semibold text-slate-800">Email Notifications</label>
+          <p class="text-xs text-slate-500">Receive workflow updates and pending actions directly in your inbox: <strong class="text-slate-600">{{ current_user.email }}</strong></p>
+        </div>
+        <div class="flex items-center">
+          <input type="checkbox" id="pref_email" name="pref_email" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" {% if pref.pref_email %}checked{% endif %}>
+        </div>
+      </div>
+
+      <!-- WhatsApp Notifications -->
+      <div class="flex items-start justify-between">
+        <div class="space-y-0.5 pr-4">
+          <label for="pref_whatsapp" class="text-sm font-semibold text-slate-800">WhatsApp Alerts</label>
+          <p class="text-xs text-slate-500">
+            Receive automated notifications on your registered mobile number: 
+            <strong class="text-slate-600">{% if current_user.phone %}+91 {{ current_user.phone }}{% else %}Not Registered (Please update phone in People details){% endif %}</strong>
+          </p>
+        </div>
+        <div class="flex items-center">
+          <input type="checkbox" id="pref_whatsapp" name="pref_whatsapp" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" {% if pref.pref_whatsapp %}checked{% endif %} {% if not current_user.phone %}disabled{% endif %}>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Actions -->
+    <div class="bg-slate-50 px-6 py-4 flex items-center justify-end gap-3 border-t border-slate-200">
+      <a href="{{ url_for('notify.index') }}" class="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</a>
+      <button type="submit" class="rounded bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-sm font-medium text-white transition-colors">Save Settings</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const desktopCheckbox = document.getElementById("pref_desktop");
+    const warning = document.getElementById("desktop-warning");
+
+    function checkPermission() {
+        if (!("Notification" in window)) {
+            desktopCheckbox.disabled = true;
+            warning.textContent = "❌ Native browser notifications are not supported in this browser.";
+            warning.classList.remove("hidden");
+            return;
+        }
+
+        if (Notification.permission === "denied") {
+            desktopCheckbox.checked = false;
+            warning.textContent = "❌ Browser notification permission denied. Please reset permissions in your browser settings.";
+            warning.classList.remove("hidden");
+        } else if (Notification.permission === "default" && desktopCheckbox.checked) {
+            warning.classList.remove("hidden");
+        } else {
+            warning.classList.add("hidden");
+        }
+    }
+
+    desktopCheckbox.addEventListener("change", async () => {
+        if (desktopCheckbox.checked) {
+            if (!("Notification" in window)) {
+                return;
+            }
+            if (Notification.permission === "default") {
+                const permission = await Notification.requestPermission();
+                if (permission !== "granted") {
+                    desktopCheckbox.checked = false;
+                }
+            }
+        }
+        checkPermission();
+    });
+
+    checkPermission();
+});
+</script>
+{% endblock %}

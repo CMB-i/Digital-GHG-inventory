@@ -1,0 +1,454 @@
+{% extends "base.html" %}
+{% block title %}Notification Configurations - Digital GHG Inventory{% endblock %}
+
+{% block content %}
+<section class="min-w-0 space-y-6">
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold text-slate-800">Notification Builder</h1>
+      <p class="mt-1 text-sm text-slate-500">Configure triggers, messaging templates, channels, and target recipients for system events.</p>
+    </div>
+    {% if perm_create %}
+    <button id="btn-open-create" class="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 transition-colors" type="button">Create Configuration</button>
+    {% endif %}
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="space-y-2">
+        {% for category, message in messages %}
+        <div class="rounded border px-4 py-3 text-sm {% if category == 'error' %}border-red-200 bg-red-50 text-red-700{% else %}border-emerald-200 bg-emerald-50 text-emerald-700{% endif %}">
+          {{ message }}
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <!-- Filter Bar -->
+  <div class="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-3 lg:justify-between shadow-sm">
+    <label class="relative block w-full max-w-sm">
+      <span class="sr-only">Search configurations</span>
+      <input class="w-full rounded border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" id="config_search" type="search" placeholder="Search by name or event type">
+    </label>
+    <div class="flex flex-wrap gap-2">
+      <button class="config-filter rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" data-filter="all" type="button">All</button>
+      <button class="config-filter rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" data-filter="active" type="button">Active</button>
+      <button class="config-filter rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" data-filter="inactive" type="button">Inactive</button>
+    </div>
+  </div>
+
+  <!-- Configs Table -->
+  <div class="w-full overflow-x-auto rounded border border-slate-200 bg-white shadow-sm">
+    <table class="w-full text-sm table-auto">
+      <thead class="border-b border-slate-200 bg-slate-50/70 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+        <tr>
+          <th class="px-6 py-3">Configuration</th>
+          <th class="px-6 py-3">Trigger / Event</th>
+          <th class="px-6 py-3">Recipient Type</th>
+          <th class="px-6 py-3">Channels</th>
+          <th class="px-6 py-3 text-center">Status</th>
+          <th class="px-6 py-3 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="config_table_body" class="divide-y divide-slate-100">
+        {% for config in configs %}
+        <tr class="config-row hover:bg-slate-50/50 transition-colors align-middle" 
+            data-search="{{ (config.name ~ ' ' ~ config.event_type) | lower }}" 
+            data-status="{{ 'active' if config.is_active else 'inactive' }}">
+          <td class="px-6 py-4">
+            <div class="text-sm font-semibold text-slate-900">{{ config.name }}</div>
+            <div class="text-xs text-slate-400 font-mono mt-0.5 truncate max-w-md" title="{{ config.message_template }}">{{ config.message_template }}</div>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 border border-slate-200 font-mono">
+              {{ config.event_type }}
+            </span>
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-slate-600 font-medium capitalize">
+            {% if config.recipient_type == 'role' %}
+              Permission: {{ config.target_entity_type }} ({{ config.target_permission }})
+            {% elif config.recipient_type == 'users' %}
+              Specific Users
+            {% elif config.recipient_type == 'dynamic' %}
+              Dynamic Context ({{ config.dynamic_role }})
+            {% else %}
+              {{ config.recipient_type }}
+            {% endif %}
+          </td>
+          <td class="px-6 py-4">
+            <div class="flex flex-wrap gap-1">
+              {% for ch in config.channels.split(',') %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase {% if ch.strip() == 'in_app' %}bg-indigo-50 text-indigo-700 border border-indigo-200{% elif ch.strip() == 'desktop' %}bg-sky-50 text-sky-700 border border-sky-200{% elif ch.strip() == 'email' %}bg-emerald-50 text-emerald-700 border border-emerald-200{% elif ch.strip() == 'whatsapp' %}bg-green-50 text-green-700 border border-green-200{% endif %}">
+                {{ ch.strip() | replace('_', ' ') }}
+              </span>
+              {% endfor %}
+            </div>
+          </td>
+          <td class="px-6 py-4 text-center whitespace-nowrap">
+            {% if config.is_active %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Active</span>
+            {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">Inactive</span>
+            {% endif %}
+          </td>
+          <td class="px-6 py-4 text-right whitespace-nowrap text-sm font-medium">
+            <div class="inline-flex items-center justify-end gap-3">
+              {% if perm_edit %}
+              <button class="edit-config-btn text-indigo-600 hover:text-indigo-900 transition-colors" type="button"
+                      data-id="{{ config.id }}"
+                      data-name="{{ config.name }}"
+                      data-event="{{ config.event_type }}"
+                      data-template="{{ config.message_template }}"
+                      data-recipient="{{ config.recipient_type }}"
+                      data-entity="{{ config.target_entity_type or '' }}"
+                      data-permission="{{ config.target_permission or '' }}"
+                      data-uids="{{ config.recipient_user_ids or '' }}"
+                      data-role="{{ config.dynamic_role or '' }}"
+                      data-channels="{{ config.channels }}"
+                      data-active="{{ 'true' if config.is_active else 'false' }}">Edit</button>
+              {% endif %}
+              {% if perm_delete %}
+              <form method="post" action="{{ url_for('notify.manager_delete', config_id=config.id) }}" class="inline" onsubmit="return confirm('Are you sure you want to delete this configuration?');">
+                <button type="submit" class="text-rose-600 hover:text-rose-900 transition-colors">Delete</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td class="px-6 py-8 text-center text-slate-500" colspan="6">No configurations defined. Create one to start routing custom notifications.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Create/Edit Drawer -->
+<div id="drawer-backdrop" class="fixed inset-0 z-40 bg-slate-900/40 hidden" aria-hidden="true"></div>
+<aside id="drawer" class="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-xl translate-x-full transition-transform duration-300 ease-in-out">
+  <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+    <div>
+      <h2 id="drawer-title" class="text-lg font-semibold text-slate-800">Create Notification Trigger</h2>
+      <p class="mt-1 text-xs text-slate-500">Specify details to capture system events and alert target recipients.</p>
+    </div>
+    <button id="btn-close-drawer" class="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50" type="button">Cancel</button>
+  </div>
+  
+  <form id="drawer-form" class="flex-1 flex flex-col min-h-0" method="post" action="{{ url_for('notify.manager_create') }}">
+    <div class="flex-1 overflow-y-auto px-6 py-6 space-y-5">
+      
+      <!-- Name -->
+      <div>
+        <label for="form_name" class="text-xs font-medium text-slate-600 uppercase tracking-wide">Configuration Name</label>
+        <input type="text" id="form_name" name="name" required class="mt-1.5 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" placeholder="e.g. Period Opened SPOC Alert">
+      </div>
+
+      <!-- Trigger/Event Type -->
+      <div>
+        <label for="form_event_type" class="text-xs font-medium text-slate-600 uppercase tracking-wide">Trigger Event</label>
+        <select id="form_event_type" name="event_type" required class="mt-1.5 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+          <option value="SUBMISSION_SUBMITTED">Workbook Pending Review (SUBMISSION_SUBMITTED)</option>
+          <option value="SUBMISSION_APPROVED">Workbook Approved (SUBMISSION_APPROVED)</option>
+          <option value="SUBMISSION_REJECTED">Workbook Rejected (SUBMISSION_REJECTED)</option>
+          <option value="SUBMISSION_CHANGES_REQUESTED">Workbook Corrections Requested (SUBMISSION_CHANGES_REQUESTED)</option>
+          <option value="PERIOD_OPEN">Reporting Period Opened (PERIOD_OPEN)</option>
+        </select>
+      </div>
+
+      <!-- Recipient Type -->
+      <div>
+        <label for="form_recipient_type" class="text-xs font-medium text-slate-600 uppercase tracking-wide">Recipient Definition</label>
+        <select id="form_recipient_type" name="recipient_type" required class="mt-1.5 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+          <option value="role">Access Matrix Role-based</option>
+          <option value="dynamic">Dynamic / Contextual User</option>
+          <option value="users">Specific Selected Users</option>
+        </select>
+      </div>
+
+      <!-- Role-based Fields (Access Matrix) -->
+      <div id="section-role" class="space-y-4 rounded bg-slate-50 p-4 border border-slate-200">
+        <h4 class="text-xs font-semibold text-slate-700 uppercase tracking-wide">Access Matrix Lookup Settings</h4>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="form_entity_type" class="text-xs text-slate-500">Entity Type</label>
+            <select id="form_entity_type" name="target_entity_type" class="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs">
+              <option value="submission">Submission</option>
+              <option value="site">Site</option>
+              <option value="user">User</option>
+              <option value="period">Reporting Period</option>
+              <option value="form">Form / Workbook</option>
+              <option value="report">Report</option>
+            </select>
+          </div>
+          <div>
+            <label for="form_target_permission" class="text-xs text-slate-500">Permission Required</label>
+            <select id="form_target_permission" name="target_permission" class="mt-1 w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs">
+              <option value="view">View</option>
+              <option value="create">Create</option>
+              <option value="edit">Edit</option>
+              <option value="delete">Delete</option>
+              <option value="submit">Submit</option>
+              <option value="approve">Approve</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Specific Users Fields -->
+      <div id="section-users" class="space-y-3 rounded bg-slate-50 p-4 border border-slate-200 hidden">
+        <h4 class="text-xs font-semibold text-slate-700 uppercase tracking-wide">Select Recipients</h4>
+        <div class="max-h-40 overflow-y-auto border border-slate-300 bg-white rounded p-2 space-y-1">
+          {% for u in all_users %}
+          <label class="flex items-center gap-2 text-xs text-slate-700 cursor-pointer p-1 rounded hover:bg-slate-50">
+            <input type="checkbox" name="recipient_user_ids" value="{{ u.id }}" class="user-check-box rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+            {{ u.full_name }} ({{ u.email }})
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Dynamic Context Fields -->
+      <div id="section-dynamic" class="space-y-3 rounded bg-slate-50 p-4 border border-slate-200 hidden">
+        <h4 class="text-xs font-semibold text-slate-700 uppercase tracking-wide">Dynamic Context Settings</h4>
+        <div>
+          <label for="form_dynamic_role" class="text-xs text-slate-500 font-medium">Recipient Context Role</label>
+          <select id="form_dynamic_role" name="dynamic_role" class="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            <option value="spoc">Submitter / SPOC (Owner)</option>
+            <option value="level_approvers">Current Level Approvers</option>
+            <option value="site_admins">Site / Setup Administrators</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Channels Checklist -->
+      <div>
+        <label class="text-xs font-medium text-slate-600 uppercase tracking-wide block mb-1.5">Enabled Dispatch Channels</label>
+        <div class="flex flex-wrap gap-4 bg-slate-50 border border-slate-200 p-3 rounded">
+          <label class="flex items-center gap-1.5 text-xs text-slate-700 font-semibold cursor-pointer">
+            <input type="checkbox" name="channels" value="in_app" checked class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+            In-App
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-slate-700 font-semibold cursor-pointer">
+            <input type="checkbox" name="channels" value="desktop" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+            Desktop
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-slate-700 font-semibold cursor-pointer">
+            <input type="checkbox" name="channels" value="email" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+            Email
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-slate-700 font-semibold cursor-pointer">
+            <input type="checkbox" name="channels" value="whatsapp" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+            WhatsApp
+          </label>
+        </div>
+      </div>
+
+      <!-- Message Template -->
+      <div>
+        <label for="form_message_template" class="text-xs font-medium text-slate-600 uppercase tracking-wide block mb-1">Message Template</label>
+        <textarea id="form_message_template" name="message_template" required rows="4" class="w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" placeholder="e.g. Period {period_label} is now open for data entry at {site_name}."></textarea>
+        
+        <!-- Placeholder reference -->
+        <div class="mt-2 rounded bg-indigo-50 p-2.5 border border-indigo-100">
+          <p class="text-[10px] font-bold text-indigo-800 uppercase tracking-wider">Dynamic Placeholders Guide</p>
+          <div class="grid grid-cols-2 gap-1 text-[10px] text-indigo-700 font-medium mt-1 font-mono">
+            <div>{site_name} - Name of Site</div>
+            <div>{form_name} - Sheet/Workbook Name</div>
+            <div>{period_label} - FY month string</div>
+            <div>{level_number} - Current review level</div>
+            <div>{reason} - Status reject notes</div>
+            <div>{status} - Workbook state</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Is Active Checkbox -->
+      <div class="flex items-center">
+        <input type="checkbox" id="form_is_active" name="is_active" checked class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+        <label for="form_is_active" class="ml-2 text-sm font-semibold text-slate-800">Active trigger</label>
+      </div>
+
+    </div>
+
+    <!-- Actions -->
+    <div class="bg-slate-50 px-6 py-4 flex items-center justify-end gap-3 border-t border-slate-200 flex-shrink-0">
+      <button id="btn-cancel-drawer" type="button" class="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+      <button type="submit" class="rounded bg-indigo-600 hover:bg-indigo-700 px-4 py-2 text-sm font-medium text-white transition-colors">Save Configuration</button>
+    </div>
+  </form>
+</aside>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    // UI Selectors
+    const configSearch = document.getElementById("config_search");
+    const filters = document.querySelectorAll(".config-filter");
+    const rows = document.querySelectorAll(".config-row");
+
+    const drawer = document.getElementById("drawer");
+    const backdrop = document.getElementById("drawer-backdrop");
+    const drawerTitle = document.getElementById("drawer-title");
+    const drawerForm = document.getElementById("drawer-form");
+
+    const btnOpenCreate = document.getElementById("btn-open-create");
+    const btnCloseDrawer = document.getElementById("btn-close-drawer");
+    const btnCancelDrawer = document.getElementById("btn-cancel-drawer");
+
+    const selectRecipient = document.getElementById("form_recipient_type");
+    const sectionRole = document.getElementById("section-role");
+    const sectionUsers = document.getElementById("section-users");
+    const sectionDynamic = document.getElementById("section-dynamic");
+
+    // Drawer forms elements
+    const formName = document.getElementById("form_name");
+    const formEvent = document.getElementById("form_event_type");
+    const formTemplate = document.getElementById("form_message_template");
+    const formEntity = document.getElementById("form_entity_type");
+    const formPermission = document.getElementById("form_target_permission");
+    const formRole = document.getElementById("form_dynamic_role");
+    const formActive = document.getElementById("form_is_active");
+    const userCheckBoxes = document.querySelectorAll(".user-check-box");
+    const channelCheckBoxes = document.querySelectorAll('input[name="channels"]');
+
+    // Search and filter logic
+    let activeFilter = "all";
+    
+    function applyFilters() {
+        const query = configSearch.value.toLowerCase().trim();
+        rows.forEach(row => {
+            const matchesSearch = row.dataset.search.includes(query);
+            const matchesFilter = activeFilter === "all" || row.dataset.status === activeFilter;
+            
+            if (matchesSearch && matchesFilter) {
+                row.classList.remove("hidden");
+            } else {
+                row.classList.add("hidden");
+            }
+        });
+    }
+
+    if (configSearch) {
+        configSearch.addEventListener("input", applyFilters);
+    }
+
+    filters.forEach(btn => {
+        btn.addEventListener("click", () => {
+            filters.forEach(b => b.classList.replace("bg-indigo-600", "bg-white"));
+            filters.forEach(b => b.classList.replace("text-white", "text-slate-700"));
+            
+            btn.classList.replace("bg-white", "bg-indigo-600");
+            btn.classList.add("text-white");
+            
+            activeFilter = btn.dataset.filter;
+            applyFilters();
+        });
+    });
+
+    // Toggle Drawer Section visibility
+    function toggleRecipientSections(recipientType) {
+        sectionRole.classList.add("hidden");
+        sectionUsers.classList.add("hidden");
+        sectionDynamic.classList.add("hidden");
+
+        if (recipientType === "role") {
+            sectionRole.classList.remove("hidden");
+        } else if (recipientType === "users") {
+            sectionUsers.classList.remove("hidden");
+        } else if (recipientType === "dynamic") {
+            sectionDynamic.classList.remove("hidden");
+        }
+    }
+
+    selectRecipient.addEventListener("change", (e) => {
+        toggleRecipientSections(e.target.value);
+    });
+
+    // Open Drawer for Creating
+    function openCreateDrawer() {
+        drawerTitle.textContent = "Create Notification Configuration";
+        drawerForm.action = "{{ url_for('notify.manager_create') }}";
+        
+        // Reset form fields
+        formName.value = "";
+        formEvent.selectedIndex = 0;
+        formTemplate.value = "";
+        selectRecipient.value = "role";
+        toggleRecipientSections("role");
+        formEntity.selectedIndex = 0;
+        formPermission.selectedIndex = 0;
+        formRole.selectedIndex = 0;
+        formActive.checked = true;
+
+        userCheckBoxes.forEach(chk => chk.checked = false);
+        channelCheckBoxes.forEach(chk => chk.checked = (chk.value === "in_app"));
+
+        drawer.classList.remove("translate-x-full");
+        backdrop.classList.remove("hidden");
+    }
+
+    // Open Drawer for Editing
+    function openEditDrawer(btn) {
+        const id = btn.dataset.id;
+        drawerTitle.textContent = "Edit Notification Configuration";
+        drawerForm.action = `/module/NOTIFY/manager/edit/${id}`;
+        
+        formName.value = btn.dataset.name;
+        formEvent.value = btn.dataset.event;
+        formTemplate.value = btn.dataset.template;
+        selectRecipient.value = btn.dataset.recipient;
+        toggleRecipientSections(btn.dataset.recipient);
+
+        if (btn.dataset.recipient === "role") {
+            formEntity.value = btn.dataset.entity;
+            formPermission.value = btn.dataset.permission;
+        } else if (btn.dataset.recipient === "dynamic") {
+            formRole.value = btn.dataset.role;
+        } else if (btn.dataset.recipient === "users") {
+            const uids = btn.dataset.uids.split(",");
+            userCheckBoxes.forEach(chk => {
+                chk.checked = uids.includes(chk.value);
+            });
+        }
+
+        const activeChannels = btn.dataset.channels.split(",");
+        channelCheckBoxes.forEach(chk => {
+            chk.checked = activeChannels.includes(chk.value);
+        });
+
+        formActive.checked = btn.dataset.active === "true";
+
+        drawer.classList.remove("translate-x-full");
+        backdrop.classList.remove("hidden");
+    }
+
+    function closeDrawer() {
+        drawer.classList.add("translate-x-full");
+        backdrop.classList.add("hidden");
+    }
+
+    if (btnOpenCreate) {
+        btnOpenCreate.addEventListener("click", openCreateDrawer);
+    }
+    
+    [btnCloseDrawer, btnCancelDrawer, backdrop].forEach(el => {
+        if (el) el.addEventListener("click", closeDrawer);
+    });
+
+    document.querySelectorAll(".edit-config-btn").forEach(btn => {
+        btn.addEventListener("click", () => openEditDrawer(btn));
+    });
+
+    // Initialize filter states
+    const defaultAllFilter = document.querySelector('.config-filter[data-filter="all"]');
+    if (defaultAllFilter) {
+        defaultAllFilter.classList.replace("bg-white", "bg-indigo-600");
+        defaultAllFilter.classList.add("text-white");
+    }
+});
+</script>
+{% endblock %}
