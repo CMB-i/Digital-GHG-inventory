@@ -141,15 +141,15 @@
       return '<span class="text-slate-400">—</span>';
     }
 
-    if (value === "") return '<span class="text-slate-400">—</span>';
-
     if (fieldType === "calculated") {
       const unit = field.unit || (field.field_config && field.field_config.unit) || "";
+      if (value === "") return '<span class="workbook-calc-empty">—</span>';
       return unit
         ? `${escapeHtml(value)} <span class="text-xs text-slate-400">${escapeHtml(unit)}</span>`
         : escapeHtml(value);
     }
 
+    if (value === "") return '<span class="text-slate-400">—</span>';
     return escapeHtml(value);
   }
 
@@ -527,6 +527,24 @@
 
 
 
+  function renderFieldHeader(field, isCalcMode) {
+    const isCalc = !isCalcMode && normalizedFieldType(field) === "calculated";
+    const unit = field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : "";
+    const subLine = isCalc
+      ? `<div class="mt-1 flex items-center gap-1.5 flex-wrap">
+           <span class="workbook-calc-pill">Auto</span>
+           ${unit ? `<span class="text-[10px] normal-case text-slate-300">${unit}</span>` : ""}
+         </div>`
+      : `<div class="mt-0.5 text-[10px] normal-case text-slate-300">
+           ${unit}
+           ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
+         </div>`;
+    return `<th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left${isCalc ? " workbook-col-calculated" : ""}">
+      <div class="font-bold text-sm">${escapeHtml(field.field_name)}</div>
+      ${subLine}
+    </th>`;
+  }
+
   function render(options) {
     const fields = options.fields || [];
     const rows = options.rows || [];
@@ -615,34 +633,14 @@
           ${!isCalcMode ? '<th rowspan="2" class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
         <tr>
-          ${displayFields.map((field) => {
-            const isCalc = !isCalcMode && normalizedFieldType(field) === "calculated";
-            return `
-            <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left${isCalc ? " workbook-col-calculated" : ""}">
-              <div class="font-bold">${escapeHtml(field.field_name)}${isCalc ? '<span class="workbook-calc-pill">ƒ</span>' : ""}</div>
-              <div class="mt-0.5 text-[10px] normal-case text-slate-300">
-                ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
-                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
-              </div>
-            </th>
-          `}).join("")}
+          ${displayFields.map((field) => renderFieldHeader(field, isCalcMode)).join("")}
         </tr>
       `;
     } else {
       headEl.innerHTML = `
         <tr>
           <th class="sticky left-0 z-20 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Month</th>
-          ${displayFields.map((field) => {
-            const isCalc = !isCalcMode && normalizedFieldType(field) === "calculated";
-            return `
-            <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left${isCalc ? " workbook-col-calculated" : ""}">
-              <div class="font-bold">${escapeHtml(field.field_name)}${isCalc ? '<span class="workbook-calc-pill">ƒ</span>' : ""}</div>
-              <div class="mt-0.5 text-[10px] normal-case text-slate-300">
-                ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
-                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
-              </div>
-            </th>
-          `}).join("")}
+          ${displayFields.map((field) => renderFieldHeader(field, isCalcMode)).join("")}
           ${!isCalcMode ? '<th class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
       `;
