@@ -322,9 +322,10 @@
                   </svg>
                   Formula attached and published.
                 </p>
-                <div class="flex items-center gap-2 py-1">
-                  <input type="checkbox" id="prop-calculated-hide-entry" class="rounded border-slate-300 text-[#1a3a6b] focus:ring-[#1a3a6b] h-4 w-4">
-                  <label for="prop-calculated-hide-entry" class="text-xs font-medium text-slate-700 cursor-pointer">Hide from data entry sheet</label>
+                <div id="prop-calc-unit-wrap" class="hidden space-y-1">
+                  <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Unit of Measurement</label>
+                  <input type="text" id="prop-calc-unit" placeholder="e.g. kg CO₂e, tCO₂e" maxlength="30"
+                    class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border">
                 </div>
                 <div class="flex flex-col gap-2">
                   <button type="button" id="btn-open-formula-builder" class="flex w-full items-center justify-between rounded-lg bg-[#1a3a6b] px-4 py-2.5 text-[13px] font-semibold text-white transition hover:bg-[#142d56]">

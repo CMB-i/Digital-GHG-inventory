@@ -1261,6 +1261,7 @@ def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
             "form_name": human_sheet_label(item["form"]),
             "field_type": "calculated",
             "field_config": item["version"].field_config or {},
+            "unit": item["version"].field_config.get("unit") or "" if item["version"].field_config else "",
             "display_order": item["field"].display_order,
             "form_id": item["form"].id,
         })

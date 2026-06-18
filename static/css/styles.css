@@ -1448,3 +1448,17 @@ body.builder-canvas-active main > div {
   animation: red-pulse 1.8s infinite;
 }
 
+/* ── Inline calculated field column styling ────────────────────────── */
+th.workbook-col-calculated {
+  background-color: #3d4b63 !important;  /* grey-blue, clearly distinct from navy without colour drama */
+}
+
+td.workbook-cell-calculated {
+  background-color: #f3f4f6 !important;
+  cursor: default;
+}
+
+.workbook-calc-empty {
+  color: #94a3b8;
+}
+

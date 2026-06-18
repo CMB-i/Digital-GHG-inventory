@@ -8,9 +8,6 @@
     late_entry: { label: "Late entry", className: "bg-violet-50 text-violet-700 border-violet-200" },
   };
 
-  const hiddenCalculatedFields = {};
-  let lastOptions = null;
-
   function escapeHtml(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -142,6 +139,14 @@
       if (value === true || value === "true" || value === "1" || value === 1 || value === "on") return "Yes";
       if (value === false || value === "false" || value === "0" || value === 0) return "No";
       return '<span class="text-slate-400">—</span>';
+    }
+
+    if (fieldType === "calculated") {
+      const unit = field.unit || (field.field_config && field.field_config.unit) || "";
+      if (value === "") return '<span class="workbook-calc-empty">—</span>';
+      return unit
+        ? `${escapeHtml(value)} <span class="text-xs text-slate-400">${escapeHtml(unit)}</span>`
+        : escapeHtml(value);
     }
 
     if (value === "") return '<span class="text-slate-400">—</span>';
@@ -387,9 +392,10 @@
       issues,
       disabled && fieldType === "calculated" ? ["Calculated field"] : []
     );
+    const calcCellClass = fieldType === "calculated" ? " workbook-cell-calculated" : "";
 
     return `
-      <td class="border align-top ${stateClass} ${interactiveClass}" data-cell-state="${escapeHtml(state)}" data-has-issues="${issues.length ? "true" : "false"}" data-row-locked="${rowLocked ? "true" : "false"}" data-submission-value-id="${valueId ? escapeHtml(valueId) : ""}" data-field-code="${escapeHtml(field.field_code)}" title="${escapeHtml(stateTitle)}">
+      <td class="border align-top ${stateClass} ${interactiveClass}${calcCellClass}" data-cell-state="${escapeHtml(state)}" data-has-issues="${issues.length ? "true" : "false"}" data-row-locked="${rowLocked ? "true" : "false"}" data-submission-value-id="${valueId ? escapeHtml(valueId) : ""}" data-field-code="${escapeHtml(field.field_code)}" title="${escapeHtml(stateTitle)}">
         <div class="relative min-h-[48px]">
           ${issues.length ? '<span class="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" data-cell-open="true" title="Cell has issues/comments"></span>' : ""}
           ${proof && fieldType !== "file" ? '<span class="absolute bottom-1 left-1 h-1.5 w-1.5 rounded-full bg-indigo-500" title="Proof attached"></span>' : ""}
@@ -521,8 +527,19 @@
 
 
 
+  function renderFieldHeader(field, isCalcMode) {
+    const isCalc = !isCalcMode && normalizedFieldType(field) === "calculated";
+    const unit = field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : "";
+    return `<th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left${isCalc ? " workbook-col-calculated" : ""}">
+      <div class="font-bold">${escapeHtml(field.field_name)}</div>
+      <div class="mt-0.5 text-[10px] normal-case text-slate-300">
+        ${unit}
+        ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
+      </div>
+    </th>`;
+  }
+
   function render(options) {
-    lastOptions = options;
     const fields = options.fields || [];
     const rows = options.rows || [];
     const headEl = options.headEl;
@@ -578,35 +595,18 @@
       }))
       .filter(group => group.fields.length > 0);
 
-    // Redesign Spoc month table around display fields (excluding file/calc in entry modes unless not hidden)
+    // Redesign Spoc month table around display fields (excluding file fields; calculated fields shown inline read-only)
     const isCalcMode = options.mode === "calc_results";
     const displayFields = isCalcMode
       ? monthlyFields
-      : monthlyFields.filter(f => {
-          const type = normalizedFieldType(f);
-          if (type === "file") return false;
-          if (type === "calculated") {
-            if (f.field_config && f.field_config.hide_on_entry_sheet) return false;
-            if (hiddenCalculatedFields[f.field_code] === true) return false;
-            return true;
-          }
-          return true;
-        });
+      : monthlyFields.filter(f => normalizedFieldType(f) !== "file");
 
     const fileField = isCalcMode ? null : monthlyFields.find(f => normalizedFieldType(f) === "file");
 
     const getGroupColspan = (group) => {
-      return group.fields.filter(f => {
-        if (isCalcMode) return true;
-        const type = normalizedFieldType(f);
-        if (type === "file") return false;
-        if (type === "calculated") {
-          if (f.field_config && f.field_config.hide_on_entry_sheet) return false;
-          if (hiddenCalculatedFields[f.field_code] === true) return false;
-          return true;
-        }
-        return true;
-      }).length;
+      return group.fields.filter(f =>
+        isCalcMode || normalizedFieldType(f) !== "file"
+      ).length;
     };
 
     const activeGroups = hasSections ? monthlyGroups.filter(g => getGroupColspan(g) > 0) : [];
@@ -627,46 +627,18 @@
           ${!isCalcMode ? '<th rowspan="2" class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
         <tr>
-          ${displayFields.map((field) => `
-            <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left">
-              <div class="font-bold">${escapeHtml(field.field_name)}</div>
-              <div class="mt-0.5 text-[10px] normal-case text-slate-300">
-                ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
-                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
-              </div>
-            </th>
-          `).join("")}
+          ${displayFields.map((field) => renderFieldHeader(field, isCalcMode)).join("")}
         </tr>
       `;
     } else {
       headEl.innerHTML = `
         <tr>
           <th class="sticky left-0 z-20 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Month</th>
-          ${displayFields.map((field) => `
-            <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left">
-              <div class="font-bold">${escapeHtml(field.field_name)}</div>
-              <div class="mt-0.5 text-[10px] normal-case text-slate-300">
-                ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
-                ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
-              </div>
-            </th>
-          `).join("")}
+          ${displayFields.map((field) => renderFieldHeader(field, isCalcMode)).join("")}
           ${!isCalcMode ? '<th class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
       `;
     }
-
-    let latestActiveRow = null;
-    let maxChron = -1;
-    rows.forEach(row => {
-      if (row.is_active_period) {
-        const chron = (row.year || 0) * 12 + (row.month || 0);
-        if (chron > maxChron) {
-          maxChron = chron;
-          latestActiveRow = row;
-        }
-      }
-    });
 
     let tbodyHtml = "";
     for (let idx = 0; idx < rows.length; idx++) {
@@ -709,12 +681,10 @@
       }
 
       const trExtraClasses = (rowState === "not_open" ? " aw-row-not-open" : "") + ((rowState === "approved" || rowState === "locked") ? " aw-row-approved" : "");
-      const isLatestActiveAndNotStarted = (row === latestActiveRow) && (row.submission_status === "Not Started");
-      const blinkerHtml = isLatestActiveAndNotStarted ? ' <span class="month-blinker" title="Latest month to fill"></span>' : '';
       tbodyHtml += `
         <tr data-row-key="${escapeHtml(key)}" class="${rowClass} transition${trExtraClasses}">
           <td class="sticky left-0 z-10 align-middle month-cell ${monthBgClass}">
-            ${escapeHtml(getFullMonthYear(row.month, row.year))}${lockSuffix}${blinkerHtml}
+            ${escapeHtml(getFullMonthYear(row.month, row.year))}${lockSuffix}
           </td>
           ${displayFields.map((field) => renderCell(row, field, options)).join("")}
           ${!isCalcMode ? renderRemarksCell(row, fileField, options) : ""}
@@ -779,52 +749,6 @@
       });
     });
 
-    // Render calculated fields toggles for the submitter
-    const activeCalculatedFields = fields.filter(f => 
-      normalizedFieldType(f) === "calculated" && 
-      !(f.field_config && f.field_config.hide_on_entry_sheet)
-    );
-
-    const togglesContainer = document.getElementById("calculated-fields-toggles");
-    if (togglesContainer) {
-      if (isCalcMode || activeCalculatedFields.length === 0) {
-        togglesContainer.classList.add("hidden");
-        togglesContainer.innerHTML = "";
-      } else {
-        togglesContainer.classList.remove("hidden");
-        togglesContainer.innerHTML = `
-          <div class="flex items-center gap-2 select-none shrink-0 mr-2 py-1">
-            <svg class="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-            </svg>
-            <span class="text-slate-500 uppercase tracking-wider text-[10px]">Show Calculated Columns:</span>
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            ${activeCalculatedFields.map(f => {
-              const isChecked = hiddenCalculatedFields[f.field_code] !== true;
-              return `
-                <label class="inline-flex items-center gap-1.5 cursor-pointer bg-white px-2.5 py-1 rounded border border-slate-200 hover:bg-slate-50 select-none">
-                  <input type="checkbox" data-field-code="${escapeHtml(f.field_code)}" class="rounded border-slate-300 text-[#1a3a6b] focus:ring-[#1a3a6b] h-3.5 w-3.5" ${isChecked ? "checked" : ""}>
-                  <span class="text-xs font-semibold text-slate-700">${escapeHtml(f.field_name)}</span>
-                </label>
-              `;
-            }).join("")}
-          </div>
-        `;
-
-        // Add event listeners to checkboxes
-        togglesContainer.querySelectorAll("input[type='checkbox']").forEach(cb => {
-          cb.addEventListener("change", function () {
-            const code = cb.dataset.fieldCode;
-            hiddenCalculatedFields[code] = !cb.checked;
-            if (lastOptions) {
-              render(lastOptions);
-            }
-          });
-        });
-      }
-    }
   }
 
   window.WorkbookSheet = {
