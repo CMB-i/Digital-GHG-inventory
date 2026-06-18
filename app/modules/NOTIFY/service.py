@@ -60,7 +60,9 @@ def send_mock_email(to_email, subject, body):
     smtp_password = os.getenv("SMTP_PASSWORD")
     sender = os.getenv("SMTP_SENDER", smtp_user)
     
-    if not smtp_server or not smtp_user or not smtp_password:
+    if (not smtp_server or not smtp_user or not smtp_password or 
+            smtp_user == "your-sender-email@gmail.com" or 
+            smtp_password == "your-gmail-app-password"):
         from flask import current_app
         try:
             log_dir = os.path.join(os.path.dirname(current_app.root_path), "uploads")
@@ -90,7 +92,7 @@ def send_mock_email(to_email, subject, body):
     msg['To'] = to_email
 
     try:
-        with smtplib.SMTP(smtp_server, int(smtp_port)) as server:
+        with smtplib.SMTP(smtp_server, int(smtp_port), timeout=5) as server:
             server.starttls()
             server.login(smtp_user, smtp_password)
             server.sendmail(sender, [to_email], msg.as_string())
@@ -107,8 +109,11 @@ def send_mock_whatsapp(to_phone, body):
     account_sid = os.getenv("TWILIO_ACCOUNT_SID")
     auth_token = os.getenv("TWILIO_AUTH_TOKEN")
     from_whatsapp = os.getenv("TWILIO_SENDER")
-    
-    if not TWILIO_AVAILABLE or not account_sid or not auth_token or not from_whatsapp:
+
+    cleaned_digits = "".join(c for c in (to_phone or "") if c.isdigit())
+    is_valid_phone = len(cleaned_digits) >= 8
+
+    if not TWILIO_AVAILABLE or not account_sid or not auth_token or not from_whatsapp or not is_valid_phone:
         from flask import current_app
         try:
             log_dir = os.path.join(os.path.dirname(current_app.root_path), "uploads")
@@ -133,7 +138,10 @@ def send_mock_whatsapp(to_phone, body):
     # Clean phone format
     formatted_phone = to_phone.strip()
     if not formatted_phone.startswith("+"):
-        formatted_phone = f"+91{formatted_phone}"
+        default_country_code = os.getenv("TWILIO_DEFAULT_COUNTRY_CODE", "+91")
+        if not default_country_code.startswith("+"):
+            default_country_code = f"+{default_country_code}"
+        formatted_phone = f"{default_country_code}{formatted_phone}"
 
     to_whatsapp = f"whatsapp:{formatted_phone}"
 
@@ -160,7 +168,7 @@ def get_user_preferences(user_id):
             pref_in_app=True,
             pref_desktop=False,
             pref_email=False,
-            pref_whatsapp=False
+            pref_whatsapp=True
         )
     return pref
 
@@ -233,11 +241,11 @@ def resolve_recipients(config, entity_type, entity_id, context):
                     if lvl:
                         level_approvers = get_eligible_level_approvers(lvl, submission.site_id)
                         user_ids = []
-                        for app in level_approvers:
-                            if app.user_id == submission.submitted_by:
+                        for lvl_approver in level_approvers:
+                            if lvl_approver.user_id == submission.submitted_by:
                                 continue
-                            if has_permission(app.user_id, "submission", "approve", scope_site_id=submission.site_id):
-                                user_ids.append(app.user_id)
+                            if has_permission(lvl_approver.user_id, "submission", "approve", scope_site_id=submission.site_id):
+                                user_ids.append(lvl_approver.user_id)
                         if user_ids:
                             recipients = User.query.filter(User.id.in_(user_ids), User.is_active == True, User.is_deleted == False).all()
                             
@@ -285,8 +293,15 @@ def dispatch_notification_event(event_type, entity_type, entity_id, context):
             try:
                 message = config.message_template.format(**context)
             except Exception as e:
-                message = config.message_template
-                print(f"[NOTIFICATION ERROR] Message formatting failed: {e}")
+                from flask import current_app
+                try:
+                    current_app.logger.warning(
+                        f"[NOTIFICATION ERROR] Message formatting failed for config '{config.name}' (event: {event_type}): {e}"
+                    )
+                except RuntimeError:
+                    # Outside of Flask application context (e.g., test runner)
+                    print(f"[NOTIFICATION ERROR] Message formatting failed for config '{config.name}' (event: {event_type}): {e}")
+                continue
             
             # 1. In-App delivery
             if "in_app" in config_channels and pref.pref_in_app:
@@ -397,8 +412,15 @@ def notify_spoc(submission_id, event_type, message):
         "CHANGES_REQUESTED": "SUBMISSION_CHANGES_REQUESTED",
         "CORRECTIONS_REQUESTED": "SUBMISSION_CHANGES_REQUESTED",
         "SUBMISSION_CHANGES_REQUESTED": "SUBMISSION_CHANGES_REQUESTED",
+        "ISSUE_RAISED": "SUBMISSION_ISSUE_RAISED",
+        "LEVEL_APPROVED": "SUBMISSION_LEVEL_APPROVED",
     }
-    mapped_event_type = mapping.get(event_upper, f"SUBMISSION_{event_upper}")
+    if event_upper in mapping:
+        mapped_event_type = mapping[event_upper]
+    elif event_upper.startswith("SUBMISSION_") or event_upper.startswith("PERIOD_"):
+        mapped_event_type = event_upper
+    else:
+        mapped_event_type = f"SUBMISSION_{event_upper}"
 
     context = {
         "site_id": submission.site_id,
@@ -409,7 +431,8 @@ def notify_spoc(submission_id, event_type, message):
         "reason": reason,
         "status": submission.status,
         "submission_id": submission_id,
-        "submitter_id": submission.submitted_by
+        "submitter_id": submission.submitted_by,
+        "message": message
     }
 
     results = dispatch_notification_event(
@@ -418,6 +441,19 @@ def notify_spoc(submission_id, event_type, message):
         entity_id=submission_id,
         context=context
     )
+    if not results and message:
+        pref = get_user_preferences(submission.submitted_by)
+        if pref.pref_in_app:
+            fallback_notification = create_notification(
+                user_id=submission.submitted_by,
+                event_type=mapped_event_type,
+                entity_type="submission",
+                entity_id=submission_id,
+                message=message,
+                channel="in_app"
+            )
+            db.session.flush()
+            return fallback_notification
     return results[0] if results else None
 
 
@@ -458,7 +494,7 @@ def seed_default_notification_configs():
     Creates the default notification configurations if they do not exist.
     """
     # Check if there are already configurations
-    if NotificationConfig.query.filter_by(is_deleted=False).count() > 0:
+    if NotificationConfig.query.count() > 0:
         return
         
     from app.modules.USRMGMT.model import User

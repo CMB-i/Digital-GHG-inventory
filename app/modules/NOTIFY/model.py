@@ -34,7 +34,7 @@ class UserNotificationPreference(db.Model):
     pref_in_app = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
     pref_desktop = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     pref_email = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
-    pref_whatsapp = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
+    pref_whatsapp = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,

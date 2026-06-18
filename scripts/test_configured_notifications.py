@@ -77,12 +77,27 @@ def run_tests():
             "period_label": "FY 2026-Q1"
         }
         
-        dispatched = dispatch_notification_event(
-            event_type="TEST_PERIOD_OPEN",
-            entity_type="reporting_period",
-            entity_id=999,
-            context=context
-        )
+        from unittest.mock import patch
+        
+        def mock_write_email(to_email, subject, body):
+            with open(email_log, "a") as f:
+                f.write(f"To: {to_email}\nSubject: {subject}\nBody:\n{body}\n")
+            print(f"[MOCK EMAIL SENT] To: {to_email} | Subject: {subject}")
+
+        def mock_write_whatsapp(to_phone, body):
+            with open(whatsapp_log, "a") as f:
+                f.write(f"To Phone: {to_phone}\nMessage:\n{body}\n")
+            print(f"[MOCK WHATSAPP SENT] To: {to_phone} | Message: {body}")
+
+        with patch("app.modules.NOTIFY.service.send_mock_email", side_effect=mock_write_email), \
+             patch("app.modules.NOTIFY.service.send_mock_whatsapp", side_effect=mock_write_whatsapp):
+            
+            dispatched = dispatch_notification_event(
+                event_type="TEST_PERIOD_OPEN",
+                entity_type="reporting_period",
+                entity_id=999,
+                context=context
+            )
         
         db.session.commit()
         print(f"Dispatched event. Created {len(dispatched)} in-app notifications.")

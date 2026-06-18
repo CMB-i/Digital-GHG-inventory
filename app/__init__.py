@@ -253,8 +253,10 @@ def create_app(config_class=Config):
 
     with app.app_context():
         from app.modules.NOTIFY.service import seed_default_notification_configs
+        from sqlalchemy import inspect
         try:
-            seed_default_notification_configs()
+            if inspect(db.engine).has_table("notification_configs"):
+                seed_default_notification_configs()
         except Exception as e:
             app.logger.warning(f"Failed to seed default notifications: {e}")
 
