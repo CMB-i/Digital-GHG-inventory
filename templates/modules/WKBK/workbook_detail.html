@@ -10,11 +10,18 @@
     <div class="text-xs text-slate-500 mb-1">
       <a href="/workbooks" class="hover:underline text-indigo-600">Workbooks</a>
       <span class="mx-1.5">·</span>
-      <strong class="text-slate-700">{{ workbook.name }}</strong>
+      <strong id="wb-breadcrumb" class="text-slate-700">{{ workbook.name }}</strong>
     </div>
     <div class="flex items-center justify-between border-b border-slate-200 pb-4">
       <div class="flex items-center space-x-3">
-        <h1 class="text-2xl font-bold text-slate-800">{{ workbook.name }}</h1>
+        <div class="flex items-center gap-2">
+          <h1 id="wb-title" class="text-2xl font-bold text-slate-800">{{ workbook.name }}</h1>
+          <button id="btn-rename-workbook" class="text-slate-400 hover:text-slate-600 transition-colors" title="Rename workbook">
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </button>
+        </div>
         <span id="wb-status-badge"
           class="px-2 py-0.5 rounded-full font-bold text-[10px] uppercase bg-amber-100 text-amber-800">
           {{ workbook.status | upper }}
@@ -229,6 +236,71 @@
   </div>
 </div>
 
+<!-- Rename Workbook Modal -->
+<div id="modal-rename-wb" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-sm overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+      <h3 class="text-base font-bold text-slate-800">Rename Workbook</h3>
+      <button id="btn-close-rename-wb" class="text-slate-400 hover:text-slate-600">
+        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+    <form id="form-rename-wb" class="p-6 space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">New Workbook Name</label>
+        <input type="text" id="rename-wb-name" required autocomplete="off"
+          placeholder="e.g. SGGH Annual Workbook"
+          class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm h-10 px-3 border">
+      </div>
+      <div class="flex justify-end space-x-2 pt-1">
+        <button type="button" id="btn-cancel-rename-wb"
+          class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded-lg transition-colors">
+          Cancel
+        </button>
+        <button type="submit" id="btn-submit-rename-wb"
+          class="px-4 py-2 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-sm font-semibold rounded-lg shadow transition-colors">
+          Save Changes
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Rename Sheet Modal -->
+<div id="modal-rename-sheet" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-sm overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+      <h3 class="text-base font-bold text-slate-800">Rename Sheet Label</h3>
+      <button id="btn-close-rename-sheet" class="text-slate-400 hover:text-slate-600">
+        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+    <form id="form-rename-sheet" class="p-6 space-y-4">
+      <input type="hidden" id="rename-sheet-form-id">
+      <div>
+        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Sheet Label / Override</label>
+        <input type="text" id="rename-sheet-label" autocomplete="off"
+          placeholder="Leave blank to use default template name"
+          class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm h-10 px-3 border">
+        <p class="text-[10px] text-slate-400 mt-1">If blank, the sheet's default name will be displayed.</p>
+      </div>
+      <div class="flex justify-end space-x-2 pt-1">
+        <button type="button" id="btn-cancel-rename-sheet"
+          class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded-lg transition-colors">
+          Cancel
+        </button>
+        <button type="submit" id="btn-submit-rename-sheet"
+          class="px-4 py-2 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-sm font-semibold rounded-lg shadow transition-colors">
+          Save Changes
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

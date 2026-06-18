@@ -50,6 +50,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
   let autosaveTimeout = null;
   let lastSavedTime = null;
+  let isSaving = false;
+  let savePending = false;
 
   function paramInt(name) {
     const value = parseInt(initialParams.get(name), 10);
@@ -514,7 +516,7 @@ document.addEventListener("DOMContentLoaded", function () {
     checkRequiredFields();
   }
 
-  function triggerAutosave() {
+  function triggerAutosave(e) {
     if (autosaveTimeout) clearTimeout(autosaveTimeout);
     
     const dot = document.getElementById("save-status-dot");
@@ -524,11 +526,19 @@ document.addEventListener("DOMContentLoaded", function () {
       text.textContent = "Saving...";
     }
     
-    autosaveTimeout = setTimeout(async function () {
-      await saveSelectedRow();
-      lastSavedTime = new Date();
-      updateLastSavedText();
-    }, 2000);
+    const immediate = e && e.type === "change";
+    if (immediate) {
+      saveSelectedRow().then(() => {
+        lastSavedTime = new Date();
+        updateLastSavedText();
+      });
+    } else {
+      autosaveTimeout = setTimeout(async function () {
+        await saveSelectedRow();
+        lastSavedTime = new Date();
+        updateLastSavedText();
+      }, 2000);
+    }
   }
 
   function updateLastSavedText() {
@@ -594,11 +604,11 @@ document.addEventListener("DOMContentLoaded", function () {
       },
       onCellChange: function(e) {
         onCellChange(e);
-        triggerAutosave();
+        triggerAutosave(e);
       },
       onWorkbookValueChange: function(e) {
         onWorkbookValueChange(e);
-        triggerAutosave();
+        triggerAutosave(e);
       },
       onCellOpen: openCellDetail
     });
@@ -845,10 +855,20 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   async function saveSelectedRow() {
+    if (isSaving) {
+      savePending = true;
+      return;
+    }
+    isSaving = true;
+    savePending = false;
+
     const row = selectedRow();
     const shouldSaveMonthly = row && row.editability && row.editability.editable;
     const shouldSaveWorkbookValues = state.dirtyWorkbookFields.size > 0;
-    if (!shouldSaveMonthly && !shouldSaveWorkbookValues) return;
+    if (!shouldSaveMonthly && !shouldSaveWorkbookValues) {
+      isSaving = false;
+      return;
+    }
 
     try {
       if (shouldSaveWorkbookValues) {
@@ -925,6 +945,11 @@ document.addEventListener("DOMContentLoaded", function () {
       renderHeader();
     } catch (error) {
       showAlert(error.message, "error");
+    } finally {
+      isSaving = false;
+      if (savePending) {
+        saveSelectedRow();
+      }
     }
   }
 
@@ -1069,6 +1094,26 @@ document.addEventListener("DOMContentLoaded", function () {
       if (event.target === cellDetailModal) closeCellDetail();
     });
   }
+
+  // Periodic autosave every 5 seconds
+  window.setInterval(async function () {
+    const hasUnsavedChanges = state.dirtyRows.size > 0 || state.dirtyWorkbookFields.size > 0;
+    if (hasUnsavedChanges && !isSaving) {
+      const dot = document.getElementById("save-status-dot");
+      const text = document.getElementById("save-status-text");
+      if (dot && text) {
+        dot.className = "h-2 w-2 rounded-full bg-amber-500 animate-pulse";
+        text.textContent = "Saving (auto)...";
+      }
+      try {
+        await saveSelectedRow();
+        lastSavedTime = new Date();
+        updateLastSavedText();
+      } catch (error) {
+        console.error("Periodic autosave failed:", error);
+      }
+    }
+  }, 5000);
 
   loadOptions().catch(error => {
     setEmpty("Could not load annual workbook", error.message);
