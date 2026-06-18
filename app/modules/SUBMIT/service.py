@@ -891,6 +891,74 @@ def get_annual_workbook_options(user_id):
     }
 
 
+def _compute_preview_calculated_values(submissions, fields):
+    """
+    For a list of submissions (all for the same form), compute preview values
+    for calculated fields using currently saved raw input values. Runs the same
+    3-pass formula evaluation as autosave but read-only — does not persist anything.
+    Returns {submission_id: {field_code: float_value}} only for fields that could
+    be evaluated; fields with missing inputs are absent from the inner dict.
+    """
+    calc_fields = [
+        f for f in fields
+        if f.get("field_type") == "calculated"
+        and (f.get("field_config") or {}).get("formula_version_id")
+    ]
+    if not calc_fields:
+        return {}
+
+    sub_ids = [s.id for s in submissions if s]
+    if not sub_ids:
+        return {}
+
+    fv_ids = list({f["field_config"]["formula_version_id"] for f in calc_fields})
+    formula_versions = {
+        fv.id: fv
+        for fv in FormulaVersion.query.filter(FormulaVersion.id.in_(fv_ids)).all()
+    }
+
+    value_set_snapshot = get_approved_valsets_snapshot()
+
+    all_svs = SubmissionValue.query.filter(
+        SubmissionValue.submission_id.in_(sub_ids)
+    ).all()
+    id_to_code = {f["field_id"]: f["field_code"] for f in fields}
+    svs_by_sub = {}
+    for sv in all_svs:
+        svs_by_sub.setdefault(sv.submission_id, []).append(sv)
+
+    result = {}
+    for sub in submissions:
+        if not sub:
+            continue
+        field_values = {}
+        for sv in svs_by_sub.get(sub.id, []):
+            code = id_to_code.get(sv.field_id)
+            if code:
+                if sv.calculated_value is not None:
+                    field_values[code] = float(sv.calculated_value)
+                elif sv.raw_value is not None:
+                    field_values[code] = sv.raw_value
+
+        computed = {}
+        for _pass in range(3):
+            for f in calc_fields:
+                code = f["field_code"]
+                fv = formula_versions.get(f["field_config"]["formula_version_id"])
+                if not fv:
+                    continue
+                try:
+                    computed_val = evaluate_formula(fv.expression, field_values, value_set_snapshot)
+                    computed[code] = computed_val
+                    field_values[code] = computed_val
+                except Exception:
+                    pass
+
+        result[sub.id] = computed
+
+    return result
+
+
 def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, selected_form_id=None):
     try:
         site_id = int(site_id)
@@ -940,11 +1008,18 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
         for submission in submissions
     }
 
+    calc_preview = _compute_preview_calculated_values(list(submissions), fields)
+
     rows = []
     for item in months:
         period = period_by_key.get((item["year"], item["month"]))
         submission = submission_by_period.get(period.id) if period else None
         editability = _row_editability(period, submission, can_edit_monthly)
+        values = _submission_values_payload(submission, fields)
+        if submission and submission.id in calc_preview:
+            for code, preview_val in calc_preview[submission.id].items():
+                if preview_val is not None and values.get(code) in (None, ""):
+                    values[code] = preview_val
         rows.append({
             **item,
             "period_id": period.id if period else None,
@@ -959,7 +1034,7 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
                 else None
             ),
             "editability": editability,
-            "values": _submission_values_payload(submission, fields),
+            "values": values,
             "issues": submission_value_issues_by_field(submission, fields),
             "is_active_period": bool(period and period.status in ("OPEN", "REOPENED")),
         })
@@ -1934,6 +2009,8 @@ def submit_monthly_workbook_package(site_id, workbook_id=None, period_id=None, y
 
         if selected_form_id == form.id and values is not None and submission.status in EDITABLE_SUBMISSION_STATUSES:
             autosave_submission_values(submission.id, values or {}, user_id)
+        elif submission.status in EDITABLE_SUBMISSION_STATUSES:
+            autosave_submission_values(submission.id, {}, user_id)
 
         submission.package_id = package.id
         if submission.status in EDITABLE_SUBMISSION_STATUSES:
@@ -2037,7 +2114,8 @@ def autosave_submission_values(submission_id, values_dict, user_id):
     if not form:
         raise ValueError("Submission form not found.")
 
-    fields = get_form_version_fields(submission.form_version_id)
+    form_version_id = (form.current_version_id if form.current_version_id else None) or submission.form_version_id
+    fields = get_form_version_fields(form_version_id)
     sections = _sections_payload(form)
     fields_map = {}
     for fv, f in fields:
