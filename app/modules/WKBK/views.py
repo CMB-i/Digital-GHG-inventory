@@ -25,6 +25,8 @@ from app.modules.WKBK.service import (
     add_site_submitter,
     remove_site_submitter,
     check_workbook_readiness,
+    rename_workbook,
+    rename_workbook_sheet,
 )
 from app.modules.WFLWBLD.model import (
     Workflow, WorkflowVersion, WorkflowLevel, WorkflowLevelApprover,
@@ -147,6 +149,39 @@ def api_deactivate(workbook_id):
         deactivate_workbook(workbook_id)
         db.session.commit()
         return success_response(message="Workbook deactivated.")
+    except ValueError as e:
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/<int:workbook_id>/rename", methods=["PUT"])
+@require_permission("form", "manage_forms")
+def api_rename_workbook(workbook_id):
+    data = request.get_json() or {}
+    name = data.get("name")
+    try:
+        wb = rename_workbook(workbook_id, name)
+        db.session.commit()
+        return success_response(
+            data={"id": wb.id, "name": wb.name, "code": wb.code},
+            message="Workbook renamed."
+        )
+    except ValueError as e:
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/<int:workbook_id>/sheets/<int:form_id>/rename", methods=["PUT"])
+@require_permission("form", "manage_forms")
+def api_rename_sheet(workbook_id, form_id):
+    data = request.get_json() or {}
+    sheet_label = data.get("sheet_label")
+    try:
+        wf = rename_workbook_sheet(workbook_id, form_id, sheet_label)
+        db.session.commit()
+        _, sheets = get_workbook_with_sheets(workbook_id)
+        return success_response(
+            data={"sheets": sheets},
+            message="Sheet renamed."
+        )
     except ValueError as e:
         return error_response(str(e), 400)
 

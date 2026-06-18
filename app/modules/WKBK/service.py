@@ -159,6 +159,30 @@ def deactivate_workbook(workbook_id):
     db.session.flush()
 
 
+def rename_workbook(workbook_id, name):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        raise ValueError("Workbook not found.")
+    if not name or not name.strip():
+        raise ValueError("Workbook name is required.")
+    wb.name = name.strip()
+    wb.updated_at = datetime.now(timezone.utc)
+    db.session.flush()
+    return wb
+
+
+def rename_workbook_sheet(workbook_id, form_id, sheet_label):
+    wb = get_workbook(workbook_id)
+    if not wb:
+        raise ValueError("Workbook not found.")
+    wf = WorkbookForm.query.filter_by(workbook_id=workbook_id, form_id=form_id).first()
+    if not wf:
+        raise ValueError("Sheet not found in this workbook.")
+    wf.sheet_label = sheet_label.strip() if sheet_label and sheet_label.strip() else None
+    db.session.flush()
+    return wf
+
+
 def get_addable_forms(workbook_id):
     """Return forms not already in this workbook."""
     existing_ids = {

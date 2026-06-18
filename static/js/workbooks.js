@@ -95,6 +95,125 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
+  // ── Workbook Rename Modal Logic ──
+  const renameModal    = document.getElementById("modal-rename-wb");
+  const formRW         = document.getElementById("form-rename-wb");
+  const renameWbId     = document.getElementById("rename-wb-id");
+  const renameWbName   = document.getElementById("rename-wb-name");
+
+  if (renameModal) {
+    const btnCloseRename = document.getElementById("btn-close-rename-wb");
+    const btnCancelRename = document.getElementById("btn-cancel-rename-wb");
+    if (btnCloseRename) btnCloseRename.onclick = () => renameModal.classList.add("hidden");
+    if (btnCancelRename) btnCancelRename.onclick = () => renameModal.classList.add("hidden");
+
+    if (formRW) {
+      formRW.onsubmit = async (e) => {
+        e.preventDefault();
+        const id = renameWbId && renameWbId.value ? renameWbId.value : (typeof WORKBOOK_ID !== "undefined" ? WORKBOOK_ID : null);
+        const name = renameWbName ? renameWbName.value.trim() : "";
+        if (!id || !name) return;
+        const submitBtn = document.getElementById("btn-submit-rename-wb");
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Saving…";
+        }
+        try {
+          const res = await fetch(`/workbooks/api/${id}/rename`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+          });
+          const d = await res.json();
+          if (d.error) {
+            toast(d.error, "error");
+          } else {
+            renameModal.classList.add("hidden");
+            toast("Workbook renamed.");
+            if (grid) {
+              loadWorkbooks();
+            } else {
+              const wbTitle = document.getElementById("wb-title");
+              const wbBreadcrumb = document.getElementById("wb-breadcrumb");
+              if (wbTitle) wbTitle.textContent = d.data.name;
+              if (wbBreadcrumb) wbBreadcrumb.textContent = d.data.name;
+            }
+          }
+        } catch {
+          toast("Failed to rename workbook.", "error");
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Save Changes";
+          }
+        }
+      };
+    }
+  }
+
+  // Workbook Rename Button (Detail Page)
+  const btnRenameWbDetail = document.getElementById("btn-rename-workbook");
+  if (btnRenameWbDetail) {
+    btnRenameWbDetail.onclick = () => {
+      const wbTitle = document.getElementById("wb-title");
+      if (renameWbId) renameWbId.value = WORKBOOK_ID;
+      if (renameWbName) renameWbName.value = wbTitle ? wbTitle.textContent.trim() : "";
+      renameModal.classList.remove("hidden");
+      setTimeout(() => renameWbName.focus(), 50);
+    };
+  }
+
+  // ── Sheet Rename Modal Logic (Detail Page Only) ──
+  const renameSheetModal  = document.getElementById("modal-rename-sheet");
+  const formRS            = document.getElementById("form-rename-sheet");
+  const renameSheetFormId = document.getElementById("rename-sheet-form-id");
+  const renameSheetLabel  = document.getElementById("rename-sheet-label");
+
+  if (renameSheetModal) {
+    const btnCloseRS = document.getElementById("btn-close-rename-sheet");
+    const btnCancelRS = document.getElementById("btn-cancel-rename-sheet");
+    if (btnCloseRS) btnCloseRS.onclick = () => renameSheetModal.classList.add("hidden");
+    if (btnCancelRS) btnCancelRS.onclick = () => renameSheetModal.classList.add("hidden");
+
+    if (formRS) {
+      formRS.onsubmit = async (e) => {
+        e.preventDefault();
+        const formId = renameSheetFormId ? renameSheetFormId.value : null;
+        const sheetLabelVal = renameSheetLabel ? renameSheetLabel.value.trim() : "";
+        if (!formId) return;
+
+        const submitBtn = document.getElementById("btn-submit-rename-sheet");
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = "Saving…";
+        }
+        try {
+          const res = await fetch(`/workbooks/api/${WORKBOOK_ID}/sheets/${formId}/rename`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sheet_label: sheetLabelVal }),
+          });
+          const d = await res.json();
+          if (d.error) {
+            toast(d.error, "error");
+          } else {
+            renameSheetModal.classList.add("hidden");
+            toast("Sheet renamed.");
+            renderSheets(d.data.sheets);
+            loadReadiness();
+          }
+        } catch {
+          toast("Failed to rename sheet.", "error");
+        } finally {
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Save Changes";
+          }
+        }
+      };
+    }
+  }
+
   function loadWorkbooks() {
     fetch("/workbooks/api")
       .then(r => r.json())
@@ -149,9 +268,21 @@ document.addEventListener("DOMContentLoaded", function () {
             class="inline-flex items-center rounded-lg bg-[#1a3a6b] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1e4280] transition-colors">
             ${isLive ? "Open Workbook →" : "Continue Setup →"}
           </a>
-          <button class="deactivate-btn text-xs font-semibold text-slate-400 hover:text-rose-500 transition-colors"
-            data-id="${wb.id}">Deactivate</button>
+          <div class="flex items-center gap-3">
+            <button class="rename-wb-btn text-xs font-semibold text-slate-400 hover:text-[#1a3a6b] transition-colors"
+              data-id="${wb.id}" data-name="${esc(wb.name)}">Rename</button>
+            <button class="deactivate-btn text-xs font-semibold text-slate-400 hover:text-rose-500 transition-colors"
+              data-id="${wb.id}">Deactivate</button>
+          </div>
         </div>`;
+      card.querySelector(".rename-wb-btn").onclick = (e) => {
+        const id = e.currentTarget.dataset.id;
+        const name = e.currentTarget.dataset.name;
+        if (renameWbId) renameWbId.value = id;
+        if (renameWbName) renameWbName.value = name;
+        renameModal.classList.remove("hidden");
+        setTimeout(() => renameWbName.focus(), 50);
+      };
       card.querySelector(".deactivate-btn").onclick = async (e) => {
         const id = e.currentTarget.dataset.id;
         if (!confirm("Deactivate this workbook? It will be removed from the list.")) return;
@@ -473,7 +604,14 @@ document.addEventListener("DOMContentLoaded", function () {
         card.innerHTML = `
           <div class="px-5 py-4 space-y-1.5">
             <div class="flex items-center justify-between gap-2">
-              <h3 class="font-bold text-slate-800 text-sm leading-snug">${esc(sheet.sheet_label)}</h3>
+              <div class="flex items-center gap-1.5 min-w-0">
+                <h3 class="font-bold text-slate-800 text-sm leading-snug truncate" title="${esc(sheet.sheet_label)}">${esc(sheet.sheet_label)}</h3>
+                <button class="rename-sheet-btn text-slate-400 hover:text-[#1a3a6b] shrink-0 transition-colors" title="Rename sheet">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                </button>
+              </div>
               ${statusBadge}
             </div>
             <p class="text-[10px] font-mono text-slate-400">${esc(sheet.form_code)}</p>
@@ -495,6 +633,12 @@ document.addEventListener("DOMContentLoaded", function () {
             </div>
           </div>`;
 
+        card.querySelector(".rename-sheet-btn").onclick = () => {
+          if (renameSheetFormId) renameSheetFormId.value = sheet.form_id;
+          if (renameSheetLabel) renameSheetLabel.value = sheet.sheet_label || "";
+          renameSheetModal.classList.remove("hidden");
+          setTimeout(() => renameSheetLabel.focus(), 50);
+        };
         card.querySelector(".move-up-btn").onclick   = () => moveSheet(sheet.form_id, -1, sheets);
         card.querySelector(".move-down-btn").onclick  = () => moveSheet(sheet.form_id, 1, sheets);
         card.querySelector(".remove-sheet-btn").onclick = () => removeSheet(sheet.form_id, sheet.sheet_label);
