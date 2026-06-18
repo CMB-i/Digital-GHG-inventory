@@ -142,6 +142,14 @@
     }
 
     if (value === "") return '<span class="text-slate-400">—</span>';
+
+    if (fieldType === "calculated") {
+      const unit = field.unit || (field.field_config && field.field_config.unit) || "";
+      return unit
+        ? `${escapeHtml(value)} <span class="text-xs text-slate-400">${escapeHtml(unit)}</span>`
+        : escapeHtml(value);
+    }
+
     return escapeHtml(value);
   }
 
@@ -574,17 +582,17 @@
       }))
       .filter(group => group.fields.length > 0);
 
-    // Redesign Spoc month table around display fields (excluding file/calc in entry modes)
+    // Redesign Spoc month table around display fields (excluding file fields; calculated fields shown inline read-only)
     const isCalcMode = options.mode === "calc_results";
     const displayFields = isCalcMode
       ? monthlyFields
-      : monthlyFields.filter(f => normalizedFieldType(f) !== "file" && normalizedFieldType(f) !== "calculated");
+      : monthlyFields.filter(f => normalizedFieldType(f) !== "file");
 
     const fileField = isCalcMode ? null : monthlyFields.find(f => normalizedFieldType(f) === "file");
 
     const getGroupColspan = (group) => {
       return group.fields.filter(f =>
-        isCalcMode || (normalizedFieldType(f) !== "file" && normalizedFieldType(f) !== "calculated")
+        isCalcMode || normalizedFieldType(f) !== "file"
       ).length;
     };
 
