@@ -474,6 +474,7 @@ document.addEventListener("DOMContentLoaded", function () {
     renderSections();
     renderWorkspace();
     if (selectedFieldCode) openInspector(selectedFieldCode);
+    saveDraftLayout().catch(() => {});
   }
 
   function moveFieldWithinActiveSection(fieldCode, direction) {
@@ -511,6 +512,7 @@ document.addEventListener("DOMContentLoaded", function () {
     updateSaveStatusText();
     renderWorkspace();
     openInspector(fieldCode);
+    saveDraftLayout().catch(() => {});
   }
 
   function normalizeDropdownOptions(options) {
@@ -1473,7 +1475,9 @@ document.addEventListener("DOMContentLoaded", function () {
   // Apply Changes from properties form
   formFieldProperties.onsubmit = function (e) {
     e.preventDefault();
-    applySelectedFieldChanges({ notify: true });
+    if (applySelectedFieldChanges({ notify: true })) {
+      saveDraftLayout().catch(() => {});
+    }
   };
 
   formFieldProperties.addEventListener("input", function () {
@@ -1515,6 +1519,7 @@ document.addEventListener("DOMContentLoaded", function () {
       renderSections();
       renderWorkspace();
       openInspector(code);
+      saveDraftLayout().catch(() => {});
     };
   });
 
@@ -1534,6 +1539,7 @@ document.addEventListener("DOMContentLoaded", function () {
     renderSections();
     renderWorkspace();
     showToast("Field deleted.");
+    saveDraftLayout().catch(() => {});
   };
 
   if (btnAddSection) {
@@ -1555,6 +1561,7 @@ document.addEventListener("DOMContentLoaded", function () {
       updateSaveStatusText();
       renderSections();
       renderWorkspace();
+      saveDraftLayout().catch(() => {});
     };
   }
 
@@ -1573,6 +1580,7 @@ document.addEventListener("DOMContentLoaded", function () {
       updateSaveStatusText();
       renderSections();
       renderWorkspace();
+      saveDraftLayout().catch(() => {});
     });
     sectionsList.addEventListener("click", function (e) {
       const moveUpButton = e.target.closest(".section-move-up");
@@ -1629,6 +1637,7 @@ document.addEventListener("DOMContentLoaded", function () {
       if (selectedFieldCode) {
         openInspector(selectedFieldCode);
       }
+      saveDraftLayout().catch(() => {});
     });
   }
 
