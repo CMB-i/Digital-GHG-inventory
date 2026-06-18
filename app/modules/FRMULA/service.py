@@ -42,16 +42,12 @@ def validate_formula(expression, operand_names):
     return result
 
 
-def evaluate_formula(expression, field_values, value_set_snapshot=None, tokens=None):
+def evaluate_formula(expression, field_values, value_set_snapshot=None):
     cleaned_expression = (expression or "").strip()
     if not cleaned_expression:
         raise FormulaValidationError("Formula expression is required.")
 
     names = {}
-    if tokens:
-        for t in tokens:
-            names[t] = 0.0
-
     if field_values:
         for k, v in field_values.items():
             if v is not None and v != "":

@@ -1401,7 +1401,7 @@ def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
                                 preview_warnings.append(f"Cannot calculate — waiting for {dep_name}.")
                     else:
                         try:
-                            preview_val = evaluate_formula(formula_version.expression, preview_field_values, value_set_snapshot, tokens=formula_version.tokens)
+                            preview_val = evaluate_formula(formula_version.expression, preview_field_values, value_set_snapshot)
 
                             # Check if preview relies on unapproved values
                             unapproved_inputs = [t for t in tokens if t not in value_set_snapshot and cell_states.get(t) != "approved_locked"]
@@ -1436,7 +1436,7 @@ def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
                             reportable_warnings.append(f"Input {dep_name} is not approved, preview only.")
                     else:
                         try:
-                            reportable_val = evaluate_formula(formula_version.expression, reportable_field_values, value_set_snapshot, tokens=formula_version.tokens)
+                            reportable_val = evaluate_formula(formula_version.expression, reportable_field_values, value_set_snapshot)
                         except Exception as exc:
                             reportable_status = "evaluation_error"
                             reportable_warnings.append(f"Evaluation error: {str(exc)}")
@@ -2150,7 +2150,7 @@ def autosave_submission_values(submission_id, values_dict, user_id):
                     
                 try:
                     # Run evaluation
-                    result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot, tokens=formula_version.tokens)
+                    result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
                     
                     # Save calculation row
                     calc_row = SubmissionValue.query.filter_by(
