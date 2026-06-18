@@ -417,8 +417,10 @@ document.addEventListener("DOMContentLoaded", function () {
             error: `<span class="inline-flex items-center border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Error</span>`,
           }[rowStatus] || "";
 
+          const _unitSet = new Set(activeFields.map(f => f.unit || "").filter(Boolean));
+          const _displayUnit = _unitSet.size === 1 ? [..._unitSet][0] : "";
           const valueHtml = rowValue !== null
-            ? `<span class="font-bold text-base ${rowStatus === "calculable" ? "text-emerald-700" : "text-blue-700"}">${rowValue}</span>`
+            ? `<span class="font-bold text-base ${rowStatus === "calculable" ? "text-emerald-700" : "text-blue-700"}">${rowValue}</span>${_displayUnit ? `<span class="ml-1 text-xs text-slate-400">${escapeHtml(_displayUnit)}</span>` : ""}`
             : `<span class="text-slate-300">—</span>`;
 
           return `

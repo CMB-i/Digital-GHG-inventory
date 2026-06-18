@@ -1130,6 +1130,7 @@ def compose_package_calculation_results(package_id, user_id):
             "field_name": f"{it['version'].field_name} ({human_sheet_label(it['form'])})",
             "field_type": "calculated",
             "field_config": it["version"].field_config or {},
+            "unit": it["version"].field_config.get("unit") or "" if it["version"].field_config else "",
             "display_order": it["field"].display_order,
             "form_id": it["form"].id,
         }

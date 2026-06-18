@@ -1334,17 +1334,19 @@ document.addEventListener("DOMContentLoaded", function () {
       const formulaSelect = document.getElementById("prop-formula");
       const formulaHint   = document.getElementById("formula-publish-hint");
       const formulaOk     = document.getElementById("formula-status-ok");
+      const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
+      const calcUnitInput = document.getElementById("prop-calc-unit");
       if (formulaSelect && config.formula_version_id) {
         formulaSelect.value = config.formula_version_id;
         if (formulaHint) formulaHint.classList.add("hidden");
         if (formulaOk)   formulaOk.classList.remove("hidden");
+        if (calcUnitWrap)  calcUnitWrap.classList.remove("hidden");
+        if (calcUnitInput) calcUnitInput.value = config.unit || "";
       } else {
-        if (formulaHint) formulaHint.classList.remove("hidden");
-        if (formulaOk)   formulaOk.classList.add("hidden");
-      }
-      const hideCheck = document.getElementById("prop-calculated-hide-entry");
-      if (hideCheck) {
-        hideCheck.checked = !!config.hide_on_entry_sheet;
+        if (formulaHint)   formulaHint.classList.remove("hidden");
+        if (formulaOk)     formulaOk.classList.add("hidden");
+        if (calcUnitWrap)  calcUnitWrap.classList.add("hidden");
+        if (calcUnitInput) calcUnitInput.value = "";
       }
     }
 
@@ -1424,26 +1426,35 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (field.field_type === "calculated") {
       const formulaSelect = document.getElementById("prop-formula");
+      const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
+      const calcUnitInput = document.getElementById("prop-calc-unit");
+
       if (formulaSelect) {
         const formulaVal = formulaSelect.value;
+        const prevFormulaId = field.field_config.formula_version_id;
         field.field_config.formula_version_id = formulaVal ? parseInt(formulaVal) : undefined;
+        field.field_config.unit = calcUnitInput ? calcUnitInput.value.trim() : "";
 
         if (formulaVal) {
-          fetch(`/module/FRMULA/api/version/${formulaVal}`)
-            .then(res => res.json())
-            .then(resData => {
-              field.field_config.expression = resData.version.expression;
-              field.field_config.tokens = resData.version.tokens;
-              renderWorkspace();
-            });
+          const formulaChanged = parseInt(formulaVal) !== prevFormulaId;
+          if (formulaChanged) {
+            field.field_config.unit = "";
+            if (calcUnitInput) calcUnitInput.value = "";
+            if (calcUnitWrap) calcUnitWrap.classList.remove("hidden");
+            fetch(`/module/FRMULA/api/version/${formulaVal}`)
+              .then(res => res.json())
+              .then(resData => {
+                field.field_config.expression = resData.version.expression;
+                field.field_config.tokens = resData.version.tokens;
+                renderWorkspace();
+              });
+          }
         } else {
           field.field_config.expression = "";
           field.field_config.tokens = [];
+          if (calcUnitInput) calcUnitInput.value = "";
+          if (calcUnitWrap) calcUnitWrap.classList.add("hidden");
         }
-      }
-      const hideCheck = document.getElementById("prop-calculated-hide-entry");
-      if (hideCheck) {
-        field.field_config.hide_on_entry_sheet = hideCheck.checked;
       }
     }
 
