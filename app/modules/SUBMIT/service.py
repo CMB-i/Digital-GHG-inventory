@@ -2114,7 +2114,8 @@ def autosave_submission_values(submission_id, values_dict, user_id):
     if not form:
         raise ValueError("Submission form not found.")
 
-    fields = get_form_version_fields(submission.form_version_id)
+    form_version_id = (form.current_version_id if form.current_version_id else None) or submission.form_version_id
+    fields = get_form_version_fields(form_version_id)
     sections = _sections_payload(form)
     fields_map = {}
     for fv, f in fields:

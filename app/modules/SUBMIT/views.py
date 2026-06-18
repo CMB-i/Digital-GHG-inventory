@@ -363,10 +363,13 @@ def autosave_endpoint(submission_id):
         calc_errors = autosave_submission_values(submission_id, values_dict, user.id)
         db.session.commit()
         
-        # Load updated values
+        # Load updated values using the form's current version so that calculated
+        # fields added after the submission was created appear in the response.
         submission = Submission.query.get(submission_id)
+        form = Form.query.get(submission.form_id)
+        current_version_id = (form.current_version_id if form else None) or submission.form_version_id
         db_values = SubmissionValue.query.filter_by(submission_id=submission_id).all()
-        fields = get_form_version_fields(submission.form_version_id)
+        fields = get_form_version_fields(current_version_id)
         
         id_to_code = {f.id: f.field_code for fv, f in fields}
         fields_data = [{"field_id": f.id, "field_code": f.field_code, "field_type": fv.field_type} for fv, f in fields]
