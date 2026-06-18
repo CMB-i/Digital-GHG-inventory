@@ -1257,7 +1257,8 @@ def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
             "field_id": item["field"].id,
             "field_version_id": item["version"].id,
             "field_code": item["field"].field_code,
-            "field_name": f"{item['version'].field_name} ({human_sheet_label(item['form'])})",
+            "field_name": item["version"].field_name,
+            "form_name": human_sheet_label(item["form"]),
             "field_type": "calculated",
             "field_config": item["version"].field_config or {},
             "display_order": item["field"].display_order,
@@ -2130,72 +2131,76 @@ def autosave_submission_values(submission_id, values_dict, user_id):
     
     calculation_errors = {}
     
-    # Calculate each formula
-    for code, info in fields_map.items():
-        if info["field_type"] == "calculated":
-            f_id = info["field_id"]
-            fv_id = info["field_version_id"]
-            formula_ver_id = info["field_config"].get("formula_version_id")
-            
-            if not formula_ver_id:
-                calculation_errors[code] = "Formula is not configured."
-                continue
+    # Calculate each formula with 3 passes to resolve inter-calculated field dependencies
+    for pass_num in range(3):
+        for code, info in fields_map.items():
+            if info["field_type"] == "calculated":
+                f_id = info["field_id"]
+                fv_id = info["field_version_id"]
+                formula_ver_id = info["field_config"].get("formula_version_id")
                 
-            formula_version = FormulaVersion.query.get(formula_ver_id)
-            if not formula_version:
-                calculation_errors[code] = "Formula version not found."
-                continue
-                
-            try:
-                # Run evaluation
-                result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
-                
-                # Save calculation row
-                calc_row = SubmissionValue.query.filter_by(
-                    submission_id=submission_id,
-                    field_id=f_id
-                ).first()
-                
-                if not calc_row:
-                    calc_row = SubmissionValue(
-                        submission_id=submission_id,
-                        field_id=f_id,
-                        field_version_id=fv_id,
-                        created_by=user_id
-                    )
-                    db.session.add(calc_row)
+                if not formula_ver_id:
+                    calculation_errors[code] = "Formula is not configured."
+                    continue
                     
-                calc_row.raw_value = None
-                calc_row.calculated_value = result
-                set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
-                calc_row.formula_version_id = formula_version.id
-                calc_row.formula_eval_at = datetime.now(timezone.utc)
-                
-                # Snapshot tokens and values
-                inputs_snapshot = {}
-                for key in (formula_version.tokens or {}).keys():
-                    if key in field_values:
-                        inputs_snapshot[key] = field_values[key]
-                    elif key in value_set_snapshot:
-                        inputs_snapshot[key] = value_set_snapshot[key]
-                calc_row.formula_inputs_snapshot = inputs_snapshot
-                calc_row.updated_by = user_id
-                
-                # Add calculated value to field_values so subsequent calculations can read it
-                field_values[code] = result
-                
-            except Exception as e:
-                # Log evaluation error and clear previous calculation
-                calc_row = SubmissionValue.query.filter_by(
-                    submission_id=submission_id,
-                    field_id=f_id
-                ).first()
-                if calc_row:
-                    calc_row.calculated_value = None
+                formula_version = FormulaVersion.query.get(formula_ver_id)
+                if not formula_version:
+                    calculation_errors[code] = "Formula version not found."
+                    continue
+                    
+                try:
+                    # Run evaluation
+                    result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
+                    
+                    # Save calculation row
+                    calc_row = SubmissionValue.query.filter_by(
+                        submission_id=submission_id,
+                        field_id=f_id
+                    ).first()
+                    
+                    if not calc_row:
+                        calc_row = SubmissionValue(
+                            submission_id=submission_id,
+                            field_id=f_id,
+                            field_version_id=fv_id,
+                            created_by=user_id
+                        )
+                        db.session.add(calc_row)
+                        
+                    calc_row.raw_value = None
+                    calc_row.calculated_value = result
+                    set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
+                    calc_row.formula_version_id = formula_version.id
                     calc_row.formula_eval_at = datetime.now(timezone.utc)
+                    
+                    # Snapshot tokens and values
+                    inputs_snapshot = {}
+                    for key in (formula_version.tokens or {}).keys():
+                        if key in field_values:
+                            inputs_snapshot[key] = field_values[key]
+                        elif key in value_set_snapshot:
+                            inputs_snapshot[key] = value_set_snapshot[key]
+                    calc_row.formula_inputs_snapshot = inputs_snapshot
                     calc_row.updated_by = user_id
-                calculation_errors[code] = str(e)
-                field_values[code] = None
+                    
+                    # Add calculated value to field_values so subsequent calculations can read it
+                    field_values[code] = result
+                    
+                    # Clear from errors on success
+                    calculation_errors.pop(code, None)
+                    
+                except Exception as e:
+                    # Log evaluation error and clear previous calculation
+                    calc_row = SubmissionValue.query.filter_by(
+                        submission_id=submission_id,
+                        field_id=f_id
+                    ).first()
+                    if calc_row:
+                        calc_row.calculated_value = None
+                        calc_row.formula_eval_at = datetime.now(timezone.utc)
+                        calc_row.updated_by = user_id
+                    calculation_errors[code] = str(e)
+                    field_values[code] = None
                 
     db.session.flush()
     return calculation_errors
