@@ -530,18 +530,12 @@
   function renderFieldHeader(field, isCalcMode) {
     const isCalc = !isCalcMode && normalizedFieldType(field) === "calculated";
     const unit = field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : "";
-    const subLine = isCalc
-      ? `<div class="mt-1 flex items-center gap-1.5 flex-wrap">
-           <span class="workbook-calc-pill">Auto</span>
-           ${unit ? `<span class="text-[10px] normal-case text-slate-300">${unit}</span>` : ""}
-         </div>`
-      : `<div class="mt-0.5 text-[10px] normal-case text-slate-300">
-           ${unit}
-           ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
-         </div>`;
     return `<th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left${isCalc ? " workbook-col-calculated" : ""}">
-      <div class="font-bold text-sm">${escapeHtml(field.field_name)}</div>
-      ${subLine}
+      <div class="font-bold">${escapeHtml(field.field_name)}</div>
+      <div class="mt-0.5 text-[10px] normal-case text-slate-300">
+        ${unit}
+        ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
+      </div>
     </th>`;
   }
 

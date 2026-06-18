@@ -1450,33 +1450,15 @@ body.builder-canvas-active main > div {
 
 /* ── Inline calculated field column styling ────────────────────────── */
 th.workbook-col-calculated {
-  background-color: #202665 !important;   /* indigo-tinted, clearly distinct from navy */
-  border-bottom: 4px solid #818cf8 !important;
-  border-left: 3px solid #818cf8 !important;
+  background-color: #3d4b63 !important;  /* grey-blue, clearly distinct from navy without colour drama */
 }
 
 td.workbook-cell-calculated {
-  background-color: #eef0ff !important;
-  border-left: 3px solid #c7d2fe !important;
+  background-color: #f3f4f6 !important;
   cursor: default;
-}
-
-.workbook-calc-pill {
-  display: inline-flex;
-  align-items: center;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  background-color: rgba(129, 140, 248, 0.3);
-  color: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(129, 140, 248, 0.55);
-  border-radius: 4px;
-  padding: 1px 5px;
 }
 
 .workbook-calc-empty {
   color: #94a3b8;
-  font-style: italic;
 }
 
