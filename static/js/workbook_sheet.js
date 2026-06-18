@@ -392,9 +392,10 @@
       issues,
       disabled && fieldType === "calculated" ? ["Calculated field"] : []
     );
+    const calcCellClass = fieldType === "calculated" ? " workbook-cell-calculated" : "";
 
     return `
-      <td class="border align-top ${stateClass} ${interactiveClass}" data-cell-state="${escapeHtml(state)}" data-has-issues="${issues.length ? "true" : "false"}" data-row-locked="${rowLocked ? "true" : "false"}" data-submission-value-id="${valueId ? escapeHtml(valueId) : ""}" data-field-code="${escapeHtml(field.field_code)}" title="${escapeHtml(stateTitle)}">
+      <td class="border align-top ${stateClass} ${interactiveClass}${calcCellClass}" data-cell-state="${escapeHtml(state)}" data-has-issues="${issues.length ? "true" : "false"}" data-row-locked="${rowLocked ? "true" : "false"}" data-submission-value-id="${valueId ? escapeHtml(valueId) : ""}" data-field-code="${escapeHtml(field.field_code)}" title="${escapeHtml(stateTitle)}">
         <div class="relative min-h-[48px]">
           ${issues.length ? '<span class="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" data-cell-open="true" title="Cell has issues/comments"></span>' : ""}
           ${proof && fieldType !== "file" ? '<span class="absolute bottom-1 left-1 h-1.5 w-1.5 rounded-full bg-indigo-500" title="Proof attached"></span>' : ""}
@@ -614,30 +615,34 @@
           ${!isCalcMode ? '<th rowspan="2" class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
         <tr>
-          ${displayFields.map((field) => `
-            <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left">
-              <div class="font-bold">${escapeHtml(field.field_name)}</div>
+          ${displayFields.map((field) => {
+            const isCalc = !isCalcMode && normalizedFieldType(field) === "calculated";
+            return `
+            <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left${isCalc ? " workbook-col-calculated" : ""}">
+              <div class="font-bold">${escapeHtml(field.field_name)}${isCalc ? '<span class="workbook-calc-pill">ƒ</span>' : ""}</div>
               <div class="mt-0.5 text-[10px] normal-case text-slate-300">
                 ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
                 ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
               </div>
             </th>
-          `).join("")}
+          `}).join("")}
         </tr>
       `;
     } else {
       headEl.innerHTML = `
         <tr>
           <th class="sticky left-0 z-20 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Month</th>
-          ${displayFields.map((field) => `
-            <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left">
-              <div class="font-bold">${escapeHtml(field.field_name)}</div>
+          ${displayFields.map((field) => {
+            const isCalc = !isCalcMode && normalizedFieldType(field) === "calculated";
+            return `
+            <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left${isCalc ? " workbook-col-calculated" : ""}">
+              <div class="font-bold">${escapeHtml(field.field_name)}${isCalc ? '<span class="workbook-calc-pill">ƒ</span>' : ""}</div>
               <div class="mt-0.5 text-[10px] normal-case text-slate-300">
                 ${field.field_config && field.field_config.unit ? escapeHtml(field.field_config.unit) : ""}
                 ${field.field_config && field.field_config.is_required ? '<span class="ml-1 text-rose-400">*</span>' : ""}
               </div>
             </th>
-          `).join("")}
+          `}).join("")}
           ${!isCalcMode ? '<th class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
       `;

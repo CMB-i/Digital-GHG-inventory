@@ -1448,3 +1448,29 @@ body.builder-canvas-active main > div {
   animation: red-pulse 1.8s infinite;
 }
 
+/* ── Inline calculated field column styling ────────────────────────── */
+th.workbook-col-calculated {
+  background-color: #1c3670 !important;
+  border-bottom: 3px solid #818cf8 !important;
+}
+
+td.workbook-cell-calculated {
+  background-color: #f0f2ff !important;
+  cursor: default;
+}
+
+.workbook-calc-pill {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: monospace;
+  background-color: rgba(129, 140, 248, 0.3);
+  color: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(129, 140, 248, 0.5);
+  border-radius: 3px;
+  padding: 0 3px;
+  margin-left: 5px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+
