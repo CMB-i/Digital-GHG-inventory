@@ -69,7 +69,6 @@ document.addEventListener("DOMContentLoaded", function () {
     requestedFormId: paramInt("form_id"),
     requestedMonth: paramInt("month"),
     workbook: null,
-    calculationResults: null,
     dashboardData: null,
     selectedRowKey: null,
     dirtyRows: new Set(),
@@ -183,7 +182,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function setEmpty(title, body) {
     tableWrap.classList.add("hidden");
-    document.getElementById("calculated-results-section").classList.add("hidden");
     formTabs.innerHTML = "";
     emptyTitleEl.textContent = title;
     emptyBodyEl.textContent = body;
@@ -460,13 +458,6 @@ document.addEventListener("DOMContentLoaded", function () {
       } else {
         currentMonthEl.classList.add("hidden");
       }
-    }
-
-    // Set Sheet specific label for Submit button
-    const btnSubmitEl = document.getElementById("btn-submit-sheet");
-    const sheetName = state.workbook ? state.workbook.selected_form.name : "Sheet";
-    if (btnSubmitEl) {
-      btnSubmitEl.textContent = `Submit ${sheetName}`;
     }
 
     // No calc_results case needed anymore
@@ -786,7 +777,6 @@ document.addEventListener("DOMContentLoaded", function () {
     hideAlert();
     const previousRowKey = state.selectedRowKey;
     state.workbook = null;
-    state.calculationResults = null;
     state.dirtyRows.clear();
     state.dirtyWorkbookFields.clear();
     renderFormTabs();
@@ -810,13 +800,8 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     let wbUrl = `/module/SUBMIT/api/annual-workbook?site_id=${state.selectedSiteId}&workbook_id=${state.selectedWorkbookId}&form_id=${state.selectedFormId}&fy=${state.selectedFy}`;
-    let calcUrl = `/module/SUBMIT/api/annual-workbook/calculation-results?site_id=${state.selectedSiteId}&workbook_id=${state.selectedWorkbookId}&fy=${state.selectedFy}`;
 
-    const [wbRes, calcRes] = await Promise.all([
-      fetch(wbUrl),
-      fetch(calcUrl)
-    ]);
-    
+    const wbRes = await fetch(wbUrl);
     const wbData = await parseJsonResponse(wbRes, "Could not load annual workbook.");
     if (!wbRes.ok) {
       const message = wbData.error || "Could not load annual workbook.";
@@ -826,7 +811,6 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     state.workbook = wbData;
-    state.calculationResults = calcRes.ok ? await calcRes.json() : null;
 
     const requestedRow = state.requestedMonth
       ? wbData.rows.find(row => parseInt(row.month) === state.requestedMonth)
@@ -839,7 +823,6 @@ document.addEventListener("DOMContentLoaded", function () {
       : (previousRow ? rowKey(previousRow) : (wbData.rows[0] ? rowKey(wbData.rows[0]) : null));
     
     renderTable();
-    // Calculated results section rendering removed
     renderHeader();
     scrollSelectedRowIntoView();
   }
@@ -984,8 +967,7 @@ document.addEventListener("DOMContentLoaded", function () {
       if (!response.ok) {
         throw new Error(packageSubmitErrorMessage(data));
       }
-      const included = data.data && data.data.included_submissions ? data.data.included_submissions.length : 0;
-      showAlert(`Workbook package submitted for approval. ${included} sheet${included === 1 ? "" : "s"} included.`, "success");
+      showAlert("Workbook submitted for approval.", "success");
       
       // Update sheets status dots data
       const sheetsRes = await fetch("/module/SUBMIT/api/sheets");
@@ -995,8 +977,7 @@ document.addEventListener("DOMContentLoaded", function () {
     } catch (error) {
       showAlert(error.message, "error");
     } finally {
-      const sheetName = state.workbook ? state.workbook.selected_form.name : "Sheet";
-      btnSubmit.textContent = `Submit ${sheetName}`;
+      btnSubmit.textContent = "Submit Workbook";
       renderHeader();
     }
   }
