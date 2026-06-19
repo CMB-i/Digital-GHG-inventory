@@ -236,39 +236,9 @@ document.addEventListener("DOMContentLoaded", function () {
       formTabs.appendChild(button);
     });
 
-    // Add Calculation Results tab button for reviewer
-    const calcButton = document.createElement("button");
-    calcButton.type = "button";
-    calcButton.id = "sheet-tab-calc-results";
-    const calcActive = activeSheetIndex === "calc_results";
-    calcButton.className = `rounded-full border px-3 py-1.5 text-xs font-bold transition ${
-      calcActive
-        ? "border-indigo-200 bg-indigo-50 text-indigo-700"
-        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
-    }`;
-    calcButton.textContent = "Calculation Results";
-    calcButton.onclick = function () {
-      focusSheet("calc_results");
-    };
-    formTabs.appendChild(calcButton);
   }
 
   function focusSheet(index, updateUrl = true) {
-    if (index === "calc_results") {
-      activeSheetIndex = "calc_results";
-      renderTabs();
-      loadCalculationResultsForReview();
-      const activeSheet = document.getElementById("active-sheet");
-      if (activeSheet) {
-        activeSheet.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-      if (updateUrl && window.history && window.history.replaceState) {
-        const url = `/module/APPROV/packages/${packageId}?sheet=calc_results`;
-        window.history.replaceState(null, "", url);
-      }
-      return;
-    }
-
     if (!reviewData || !reviewData.sheets[index]) return;
     activeSheetIndex = index;
     renderTabs();
@@ -284,176 +254,15 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
-  async function loadCalculationResultsForReview() {
-    const card = document.getElementById("sheet-audit-logs-card");
-    if (card) card.classList.add("hidden");
-    sheetTitle.textContent = "Calculation Results";
-    sheetMeta.textContent = "Read-only calculation dashboard for this financial year.";
-    sheetStatus.classList.add("hidden");
-    sheetFallbackLink.classList.add("hidden");
-
-    sheetHead.innerHTML = "";
-    sheetValues.innerHTML = `<tr><td class="px-5 py-8 text-center text-slate-400 text-sm">Loading calculations...</td></tr>`;
-
-    try {
-      const response = await fetch(`/module/APPROV/api/packages/${packageId}/calculation-results`);
-      if (!response.ok) throw new Error("Could not load calculation results.");
-      const payload = await response.json();
-      const data = payload.data || payload;
-
-      const allFields = data.fields || [];
-      const rows = data.rows || [];
-
-      // Group fields by sheet/form
-      const sheetMap = {};
-      allFields.forEach(f => {
-        const key = String(f.form_id);
-        if (!sheetMap[key]) sheetMap[key] = { id: f.form_id, name: f.form_name || ("Sheet " + f.form_id), fields: [] };
-        sheetMap[key].fields.push(f);
-      });
-      const sheets = Object.values(sheetMap);
-      let activeCalcSheet = sheets[0] || null;
-
-      function renderCalcView() {
-        const activeFields = activeCalcSheet ? activeCalcSheet.fields : [];
-
-        // Summary counts
-        let approvedTotal = null, previewTotal = null, cannotCalcCount = 0, needsInputCount = 0;
-        rows.forEach(row => {
-          activeFields.forEach(field => {
-            const cell = row.values ? row.values[field.field_code] : null;
-            if (!cell) { cannotCalcCount++; return; }
-            if (cell.status === "calculable") {
-              approvedTotal = (approvedTotal || 0) + Number(cell.reportable_value || 0);
-            } else if (cell.status === "pending_approval" || cell.status === "preview_only") {
-              previewTotal = (previewTotal || 0) + Number(cell.preview_value || 0);
-            } else if (cell.status === "missing_input") {
-              needsInputCount++;
-            } else if (cell.status === "not_configured") {
-              cannotCalcCount++;
-            }
-          });
-        });
-
-        // Build summary + sheet tabs + table into sheetHead/sheetValues
-        sheetHead.innerHTML = `
-          <tr>
-            <td colspan="3" class="px-0 py-0 border-0">
-              <div class="flex gap-6 px-5 py-4 border-b border-slate-200">
-                <div class="flex flex-col gap-0.5">
-                  <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Approved Total</div>
-                  <div class="text-2xl font-bold text-emerald-700">${approvedTotal !== null ? approvedTotal : "—"}</div>
-                </div>
-                <div class="w-px bg-slate-200 self-stretch"></div>
-                <div class="flex flex-col gap-0.5">
-                  <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Preview Total</div>
-                  <div class="text-2xl font-bold text-blue-700">${previewTotal !== null ? previewTotal : "—"}</div>
-                </div>
-                <div class="w-px bg-slate-200 self-stretch"></div>
-                <div class="flex flex-col gap-0.5">
-                  <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Cannot Calculate</div>
-                  <div class="text-2xl font-bold text-amber-700">${cannotCalcCount}</div>
-                </div>
-                <div class="w-px bg-slate-200 self-stretch"></div>
-                <div class="flex flex-col gap-0.5">
-                  <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Needs Input</div>
-                  <div class="text-2xl font-bold text-amber-700">${needsInputCount}</div>
-                </div>
-              </div>
-              ${sheets.length > 1 ? `
-              <div class="flex gap-2 px-5 py-3 border-b border-slate-200">
-                ${sheets.map(s => `
-                  <button type="button" data-sheet-id="${s.id}" class="calc-sheet-tab workbook-tab whitespace-nowrap ${String(s.id) === String(activeCalcSheet && activeCalcSheet.id) ? "workbook-tab-active" : "workbook-tab-inactive"}">
-                    ${escapeHtml(s.name)}
-                  </button>
-                `).join("")}
-              </div>` : ""}
-            </td>
-          </tr>
-          <tr>
-            <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider w-32">Month</th>
-            <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider">Result</th>
-            <th class="border border-slate-200 bg-[#1a3a6b] text-white px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider w-36">Status</th>
-          </tr>
-        `;
-
-        // Bind sheet tab clicks
-        sheetHead.querySelectorAll(".calc-sheet-tab").forEach(btn => {
-          btn.addEventListener("click", function() {
-            activeCalcSheet = sheetMap[btn.dataset.sheetId] || activeCalcSheet;
-            renderCalcView();
-          });
-        });
-
-        // Rows
-        const currentMonth = reviewData && reviewData.package ? reviewData.package.month : null;
-        sheetValues.innerHTML = rows.map(row => {
-          const isActive = row.month === currentMonth || row.is_active_period;
-          const monthLabel = row.label || row.period_label ||
-            (row.month ? ["","January","February","March","April","May","June","July","August","September","October","November","December"][parseInt(row.month)] + " " + row.year : "—");
-
-          let rowValue = null, rowStatus = row.period_id ? "missing_input" : "no_period";
-          activeFields.forEach(field => {
-            const cell = row.values ? row.values[field.field_code] : null;
-            if (!cell) return;
-            if (cell.status === "calculable") {
-              rowValue = (rowValue || 0) + Number(cell.reportable_value || 0);
-              rowStatus = "calculable";
-            } else if ((cell.status === "pending_approval" || cell.status === "preview_only") && rowStatus !== "calculable") {
-              rowValue = (rowValue || 0) + Number(cell.preview_value || 0);
-              rowStatus = "preview";
-            } else if (cell.status === "missing_input" && rowStatus !== "calculable" && rowStatus !== "preview") {
-              rowStatus = "missing_input";
-            } else if (cell.status === "evaluation_error") {
-              rowStatus = "error";
-            }
-          });
-
-          const badge = {
-            calculable: `<span class="inline-flex items-center border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Approved</span>`,
-            preview: `<span class="inline-flex items-center border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">Preview</span>`,
-            missing_input: `<span class="inline-flex items-center border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">Cannot calculate</span>`,
-            no_period: `<span class="inline-flex items-center border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500">Period missing</span>`,
-            error: `<span class="inline-flex items-center border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Error</span>`,
-          }[rowStatus] || "";
-
-          const _unitSet = new Set(activeFields.map(f => f.unit || "").filter(Boolean));
-          const _displayUnit = _unitSet.size === 1 ? [..._unitSet][0] : "";
-          const valueHtml = rowValue !== null
-            ? `<span class="font-bold text-base ${rowStatus === "calculable" ? "text-emerald-700" : "text-blue-700"}">${rowValue}</span>${_displayUnit ? `<span class="ml-1 text-xs text-slate-400">${escapeHtml(_displayUnit)}</span>` : ""}`
-            : `<span class="text-slate-300">—</span>`;
-
-          return `
-            <tr class="border-b border-slate-100 ${isActive ? "font-semibold" : ""}">
-              <td class="border border-slate-200 px-4 py-2.5 text-sm ${isActive ? "text-slate-900" : "text-slate-500"}">${escapeHtml(monthLabel)}</td>
-              <td class="border border-slate-200 px-4 py-2.5">${valueHtml}</td>
-              <td class="border border-slate-200 px-4 py-2.5">${badge}</td>
-            </tr>
-          `;
-        }).join("");
-      }
-
-      renderCalcView();
-
-    } catch (err) {
-      sheetHead.innerHTML = "";
-      sheetValues.innerHTML = `<tr><td colspan="3" class="px-5 py-4 text-rose-500 font-bold">${escapeHtml(err.message)}</td></tr>`;
-    }
-  }
-
   function renderReview(data) {
     reviewData = data;
     const pkg = data.package;
     if (requestedSheet) {
-      if (requestedSheet === "calc_results") {
-        activeSheetIndex = "calc_results";
-      } else {
-        const requestedIndex = data.sheets.findIndex((sheet) => (
-          String(sheet.form_id) === String(requestedSheet) ||
-          String(sheet.submission_id) === String(requestedSheet)
-        ));
-        if (requestedIndex >= 0) activeSheetIndex = requestedIndex;
-      }
+      const requestedIndex = data.sheets.findIndex((sheet) => (
+        String(sheet.form_id) === String(requestedSheet) ||
+        String(sheet.submission_id) === String(requestedSheet)
+      ));
+      if (requestedIndex >= 0) activeSheetIndex = requestedIndex;
     }
 
     reviewTitle.textContent = `${pkg.period_label} · ${pkg.site_name}`;
@@ -470,17 +279,13 @@ document.addEventListener("DOMContentLoaded", function () {
     reviewLoading.classList.add("hidden");
     renderLegend();
     renderTabs();
-    if (activeSheetIndex === "calc_results") {
-      loadCalculationResultsForReview();
-    } else {
-      renderSheet(data.sheets[activeSheetIndex] || data.sheets[0]);
-    }
+    renderSheet(data.sheets[activeSheetIndex] || data.sheets[0]);
     renderActions(pkg);
     reviewContent.classList.remove("hidden");
   }
 
   function activeSheet() {
-    return reviewData && reviewData.sheets && activeSheetIndex !== "calc_results" ? reviewData.sheets[activeSheetIndex] : null;
+    return reviewData && reviewData.sheets ? reviewData.sheets[activeSheetIndex] : null;
   }
 
   function activeField(fieldCode) {
