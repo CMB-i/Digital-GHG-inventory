@@ -401,7 +401,7 @@ def notify_spoc(submission_id, event_type, message):
 
     from app.modules.APPROV.model import ApprovalAction
     last_action = ApprovalAction.query.filter_by(submission_id=submission_id).order_by(ApprovalAction.created_at.desc()).first()
-    reason = last_action.comments if last_action else ""
+    reason = last_action.comment if last_action else ""
 
     event_upper = event_type.upper()
     mapping = {
