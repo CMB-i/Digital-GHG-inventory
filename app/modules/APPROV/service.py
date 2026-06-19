@@ -1050,6 +1050,7 @@ def compose_package_calculation_results(package_id, user_id):
         human_sheet_label,
         format_period_label,
         get_approved_valsets_snapshot,
+        is_sheet_result_field,
     )
 
     package = SubmissionPackage.query.get(package_id)
@@ -1114,7 +1115,10 @@ def compose_package_calculation_results(package_id, user_id):
     for form, _ in assigned:
         for fv, f in get_form_version_fields(form.current_version_id):
             field_code_to_name[f.field_code] = fv.field_name
-            if fv.field_type == "calculated":
+            if fv.field_type == "calculated" and not is_sheet_result_field({
+                "field_type": fv.field_type,
+                "field_config": fv.field_config or {},
+            }):
                 calculated_fields.append({"field": f, "version": fv, "form": form})
 
     calculated_fields.sort(

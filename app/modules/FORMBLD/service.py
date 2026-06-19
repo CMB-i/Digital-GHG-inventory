@@ -15,6 +15,7 @@ def is_formula_compatible_field(field_version):
     ).lower()
     return (
         field_type in NUMERIC_FIELD_TYPES
+        or field_type == "calculated"
         or configured_type in NUMERIC_FIELD_TYPES
         or config.get("is_numeric") is True
     )
@@ -358,6 +359,38 @@ def save_form_sections(form_id, sections_list, user_id):
     db.session.flush()
     return saved_sections
 
+def normalize_calculated_field_config(field_type, field_config, frequency):
+    config = dict(field_config or {})
+    normalized_type = (field_type or "").strip().lower()
+    normalized_frequency = (frequency or "monthly").strip().lower()
+
+    if normalized_type != "calculated":
+        return config, normalized_frequency
+
+    is_annual_result = (
+        config.get("field_scope") == "annual_result"
+        or config.get("result_role") in ("aggregate_result", "formula_result")
+        or config.get("display_region") == "below_monthly_table"
+    )
+
+    if is_annual_result:
+        normalized_frequency = "annual"
+        config["field_scope"] = "annual_result"
+        config["result_role"] = "aggregate_result"
+        config["display_region"] = "below_monthly_table"
+        config["blank_policy"] = config.get("blank_policy") or "strict"
+        config["is_required"] = False
+        config["remarks_required"] = False
+        config["proof_required"] = False
+    else:
+        normalized_frequency = "monthly"
+        config.setdefault("field_scope", "monthly")
+        config.setdefault("result_role", "monthly_calculated")
+        config.setdefault("display_region", "monthly_table")
+        config.pop("blank_policy", None)
+
+    return config, normalized_frequency
+
 def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=None):
     form_version = FormVersion.query.get(form_version_id)
     if not form_version:
@@ -419,6 +452,7 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
             raise ValueError("Field name is required.")
         if not field_type or not field_type.strip():
             raise ValueError("Field type is required.")
+        field_config, frequency = normalize_calculated_field_config(field_type, field_config, frequency)
         if frequency not in ALLOWED_FIELD_FREQUENCIES:
             raise ValueError(f"Unsupported field frequency '{frequency}'.")
 

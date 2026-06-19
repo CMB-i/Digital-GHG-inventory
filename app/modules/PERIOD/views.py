@@ -28,6 +28,18 @@ MODULE_CODE = "PERIOD"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
 
 
+def _period_filter_args(source=None):
+    source = source or request.args
+    site_id = source.get("site_id", type=int)
+    status = (source.get("status") or "").strip()
+    args = {}
+    if site_id:
+        args["site_id"] = site_id
+    if status in VALID_STATUSES:
+        args["status"] = status
+    return args
+
+
 @bp.route("/")
 @require_permission("period", "view")
 def index():
@@ -96,6 +108,7 @@ def index():
     return render_template(
         "modules/PERIOD/periods.html",
         module_code=MODULE_CODE,
+        period_filter_args=_period_filter_args(),
         month_groups=month_groups,
         sites=sites,
         site_map=site_map,
@@ -132,14 +145,14 @@ def create():
         notify_period_open_for_entry(period.id)
         db.session.commit()
         flash("Reporting period opened.", "success")
-        return redirect(url_for("period.index"))
+        return redirect(url_for("period.index", **_period_filter_args()))
     except ValidationError as error:
         db.session.rollback()
         flash(str(error), "error")
     except Exception:
         db.session.rollback()
         flash("Could not open reporting period.", "error")
-    return redirect(url_for("period.index", drawer="create"))
+    return redirect(url_for("period.index", drawer="create", **_period_filter_args()))
 
 
 @bp.route("/bulk-open", methods=["POST"])
@@ -151,7 +164,7 @@ def bulk_open_periods():
 
     if not year or not month or not (1 <= month <= 12) or not (2000 <= year <= 2100):
         flash("Invalid reporting month.", "error")
-        return redirect(url_for("period.index"))
+        return redirect(url_for("period.index", **_period_filter_args()))
 
     sites = Site.query.filter_by(is_deleted=False).all()
     site_ids = [s.id for s in sites]
@@ -174,7 +187,7 @@ def bulk_open_periods():
         db.session.rollback()
         flash("Could not open reporting periods.", "error")
 
-    return redirect(url_for("period.index"))
+    return redirect(url_for("period.index", **_period_filter_args()))
 
 
 @bp.route("/<int:period_id>/transition", methods=["POST"])
@@ -187,7 +200,7 @@ def transition(period_id):
     required_action = TRANSITION_ACTION.get(target_status)
     if not required_action or not has_permission(actor.id, "period", required_action):
         flash("You do not have permission for this transition.", "error")
-        return redirect(url_for("period.index"))
+        return redirect(url_for("period.index", **_period_filter_args()))
 
     try:
         period = transition_period(
@@ -206,4 +219,4 @@ def transition(period_id):
     except Exception:
         db.session.rollback()
         flash("Could not update period status.", "error")
-    return redirect(url_for("period.index"))
+    return redirect(url_for("period.index", **_period_filter_args()))

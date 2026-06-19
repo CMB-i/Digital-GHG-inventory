@@ -10,6 +10,39 @@ ALLOWED_FORMULA_FUNCTIONS = {
     "max": max,
 }
 
+AGGREGATE_FORMULA_FUNCTIONS = {"SUM_MONTHS"}
+
+
+def sum_months(values):
+    if values is None:
+        raise FormulaValidationError("SUM_MONTHS requires monthly values.")
+    if not isinstance(values, (list, tuple)):
+        raise FormulaValidationError("SUM_MONTHS can only aggregate a monthly field.")
+
+    total = 0.0
+    for value in values:
+        if value in (None, ""):
+            raise FormulaValidationError("SUM_MONTHS cannot calculate while a month is blank.")
+        try:
+            total += float(value)
+        except (TypeError, ValueError) as error:
+            raise FormulaValidationError("SUM_MONTHS requires numeric monthly values.") from error
+    return total
+
+
+ALLOWED_FORMULA_FUNCTIONS["SUM_MONTHS"] = sum_months
+
+
+def aggregate_operand_names(expression):
+    import re
+
+    cleaned_expression = expression or ""
+    names = set()
+    for helper in AGGREGATE_FORMULA_FUNCTIONS:
+        pattern = rf"\b{helper}\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)"
+        names.update(re.findall(pattern, cleaned_expression))
+    return names
+
 
 class FormulaValidationError(ValueError):
     pass
@@ -20,8 +53,14 @@ def validate_formula(expression, operand_names):
     if not cleaned_expression:
         raise FormulaValidationError("Formula expression is required.")
 
+    aggregate_names = aggregate_operand_names(cleaned_expression)
+    names = {
+        name: ([1.0] * 12 if name in aggregate_names else 1.0)
+        for name in operand_names
+    }
+
     evaluator = SimpleEval(
-        names={name: 1.0 for name in operand_names},
+        names=names,
         functions=ALLOWED_FORMULA_FUNCTIONS,
     )
     try:
@@ -29,9 +68,9 @@ def validate_formula(expression, operand_names):
     except NameNotDefined as error:
         raise FormulaValidationError(f"Unknown formula field: {error}.") from error
     except FunctionNotDefined as error:
-        raise FormulaValidationError("Only min() and max() functions are supported.") from error
+        raise FormulaValidationError("Only min(), max(), and SUM_MONTHS() functions are supported.") from error
     except TypeError as error:
-        raise FormulaValidationError("min() and max() require numeric operands.") from error
+        raise FormulaValidationError("Formula functions require numeric operands.") from error
     except ZeroDivisionError:
         raise FormulaValidationError("Division by zero in formula.")
     except Exception as error:
@@ -58,6 +97,8 @@ def evaluate_formula(expression, field_values, value_set_snapshot=None):
 
     if value_set_snapshot:
         for k, v in value_set_snapshot.items():
+            if k in names:
+                continue
             if v is not None and v != "":
                 try:
                     names[k] = float(v)
@@ -73,9 +114,9 @@ def evaluate_formula(expression, field_values, value_set_snapshot=None):
     except NameNotDefined as error:
         raise FormulaValidationError(f"Unknown formula variable: {error}.") from error
     except FunctionNotDefined as error:
-        raise FormulaValidationError("Only min() and max() functions are supported.") from error
+        raise FormulaValidationError("Only min(), max(), and SUM_MONTHS() functions are supported.") from error
     except TypeError as error:
-        raise FormulaValidationError("min() and max() require numeric operands.") from error
+        raise FormulaValidationError("Formula functions require numeric operands.") from error
     except ZeroDivisionError:
         raise FormulaValidationError("Division by zero in formula.")
     except Exception as error:

@@ -22,7 +22,7 @@ from app.modules.SUBMIT.model import (
     SubmissionPackage,
 )
 from app.modules.FRMULA.model import FormulaVersion
-from app.modules.FRMULA.service import evaluate_formula
+from app.modules.FRMULA.service import aggregate_operand_names, evaluate_formula
 from app.modules.WFLWBLD.model import Workflow
 from app.modules.WFLWBLD.service import (
     find_next_applicable_level,
@@ -547,7 +547,21 @@ def _normalized_field_type(value):
     return (value or "").strip().lower()
 
 
+def is_sheet_result_field(field):
+    config = field.get("field_config") or {}
+    return (
+        _normalized_field_type(field.get("field_type")) == "calculated"
+        and (
+            config.get("field_scope") == "annual_result"
+            or config.get("result_role") in ("aggregate_result", "formula_result")
+            or config.get("display_region") == "below_monthly_table"
+        )
+    )
+
+
 def is_non_monthly_field(field, sections):
+    if is_sheet_result_field(field):
+        return True
     if _normalized_frequency(field.get("frequency")) in ("annual", "static"):
         return True
     section = _section_by_id(sections).get(field.get("section_id"))
@@ -959,6 +973,138 @@ def _compute_preview_calculated_values(submissions, fields):
     return result
 
 
+def _coerce_sheet_result_number(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, dict):
+        if value.get("calculated_value") not in (None, ""):
+            value = value.get("calculated_value")
+        elif value.get("raw_value") not in (None, ""):
+            value = value.get("raw_value")
+        else:
+            return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _monthly_series_for_results(rows, monthly_fields):
+    series = {}
+    labels = {}
+    for field in monthly_fields:
+        code = field.get("field_code")
+        if not code or _normalized_field_type(field.get("field_type")) == "file":
+            continue
+        values = []
+        missing_labels = []
+        for row in rows:
+            raw_value = (row.get("values") or {}).get(code)
+            coerced = _coerce_sheet_result_number(raw_value)
+            values.append(coerced)
+            if coerced is None:
+                missing_labels.append(row.get("label") or row.get("period_label") or "a month")
+        series[code] = values
+        labels[code] = missing_labels
+    return series, labels
+
+
+def _compose_sheet_results(result_fields, monthly_fields, rows):
+    if not result_fields:
+        return []
+
+    value_set_snapshot = get_approved_valsets_snapshot()
+    monthly_series, missing_by_code = _monthly_series_for_results(rows, monthly_fields)
+    result_values = {}
+    results_by_code = {}
+
+    formula_version_ids = [
+        (field.get("field_config") or {}).get("formula_version_id")
+        for field in result_fields
+        if (field.get("field_config") or {}).get("formula_version_id")
+    ]
+    formula_versions = {
+        fv.id: fv
+        for fv in FormulaVersion.query.filter(FormulaVersion.id.in_(formula_version_ids or [0])).all()
+    }
+
+    for _pass in range(3):
+        for field in result_fields:
+            code = field["field_code"]
+            config = field.get("field_config") or {}
+            formula_version_id = config.get("formula_version_id")
+            previous = results_by_code.get(code)
+            if previous and previous.get("status") == "calculated":
+                continue
+
+            if not formula_version_id:
+                results_by_code[code] = {
+                    "status": "not_configured",
+                    "message": "Formula is not configured.",
+                }
+                continue
+
+            formula_version = formula_versions.get(formula_version_id)
+            if not formula_version:
+                results_by_code[code] = {
+                    "status": "not_configured",
+                    "message": "Formula version not found.",
+                }
+                continue
+
+            aggregate_names = aggregate_operand_names(formula_version.expression)
+            missing_messages = []
+            context_values = dict(result_values)
+
+            for name in aggregate_names:
+                if name not in monthly_series:
+                    missing_messages.append(f"Monthly field '{name}' is not available in this sheet.")
+                    continue
+                missing_months = missing_by_code.get(name) or []
+                if config.get("blank_policy", "strict") == "strict" and missing_months:
+                    preview = ", ".join(missing_months[:3])
+                    suffix = "..." if len(missing_months) > 3 else ""
+                    missing_messages.append(f"{name} is missing for {preview}{suffix}.")
+                context_values[name] = monthly_series[name]
+
+            if missing_messages:
+                results_by_code[code] = {
+                    "status": "needs_input",
+                    "message": "Cannot calculate: " + " ".join(missing_messages),
+                }
+                continue
+
+            try:
+                result = evaluate_formula(formula_version.expression, context_values, value_set_snapshot)
+                result_values[code] = result
+                results_by_code[code] = {
+                    "status": "calculated",
+                    "value": result,
+                    "message": "",
+                }
+            except Exception as exc:
+                results_by_code[code] = {
+                    "status": "error",
+                    "message": str(exc),
+                }
+
+    sheet_results = []
+    for field in result_fields:
+        config = field.get("field_config") or {}
+        result = results_by_code.get(field["field_code"], {})
+        value = result.get("value")
+        sheet_results.append({
+            "field_id": field["field_id"],
+            "field_code": field["field_code"],
+            "label": field["field_name"],
+            "value": value,
+            "unit": config.get("unit") or field.get("unit") or "",
+            "status": result.get("status") or "error",
+            "message": result.get("message") or "",
+        })
+    return sheet_results
+
+
 def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, selected_form_id=None):
     try:
         site_id = int(site_id)
@@ -980,6 +1126,8 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
     workbook_form, form = _require_form_in_workbook(workbook.id, selected_id)
 
     fields = _field_payload(form.current_version_id)
+    sheet_result_fields = [field for field in fields if is_sheet_result_field(field)]
+    monthly_fields = [field for field in fields if not is_sheet_result_field(field)]
     sections = _sections_payload(form)
     months = _fy_months(fy_start_year)
     can_edit_monthly = (
@@ -1008,14 +1156,14 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
         for submission in submissions
     }
 
-    calc_preview = _compute_preview_calculated_values(list(submissions), fields)
+    calc_preview = _compute_preview_calculated_values(list(submissions), monthly_fields)
 
     rows = []
     for item in months:
         period = period_by_key.get((item["year"], item["month"]))
         submission = submission_by_period.get(period.id) if period else None
         editability = _row_editability(period, submission, can_edit_monthly)
-        values = _submission_values_payload(submission, fields)
+        values = _submission_values_payload(submission, monthly_fields)
         if submission and submission.id in calc_preview:
             for code, preview_val in calc_preview[submission.id].items():
                 if preview_val is not None and values.get(code) in (None, ""):
@@ -1035,9 +1183,11 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
             ),
             "editability": editability,
             "values": values,
-            "issues": submission_value_issues_by_field(submission, fields),
+            "issues": submission_value_issues_by_field(submission, monthly_fields),
             "is_active_period": bool(period and period.status in ("OPEN", "REOPENED")),
         })
+
+    sheet_results = _compose_sheet_results(sheet_result_fields, monthly_fields, rows)
 
     return {
         "financial_year": {
@@ -1063,9 +1213,10 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
             "code": form.code,
             "workflow_id": workbook.workflow_id,
         },
-        "fields": fields,
+        "fields": monthly_fields,
         "sections": sections,
         "workbook_values": workbook_values_payload(site.id, form.id, fy_start_year, fields),
+        "sheet_results": sheet_results,
         "rows": rows,
     }
 
@@ -1181,6 +1332,7 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
         raise ValueError("Published form not found.")
 
     fields = _field_payload(form_version_id or form.current_version_id)
+    monthly_fields = [field for field in fields if not is_sheet_result_field(field)]
     sections = _sections_payload(form)
     months = _fy_months(fy_start_year)
     month_keys = [(item["year"], item["month"]) for item in months]
@@ -1221,7 +1373,7 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
                 if submission and (submission.updated_at or submission.created_at)
                 else None
             ),
-            "values": submission_values_review_payload(submission, fields),
+            "values": submission_values_review_payload(submission, monthly_fields),
             "proofs": submission_proofs_payload(submission),
             "editable": False,
             "is_active_period": bool(period and active_period_id and period.id == active_period_id),
@@ -1242,7 +1394,7 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
             "name": human_sheet_label(form),
             "code": form.code,
         },
-        "fields": fields,
+        "fields": monthly_fields,
         "sections": sections,
         "workbook_values": workbook_values_payload(site.id, form.id, fy_start_year, fields),
         "rows": rows,
@@ -1314,7 +1466,10 @@ def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
         fields = get_form_version_fields(form.current_version_id)
         for fv, f in fields:
             field_code_to_name[f.field_code] = fv.field_name
-            if fv.field_type == "calculated":
+            if fv.field_type == "calculated" and not is_sheet_result_field({
+                "field_type": fv.field_type,
+                "field_config": fv.field_config or {},
+            }):
                 calculated_fields.append({
                     "field": f,
                     "version": fv,
@@ -2123,7 +2278,9 @@ def autosave_submission_values(submission_id, values_dict, user_id):
             "field_id": f.id,
             "field_version_id": fv.id,
             "field_type": fv.field_type,
-            "field_config": fv.field_config or {}
+            "field_config": fv.field_config or {},
+            "frequency": fv.frequency or "monthly",
+            "section_id": fv.section_id,
         }
         
     # Save input values
@@ -2213,7 +2370,7 @@ def autosave_submission_values(submission_id, values_dict, user_id):
     # Calculate each formula with 3 passes to resolve inter-calculated field dependencies
     for pass_num in range(3):
         for code, info in fields_map.items():
-            if info["field_type"] == "calculated":
+            if info["field_type"] == "calculated" and not is_sheet_result_field(info):
                 f_id = info["field_id"]
                 fv_id = info["field_version_id"]
                 formula_ver_id = info["field_config"].get("formula_version_id")
@@ -2358,7 +2515,9 @@ def submit_submission(submission_id, user_id):
                 continue
                 
         # 3. Calculation errors check
-        if fv.field_type == "calculated":
+        if fv.field_type == "calculated" and not is_sheet_result_field(
+            {"field_type": fv.field_type, "field_config": config}
+        ):
             if not val_obj or val_obj.calculated_value is None:
                 validation_errors[f.field_code] = f"Calculated value is missing or has formula errors."
                 continue

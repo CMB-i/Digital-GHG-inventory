@@ -306,6 +306,14 @@
 
               <section id="prop-section-calculated" class="space-y-3 rounded-lg border border-slate-100 bg-white p-3 hidden">
                 <h3 class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Formula</h3>
+                <div>
+                  <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Calculation placement</label>
+                  <select id="prop-calc-placement" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
+                    <option value="monthly">Per-month table cell</option>
+                    <option value="annual_result">Sheet/FY result below table</option>
+                  </select>
+                  <p class="mt-1 text-[10px] text-slate-400">Sheet/FY results are read-only formula outputs shown below the real sheet table.</p>
+                </div>
                 <select id="prop-formula" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
                   <option value="">Select a formula...</option>
                 </select>

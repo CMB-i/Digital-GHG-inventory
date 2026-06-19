@@ -10,7 +10,7 @@
       <p class="mt-1 text-sm text-slate-500">Open, close, lock, or reopen reporting months by site.</p>
     </div>
     {% if perm_create %}
-    <a class="action-button btn-primary" href="{{ url_for('period.index', drawer='create') }}">Open Period</a>
+    <a class="action-button btn-primary" href="{{ url_for('period.index', drawer='create', **period_filter_args) }}">Open Period</a>
     {% endif %}
   </div>
 
@@ -106,7 +106,7 @@
                 </div>
                 {% if perm_create and group.can_bulk_open and not filter_site_id and not filter_status %}
                 <form class="bulk-open-form inline" method="post"
-                      action="{{ url_for('period.bulk_open_periods') }}"
+                      action="{{ url_for('period.bulk_open_periods', **period_filter_args) }}"
                       data-confirm="Open {{ group.missing_count }} reporting period(s) for active sites that do not yet have a period for {{ group.month_name }} {{ group.year }}?">
                   <input type="hidden" name="year" value="{{ group.year }}">
                   <input type="hidden" name="month" value="{{ group.month }}">
@@ -147,7 +147,7 @@
                   {% if perm_reopen %}
                   <button class="action-button action-button-secondary reopen-button"
                           data-period-id="{{ period.id }}"
-                          data-transition-url="{{ url_for('period.transition', period_id=period.id) }}"
+                          data-transition-url="{{ url_for('period.transition', period_id=period.id, **period_filter_args) }}"
                           data-period-label="{{ group.month_name }} {{ group.year }}{% if site %} — {{ site.name }}{% endif %}"
                           type="button">Reopen</button>
                   {% else %}
@@ -158,7 +158,7 @@
                   <form class="period-transition-form inline"
                         data-confirm="Move {{ site.name if site else 'this site' }} ({{ group.month_name }} {{ group.year }}) to '{{ status_labels.get(next_status, next_status) }}'?"
                         method="post"
-                        action="{{ url_for('period.transition', period_id=period.id) }}">
+                        action="{{ url_for('period.transition', period_id=period.id, **period_filter_args) }}">
                     <input type="hidden" name="target_status" value="{{ next_status }}">
                     <button class="action-button {% if period.status == 'REOPENED' %}btn-outline{% else %}btn-neutral{% endif %}" type="submit">
                       {{ transition_labels.get(period.status, "Advance") }}
@@ -229,11 +229,11 @@
       <p class="mt-1 text-sm text-slate-600">Open a new monthly reporting period for a site.</p>
     </div>
     <a class="action-button action-button-secondary"
-       href="{{ url_for('period.index') }}">Cancel</a>
+       href="{{ url_for('period.index', **period_filter_args) }}">Cancel</a>
   </div>
   <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5"
         method="post"
-        action="{{ url_for('period.create') }}">
+        action="{{ url_for('period.create', **period_filter_args) }}">
     <div>
       <label class="text-xs font-medium text-slate-600" for="create_site_id">Site</label>
       <select class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
@@ -273,7 +273,7 @@
     </div>
     <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
       <a class="action-button action-button-secondary"
-         href="{{ url_for('period.index') }}">Cancel</a>
+         href="{{ url_for('period.index', **period_filter_args) }}">Cancel</a>
       <button class="action-button action-button-primary" type="submit">Open Period</button>
     </div>
   </form>
