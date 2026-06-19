@@ -177,6 +177,15 @@
   }
 
   function isFieldNonMonthly(field, options) {
+    const config = field && field.field_config ? field.field_config : {};
+    if (
+      config.field_scope === "annual_result" ||
+      config.result_role === "aggregate_result" ||
+      config.result_role === "formula_result" ||
+      config.display_region === "below_monthly_table"
+    ) {
+      return true;
+    }
     const frequency = normalizedFrequency(field);
     if (frequency === "annual" || frequency === "static") {
       return true;

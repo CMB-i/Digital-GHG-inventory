@@ -61,6 +61,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnMoveDown = document.getElementById("btn-move-down");
   const propSection = document.getElementById("prop-section");
   const propFrequency = document.getElementById("prop-frequency");
+  const propCalcPlacement = document.getElementById("prop-calc-placement");
   const dropdownOptionsList = document.getElementById("dropdown-options-list");
   const btnAddDropdownOption = document.getElementById("btn-add-dropdown-option");
 
@@ -164,6 +165,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function isPreviewNonMonthlyField(field, context) {
+    if (isSheetResultField(field)) return true;
     if (window.WorkbookSheet && typeof window.WorkbookSheet.isFieldNonMonthly === "function") {
       return window.WorkbookSheet.isFieldNonMonthly(field, context);
     }
@@ -172,6 +174,29 @@ document.addEventListener("DOMContentLoaded", function () {
     const section = (context.sections || []).find(item => item.id === field.section_id);
     const layoutType = String((section && section.layout_type) || "monthly_table").trim().toLowerCase();
     return layoutType === "annual_table" || layoutType === "reference_table";
+  }
+
+  function isSheetResultField(field) {
+    const config = field && field.field_config ? field.field_config : {};
+    return (
+      field &&
+      field.field_type === "calculated" &&
+      (
+        config.field_scope === "annual_result" ||
+        config.result_role === "aggregate_result" ||
+        config.result_role === "formula_result" ||
+        config.display_region === "below_monthly_table"
+      )
+    );
+  }
+
+  function setResultFieldWorkflowControls(isResult) {
+    ["prop-required", "prop-remarks-req", "prop-proof-req"].forEach(id => {
+      const input = document.getElementById(id);
+      if (!input) return;
+      input.disabled = isResult || !builderIsEditable;
+      if (isResult) input.checked = false;
+    });
   }
 
   function dropdownSelectHtml(field) {
@@ -913,6 +938,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // --- Step 2 Layout Canvas Logic ---
   function loadVersionDetails(versionId) {
+    const fieldCodeToRestore = selectedFieldCode;
     closeInspector();
     publishErrors.classList.add("hidden");
 
@@ -923,6 +949,9 @@ document.addEventListener("DOMContentLoaded", function () {
         currentVersionStatus = data.version.status;
         currentFields = data.fields || [];
         currentSections = data.sections || [];
+        if (!pendingPrefill && fieldCodeToRestore && currentFields.some(field => field.field_code === fieldCodeToRestore)) {
+          selectedFieldCode = fieldCodeToRestore;
+        }
         availableValueSets = data.available_value_sets || [];
         availableFormulas = data.available_formulas || [];
         if (activeSectionCode && !currentSections.some(section => section.code === activeSectionCode)) {
@@ -977,6 +1006,8 @@ document.addEventListener("DOMContentLoaded", function () {
               }
             }
           }
+        } else if (selectedFieldCode && currentFields.some(field => field.field_code === selectedFieldCode)) {
+          openInspector(selectedFieldCode);
         }
 
       })
@@ -1182,6 +1213,7 @@ document.addEventListener("DOMContentLoaded", function () {
           const indicators = [];
           if (config.is_required) indicators.push("Required");
           if (field.field_type === "calculated") indicators.push("Calculated");
+          if (isSheetResultField(field)) indicators.push("Sheet/FY result");
           if (config.proof_required) indicators.push("Proof");
           if (field.field_type === "dropdown") {
             const optionCount = dropdownOptionCount(field);
@@ -1256,6 +1288,7 @@ document.addEventListener("DOMContentLoaded", function () {
       const indicators = [];
       if (config.is_required) indicators.push("Required");
       if (field.field_type === "calculated") indicators.push("Read-only calculated");
+      if (isSheetResultField(field)) indicators.push("Sheet/FY result");
       if (config.proof_required) indicators.push("Proof required");
       if (config.remarks_required) indicators.push("Remarks required");
       if (field.field_type === "dropdown") {
@@ -1304,6 +1337,7 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("prop-required").checked = field.field_config.is_required || false;
     document.getElementById("prop-remarks-req").checked = field.field_config.remarks_required || false;
     document.getElementById("prop-proof-req").checked = field.field_config.proof_required || false;
+    setResultFieldWorkflowControls(field.field_type === "calculated" && isSheetResultField(field));
     document.getElementById("prop-help").value = field.field_config.help_text || "";
 
     // Toggle specific type options
@@ -1338,6 +1372,9 @@ document.addEventListener("DOMContentLoaded", function () {
       const formulaOk     = document.getElementById("formula-status-ok");
       const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
       const calcUnitInput = document.getElementById("prop-calc-unit");
+      if (propCalcPlacement) {
+        propCalcPlacement.value = isSheetResultField(field) ? "annual_result" : "monthly";
+      }
       if (formulaSelect && config.formula_version_id) {
         formulaSelect.value = config.formula_version_id;
         if (formulaHint) formulaHint.classList.add("hidden");
@@ -1430,6 +1467,32 @@ document.addEventListener("DOMContentLoaded", function () {
       const formulaSelect = document.getElementById("prop-formula");
       const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
       const calcUnitInput = document.getElementById("prop-calc-unit");
+      const placement = propCalcPlacement ? propCalcPlacement.value : "monthly";
+      const isAnnualResult = placement === "annual_result";
+
+      if (isAnnualResult) {
+        field.frequency = "annual";
+        if (propFrequency) propFrequency.value = "annual";
+        field.field_config.field_scope = "annual_result";
+        field.field_config.result_role = "aggregate_result";
+        field.field_config.display_region = "below_monthly_table";
+        field.field_config.blank_policy = field.field_config.blank_policy || "strict";
+        field.field_config.is_required = false;
+        field.field_config.remarks_required = false;
+        field.field_config.proof_required = false;
+        document.getElementById("prop-required").checked = false;
+        document.getElementById("prop-remarks-req").checked = false;
+        document.getElementById("prop-proof-req").checked = false;
+        setResultFieldWorkflowControls(true);
+      } else {
+        field.frequency = "monthly";
+        if (propFrequency) propFrequency.value = "monthly";
+        field.field_config.field_scope = "monthly";
+        field.field_config.result_role = "monthly_calculated";
+        field.field_config.display_region = "monthly_table";
+        delete field.field_config.blank_policy;
+        setResultFieldWorkflowControls(false);
+      }
 
       if (formulaSelect) {
         const formulaVal = formulaSelect.value;
@@ -1520,6 +1583,11 @@ document.addEventListener("DOMContentLoaded", function () {
           help_text: ""
         }
       };
+      if (type === "calculated") {
+        newField.field_config.field_scope = "monthly";
+        newField.field_config.result_role = "monthly_calculated";
+        newField.field_config.display_region = "monthly_table";
+      }
 
       currentFields.push(newField);
       isUnsaved = true;

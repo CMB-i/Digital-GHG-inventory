@@ -15,6 +15,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Saved cursor range for operator/chip insertion into contenteditable
   let savedRange = null;
+  let pendingAggregateHelper = null;
 
   // ── Return-to params ──────────────────────────────────────────────────
   const _fbUrlParams = new URLSearchParams(window.location.search);
@@ -54,6 +55,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnCloseModal = document.getElementById("btn-close-modal");
   const btnCancelModal = document.getElementById("btn-cancel-modal");
   const formCreateFormula = document.getElementById("form-create-formula");
+  const btnInsertSumMonths = document.getElementById("btn-insert-sum-months");
 
   // ── Back button ───────────────────────────────────────────────────────
   const btnEditorBack = document.getElementById("btn-editor-back");
@@ -224,6 +226,28 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  function setPendingAggregateHelper(helper) {
+    pendingAggregateHelper = helper;
+    if (!btnInsertSumMonths) return;
+    const active = helper === "SUM_MONTHS";
+    btnInsertSumMonths.classList.toggle("bg-violet-50", active);
+    btnInsertSumMonths.classList.toggle("border-violet-400", active);
+    btnInsertSumMonths.classList.toggle("ring-2", active);
+    btnInsertSumMonths.classList.toggle("ring-violet-100", active);
+  }
+
+  function selectedExpressionText() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return "";
+    const range = sel.getRangeAt(0);
+    if (!expressionDisplay.contains(range.commonAncestorContainer)) return "";
+    return sel.toString().trim();
+  }
+
+  function isSingleFieldReference(text) {
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test((text || "").trim());
+  }
+
   // ── expressionDisplay event wiring ────────────────────────────────────
   expressionDisplay.addEventListener("input", syncToTextarea);
 
@@ -244,6 +268,13 @@ document.addEventListener("DOMContentLoaded", function () {
     if (isPublished) return;
     const name = fieldNameMap[code] || code;
     const type = valsetCodeSet.has(code) ? "valset" : "field";
+    if (pendingAggregateHelper === "SUM_MONTHS" && type === "field") {
+      insertTextAtCursor("SUM_MONTHS(");
+      insertNodeAtCursor(makeChip(code, name, type));
+      insertTextAtCursor(")");
+      setPendingAggregateHelper(null);
+      return;
+    }
     insertNodeAtCursor(makeChip(code, name, type));
   };
 
@@ -251,6 +282,22 @@ document.addEventListener("DOMContentLoaded", function () {
     if (isPublished) return;
     insertTextAtCursor(op);
   };
+
+  if (btnInsertSumMonths) {
+    btnInsertSumMonths.addEventListener("click", function () {
+      if (isPublished) return;
+      const selectedText = selectedExpressionText();
+      if (selectedText && !isSingleFieldReference(selectedText)) {
+        setPendingAggregateHelper(null);
+        showToast("SUM_MONTHS accepts one monthly field only. Use SUM_MONTHS(field_a) + SUM_MONTHS(field_b) for multiple fields.", "error");
+        return;
+      }
+      setPendingAggregateHelper(pendingAggregateHelper === "SUM_MONTHS" ? null : "SUM_MONTHS");
+      if (pendingAggregateHelper === "SUM_MONTHS") {
+        showToast("Click a field to insert SUM_MONTHS(field_code).");
+      }
+    });
+  }
 
   // ── View switching ────────────────────────────────────────────────────
   window.showList = function () {
@@ -484,7 +531,7 @@ document.addEventListener("DOMContentLoaded", function () {
   function scanVariables() {
     const expr = expressionTextarea.value || "";
     const matches = expr.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || [];
-    const forbidden = new Set(["min", "max"]);
+    const forbidden = new Set(["min", "max", "sum_months"]);
     const seen = new Set();
     const unique = [];
     matches.forEach(m => {
@@ -549,6 +596,14 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     if (window.FormulaRuntime) {
+      if (typeof window.FormulaRuntime.validate === "function") {
+        const validation = window.FormulaRuntime.validate(expr);
+        if (!validation.valid) {
+          previewResultValue.textContent = validation.error || "Error";
+          previewResultValue.className = "max-w-xs text-right text-xs font-bold leading-tight text-rose-600";
+          return;
+        }
+      }
       const result = window.FormulaRuntime.evaluate(expr, values);
       if (result !== null && result !== undefined && !isNaN(result)) {
         previewResultValue.textContent = parseFloat(result.toFixed(6));
@@ -640,7 +695,11 @@ document.addEventListener("DOMContentLoaded", function () {
           showToast(createData.error, "error");
         } else {
           showToast("Formula created successfully!");
-          showList();
+          selectedFormulaId = createData.data && createData.data.id ? createData.data.id : selectedFormulaId;
+          selectedVersionId = createData.data && createData.data.version_id ? createData.data.version_id : selectedVersionId;
+          if (selectedVersionId) {
+            loadVersionDetails(selectedVersionId);
+          }
         }
       } else {
         const putRes = await fetch(`/module/FRMULA/api/${selectedFormulaId}`, {

@@ -12,6 +12,50 @@
     return matches;
   }
 
+  function validateAggregateSyntax(expression) {
+    const source = expression || "";
+    const helper = "SUM_MONTHS";
+    let index = 0;
+
+    while (index < source.length) {
+      const foundAt = source.indexOf(helper, index);
+      if (foundAt === -1) break;
+
+      const before = foundAt > 0 ? source[foundAt - 1] : "";
+      const afterName = source[foundAt + helper.length] || "";
+      if (/[A-Za-z0-9_]/.test(before) || /[A-Za-z0-9_]/.test(afterName)) {
+        index = foundAt + helper.length;
+        continue;
+      }
+
+      let cursor = foundAt + helper.length;
+      while (/\s/.test(source[cursor] || "")) cursor += 1;
+      if (source[cursor] !== "(") {
+        return { valid: false, error: "SUM_MONTHS can only aggregate a monthly field." };
+      }
+
+      const start = cursor + 1;
+      let depth = 1;
+      cursor += 1;
+      while (cursor < source.length && depth > 0) {
+        if (source[cursor] === "(") depth += 1;
+        else if (source[cursor] === ")") depth -= 1;
+        cursor += 1;
+      }
+      if (depth !== 0) {
+        return { valid: false, error: "SUM_MONTHS can only aggregate a monthly field." };
+      }
+
+      const inner = source.slice(start, cursor - 1).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(inner)) {
+        return { valid: false, error: "SUM_MONTHS can only aggregate a monthly field." };
+      }
+      index = cursor;
+    }
+
+    return { valid: true, error: "" };
+  }
+
   const precedence = {
     '+': 1,
     '-': 1,
@@ -23,6 +67,10 @@
     if (!expression) return null;
 
     try {
+      const aggregateValidation = validateAggregateSyntax(expression);
+      if (!aggregateValidation.valid) {
+        return null;
+      }
       const tokens = tokenize(expression);
       const outputQueue = [];
       const operatorStack = [];
@@ -34,8 +82,8 @@
         if (!isNaN(parseFloat(token)) && isFinite(token)) {
           outputQueue.push({ type: 'NUMBER', value: parseFloat(token) });
         }
-        // 2. If token is min or max function, push to operator stack
-        else if (token === 'min' || token === 'max') {
+        // 2. If token is a supported function, push to operator stack
+        else if (token === 'min' || token === 'max' || token === 'SUM_MONTHS') {
           operatorStack.push({ type: 'FUNCTION', value: token });
         }
         // 3. Comma argument separator
@@ -123,6 +171,11 @@
           }
           evalStack.push(res);
         } else if (item.type === 'FUNCTION') {
+          if (item.value === 'SUM_MONTHS') {
+            if (evalStack.length < 1) return null;
+            evalStack.push(evalStack.pop());
+            continue;
+          }
           if (evalStack.length < 2) return null;
           const b = evalStack.pop();
           const a = evalStack.pop();
@@ -142,6 +195,7 @@
   }
 
   window.FormulaRuntime = {
-    evaluate: evaluateFormulaJS
+    evaluate: evaluateFormulaJS,
+    validate: validateAggregateSyntax
   };
 })();

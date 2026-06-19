@@ -148,9 +148,18 @@ def create():
         validate_formula(expression, allowed_names)
 
         formula = create_formula(name, code, expression, tokens, user.id)
+        latest_version = FormulaVersion.query.filter_by(
+            formula_id=formula.id
+        ).order_by(FormulaVersion.version_number.desc()).first()
         db.session.commit()
         return success_response(
-            data={"id": formula.id, "name": formula.name, "code": formula.code},
+            data={
+                "id": formula.id,
+                "name": formula.name,
+                "code": formula.code,
+                "version_id": latest_version.id if latest_version else None,
+                "version_number": latest_version.version_number if latest_version else None,
+            },
             message="Formula created successfully."
         )
     except (ValueError, FormulaValidationError) as e:
