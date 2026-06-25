@@ -1,55 +1,106 @@
-# Walkthrough — JSW Excel-Style Protected Theme & SPOC Sheets View Rebuild
+# Walkthrough — Jaigarh Energy & GHG Workbook Conversion
 
-This walkthrough summarizes the redesign and functionality rebuild of the SPOC Annual Workbook data-entry workspace (Phase 12B-3) and JSW "Excel opened in a browser, but protected" theme integration.
+We have successfully converted the **Jaigarh Energy & GHG** excel sheets into a fully configured, functional workbook in the application.
 
-## Changes Made
+## Workbook Overview
 
-### 1. Backend Service Updates
+A new workbook template **Jaigarh Energy & GHG Workbook** (`wkbk_jaigarh`) has been defined with **6 form sheets**, capturing all fuel usages, refrigerant emissions, energy conversions, and final GHG scopes/intensities.
 
-#### [service.py](file:///c:/Users/SHATAM%20RAI/Desktop/jsw/mywork/Digital-GHG-inventory/app/modules/SUBMIT/service.py)
-* **Cross-Sheet Missing Warnings:** Added mapping of missing dependency codes to sheet names in `compose_calculation_results`. Missing dependencies now show specific warning messages: `"Cannot calculate yet — [Sheet Name] value is missing"`.
-* **Form ID Serialization:** Included `form_id` in serialized calculated fields list to let the frontend group and render calculated results by their parent sheet tab.
-* **Row Active Period Resolution:** Added `is_active_period` key to serialized rows in both `compose_annual_workbook_data` and `compose_calculation_results` to correctly highlight open month rows on the frontend.
+### Configured Sheets and Fields
 
-### 2. Frontend Layout & Logic Updates
+1. **Electricity Consumed** (`form_jaigarh_electricity`)
+   * **From Grid (MWH)** (`elec_grid_mwh`): Input field
+   * **Group Co Sourcing (MWH)** (`elec_group_sourcing_mwh`): Input field
+   * **Total Electricity (MWH)** (`elec_total_mwh`): `elec_grid_mwh + elec_group_sourcing_mwh`
+   * **Grid Electricity Emissions (tCO2e)** (`elec_grid_emissions`): `elec_grid_mwh * 0.71`
+   * **Group Co Sourcing Emissions (tCO2e)** (`elec_group_sourcing_emissions`): `elec_group_sourcing_mwh * 0.71`
+   * **Total Electricity Emissions (tCO2e)** (`elec_total_emissions`): `elec_grid_emissions + elec_group_sourcing_emissions`
+   * **Electrical Energy Consumption (GJ)** (`elec_energy_gj`): `elec_total_mwh * 3.6`
 
-#### [annual_workbook.html](file:///c:/Users/SHATAM%20RAI/Desktop/jsw/mywork/Digital-GHG-inventory/templates/modules/SUBMIT/annual_workbook.html)
-* **Rebuilt Layout:** Redesigned sheet container with horizontal scrolling support, inline Remarks column, and removed references to old buttons like "Submit selected month package".
-* **Calculated Results Section:** Added calculated results table structure styled with a dark header (`CALCULATED RESULTS`) and a lock icon subtitle.
-* **Fixed Footer Bar:** Added a sticky bottom action bar displaying autosave status on the left and primary buttons (Save draft, Submit [Sheet Name]) on the right.
-* **Hidden File Uploader:** Added programmatic uploader trigger for sheet proof attachments.
+2. **Diesel Consumed** (`form_jaigarh_diesel`)
+   * **Stationary Eqp (KL)** (`diesel_stationary_kl`): Input field
+   * **Mobile Eqp (KL)** (`diesel_mobile_kl`): Input field
+   * **Total Diesel Qty (KL)** (`diesel_total_kl`): `diesel_stationary_kl + diesel_mobile_kl`
+   * **Stationary Diesel Emissions (tCO2e)** (`diesel_stationary_emissions`): `diesel_stationary_kl * 2.6898`
+   * **Mobile Diesel Emissions (tCO2e)** (`diesel_mobile_emissions`): `diesel_mobile_kl * 2.6932`
+   * **Total Diesel Emissions (tCO2e)** (`diesel_total_emissions`): `diesel_stationary_emissions + diesel_mobile_emissions`
+   * **Diesel Energy (GJ)** (`diesel_energy_gj`): `diesel_total_kl * 36.12`
 
-#### [annual_workbook.js](file:///c:/Users/SHATAM%20RAI/Desktop/jsw/mywork/Digital-GHG-inventory/static/js/annual_workbook.js)
-* **Status Dot Tabs:** Dynamically computes and displays colored status dots on sheet tabs based on the dashboard sheet status:
-  - **Red:** Sent back
-  - **Amber:** Draft
-  - **Green:** Submitted
-  - **Grey:** Not started
-* **Debounced Autosave:** Edits are automatically autosaved 2 seconds after the user stops typing. The footer displays `Saving...` which updates to `Last saved X min ago` or `Last saved just now`.
-* **Submit Validation:** The Submit button dynamically updates to match the current sheet's name. It validates required fields in real-time, showing a list of missing fields in a tooltip if any required fields are left blank.
-* **Sent Back Scroll Nudge:** Added a pulse-animated red `Needs Correction` badge next to the title if any month is sent back. Clicking it scrolls to and highlights the target row.
-* **Calculated Results Integration:** Automatically renders calculated cells in a dedicated section below the main table, displaying specific missing dependency warnings.
+3. **Petrol Consumed** (`form_jaigarh_petrol`)
+   * **Total Qty (KL)** (`petrol_qty_kl`): Input field
+   * **Total Petrol Emissions (tCO2e)** (`petrol_emissions`): `petrol_qty_kl * 2.3372`
+   * **Petrol Energy (GJ)** (`petrol_energy_gj`): `petrol_qty_kl * 32.88`
 
-#### [workbook_sheet.js](file:///c:/Users/SHATAM%20RAI/Desktop/jsw/mywork/Digital-GHG-inventory/static/js/workbook_sheet.js)
-* **Spreadsheet Grid:** Rebuilt table layout (April at top, March at bottom) with data point names as column headers and units in small grey text below.
-* **Row Zebra Tints:** Highlights active period rows in light blue (`#dfeaf8`) and greys out approved/locked rows (`#eef3fa`), rendering them as flat plain text values rather than disabled input elements.
-* **Remarks & Proof:** Renders `✓ Proof  Replace` if a document proof exists in the remarks column, or an upload button if it doesn't.
-* **Real-time MoM Alerts:** Calculates month-over-month numeric increases in real-time. If a value exceeds the previous month's value by >20%, it expands an amber warning alert directly below that month row.
+4. **HFHSD & IFO Consumed** (`form_jaigarh_hfhsd_ifo`)
+   * **HFHSD Qty (KL)** (`hfhsd_qty_kl`): Input field
+   * **IFO Qty (KL)** (`ifo_qty_kl`): Input field
+   * **Total Qty (KL)** (`hfhsd_ifo_total_kl`): `hfhsd_qty_kl + ifo_qty_kl`
+   * **Total HFHSD & IFO Emissions (tCO2e)** (`hfhsd_ifo_emissions`): `hfhsd_ifo_total_kl * 2.8311`
+   * **HFHSD & IFO Energy (GJ)** (`hfhsd_ifo_energy_gj`): `hfhsd_ifo_total_kl * 36.40`
+
+5. **Other Fuels & Refrigerants** (`form_jaigarh_other_fuels`)
+   * **Acetylene Qty (T)** (`acetylene_qty_t`): Input field
+   * **LPG Qty (T)** (`lpg_qty_t`): Input field
+   * **CO2 Fire Ext Qty (T)** (`co2_fire_ext_qty_t`): Input field
+   * **R32 Qty (Kg)** (`r32_qty_kg`): Input field
+   * **R410A Qty (Kg)** (`r410a_qty_kg`): Input field
+   * **R22 Qty (Kg)** (`r22_qty_kg`): Input field
+   * **Other Fuels & Refrigerants Emissions (tCO2e)** (`other_fuels_emissions`): `acetylene_qty_t * 4.2283 + lpg_qty_t * 2.985 + co2_fire_ext_qty_t * 1.0 + r32_qty_kg * 0.771 + r410a_qty_kg * 2.255`
+   * **Other Fuels Energy (GJ)** (`other_fuels_energy_gj`): `acetylene_qty_t * 59.16 + lpg_qty_t * 47.3`
+
+6. **Energy & GHG Summary** (`form_jaigarh_summary`)
+   * **Production (Million MT)** (`production_million_mt`): Input field
+   * **Total Scope 1 (Direct) Emissions (tCO2e)** (`total_scope1_emissions`): `diesel_total_emissions + petrol_emissions + hfhsd_ifo_emissions + other_fuels_emissions`
+   * **Total Scope 2 (Indirect) Emissions (tCO2e)** (`total_scope2_emissions`): `elec_total_emissions`
+   * **Total GHG Emissions (tCO2e)** (`total_ghg_emissions`): `total_scope1_emissions + total_scope2_emissions`
+   * **Total Energy Consumption (GJ)** (`total_energy_gj`): `elec_energy_gj + diesel_energy_gj + petrol_energy_gj + hfhsd_ifo_energy_gj + other_fuels_energy_gj`
+   * **Energy Intensity (GJ/Million MT)** (`energy_intensity`): `total_energy_gj / production_million_mt`
+   * **GHG Intensity (tCO2e/Million MT)** (`ghg_intensity`): `total_ghg_emissions / production_million_mt`
 
 ---
 
-## Verification Results
+## Verification & Validation Results
 
-### 1. Code Health & Syntax
-* Syntax and compilation check run and passed: `python -m compileall app scripts`.
-* JavaScript syntax check run and passed: `node --check static/js/workbook_sheet.js static/js/annual_workbook.js`.
-* Alembic database schema check passed: `.venv/Scripts/alembic.exe heads`.
-* Database seeded successfully via `seed.py`.
+We executed the test verification script `scratch/test_jaigarh_calculations.py` to assert the correctness of all formula configurations.
 
-### 2. Manual Verification Checklist
-1. Tab status dots rendered correctly based on workbook state.
-2. The grid correctly listed months from April to March.
-3. Active rows are clearly highlighted in light blue.
-4. MoM validation logic dynamically displayed warning alerts for >20% increases.
-5. Calculated results table correctly rendered below the monthly inputs.
-6. Auto-saves and button tooltips operated seamlessly as expected.
+### Test Inputs (April 2025)
+* Grid Electricity = `100.0` MWH
+* Group Sourcing Electricity = `200.0` MWH
+* Diesel (Stationary) = `10.0` KL
+* Diesel (Mobile) = `20.0` KL
+* Petrol = `5.0` KL
+* HFHSD = `50.0` KL, IFO = `50.0` KL
+* Acetylene = `2.0` T, LPG = `0.0` T, CO2 Fire Ext = `0.0` T
+* R32 = `10.0` kg, R410A = `20.0` kg, R22 = `0.0` kg
+* Production = `10.0` Million MT
+
+### Evaluated Outputs
+The script yielded the following results, matching the spreadsheet calculations exactly:
+
+```text
+Total Diesel Qty (KL)                         | diesel_total_kl                = 30.0
+Stationary Diesel Emissions (tCO2e)           | diesel_stationary_emissions    = 26.898
+Mobile Diesel Emissions (tCO2e)               | diesel_mobile_emissions        = 53.864
+Total Diesel Emissions (tCO2e)                | diesel_total_emissions         = 80.762
+Diesel Energy (GJ)                            | diesel_energy_gj               = 1083.6
+Total Electricity (MWH)                       | elec_total_mwh                 = 300.0
+Grid Electricity Emissions (tCO2e)            | elec_grid_emissions            = 71.0
+Group Co Sourcing Emissions (tCO2e)           | elec_group_sourcing_emissions  = 142.0
+Total Electricity Emissions (tCO2e)           | elec_total_emissions           = 213.0
+Electrical Energy Consumption (GJ)            | elec_energy_gj                 = 1080.0
+Total Scope 1 (Direct) Emissions (tCO2e)      | total_scope1_emissions         = 436.8246
+Total Scope 2 (Indirect) Emissions (tCO2e)    | total_scope2_emissions         = 213.0
+Total GHG Emissions (tCO2e)                   | total_ghg_emissions            = 649.8246
+Total Energy Consumption (GJ)                 | total_energy_gj                = 6086.32
+Energy Intensity (GJ/Million MT)              | energy_intensity               = 608.632
+GHG Intensity (tCO2e/Million MT)              | ghg_intensity                  = 64.98246
+Total Qty (KL)                                | hfhsd_ifo_total_kl             = 100.0
+Total HFHSD & IFO Emissions (tCO2e)           | hfhsd_ifo_emissions            = 283.11
+HFHSD & IFO Energy (GJ)                       | hfhsd_ifo_energy_gj            = 3640.0
+Other Fuels & Refrigerants Emissions (tCO2e)  | other_fuels_emissions          = 61.2666
+Other Fuels Energy (GJ)                       | other_fuels_energy_gj          = 118.32
+Total Petrol Emissions (tCO2e)                | petrol_emissions               = 11.686
+Petrol Energy (GJ)                            | petrol_energy_gj               = 164.4
+```
+
+All 23 cross-sheet formulas evaluate successfully using the multi-pass calculation engine.
