@@ -16,7 +16,6 @@ document.addEventListener("DOMContentLoaded", function () {
   const tableHead = document.getElementById("workbook-head");
   const tableBody = document.getElementById("workbook-body");
   const sheetResultsSection = document.getElementById("sheet-results-section");
-  const sheetResultsList = document.getElementById("sheet-results-list");
   const btnSave = document.getElementById("btn-save-draft");
   const btnSubmit = document.getElementById("btn-submit-sheet");
   const cellDetailModal = document.getElementById("cell-detail-modal");
@@ -560,50 +559,21 @@ document.addEventListener("DOMContentLoaded", function () {
   // Update save status text every 30 seconds
   setInterval(updateLastSavedText, 30000);
 
-  function formatSheetResultValue(result) {
-    if (!result || result.value === null || result.value === undefined || result.value === "") {
-      return "—";
-    }
-    const numeric = Number(result.value);
-    const value = Number.isFinite(numeric)
-      ? numeric.toLocaleString("en-IN", { maximumFractionDigits: 6 })
-      : String(result.value);
-    return `${value}${result.unit ? ` ${result.unit}` : ""}`;
-  }
-
-  function renderSheetResults() {
-    if (!sheetResultsSection || !sheetResultsList) return;
-    const results = state.workbook && Array.isArray(state.workbook.sheet_results)
-      ? state.workbook.sheet_results
-      : [];
-
-    if (!results.length) {
+  function renderSheetResultsOverflow(sheetResults) {
+    if (!sheetResultsSection) return;
+    const results = Array.isArray(sheetResults) ? sheetResults : [];
+    if (!window.WorkbookSheet || typeof window.WorkbookSheet.renderSheetResultsOverflowHtml !== "function") {
       sheetResultsSection.classList.add("hidden");
-      sheetResultsList.innerHTML = "";
+      sheetResultsSection.innerHTML = "";
       return;
     }
-
-    sheetResultsList.innerHTML = results.map(result => {
-      const calculated = result.status === "calculated";
-      const statusClass = calculated
-        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-        : "border-amber-200 bg-amber-50 text-amber-700";
-      const label = calculated ? "Calculated" : "Needs input";
-      return `
-        <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="truncate text-sm font-bold text-slate-900">${escapeHtml(result.label || result.field_code || "Result")}</div>
-              <div class="mt-1 font-mono text-[10px] font-semibold text-slate-400">${escapeHtml(result.field_code || "")}</div>
-            </div>
-            <span class="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${statusClass}">${label}</span>
-          </div>
-          <div class="mt-3 text-2xl font-black tabular-nums ${calculated ? "text-[#1a3a6b]" : "text-slate-400"}">${escapeHtml(formatSheetResultValue(result))}</div>
-          ${result.message ? `<div class="mt-2 rounded border border-amber-100 bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-700">${escapeHtml(result.message)}</div>` : ""}
-          <div class="mt-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Read-only formula output</div>
-        </div>
-      `;
-    }).join("");
+    const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(results);
+    if (!html) {
+      sheetResultsSection.classList.add("hidden");
+      sheetResultsSection.innerHTML = "";
+      return;
+    }
+    sheetResultsSection.innerHTML = html;
     sheetResultsSection.classList.remove("hidden");
   }
 
@@ -625,6 +595,8 @@ document.addEventListener("DOMContentLoaded", function () {
     tableWrap.classList.remove("hidden");
     const mode = "entry";
 
+    const sheetResults = state.workbook.sheet_results || [];
+
     window.WorkbookSheet.render({
       mode: mode,
       headEl: tableHead,
@@ -633,6 +605,7 @@ document.addEventListener("DOMContentLoaded", function () {
       sections: state.workbook.sections || [],
       workbookValues: state.workbook.workbook_values || {},
       canEditWorkbookValues: hasOpenWorkbookPeriod(),
+      sheetResults,
       rows: rows.map(row => ({
         ...row,
         editable: mode === "calc_results" ? false : Boolean(row.editability && row.editability.editable),
@@ -655,7 +628,7 @@ document.addEventListener("DOMContentLoaded", function () {
       onCellOpen: openCellDetail
     });
 
-    renderSheetResults();
+    renderSheetResultsOverflow(sheetResults);
 
     // Check sent back badge
     const needsCorrectionRow = rows.find(row => 

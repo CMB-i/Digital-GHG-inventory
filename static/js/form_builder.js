@@ -50,6 +50,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const builderPreviewStaticWrap = document.getElementById("builder-preview-static-wrap");
   const builderPreviewStaticHead = document.getElementById("builder-preview-static-head");
   const builderPreviewStaticBody = document.getElementById("builder-preview-static-body");
+  const builderPreviewResultsOverflow = document.getElementById("builder-preview-results-overflow");
 
   // Inspector elements
   const inspectorPanel = document.getElementById("inspector-panel");
@@ -87,6 +88,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const previewStaticWrap = document.getElementById("preview-static-wrap");
   const previewStaticHead = document.getElementById("preview-static-head");
   const previewStaticBody = document.getElementById("preview-static-body");
+  const previewResultsOverflow = document.getElementById("preview-results-overflow");
 
   // Toast Helper
   function showToast(message, type = "success") {
@@ -185,7 +187,8 @@ document.addEventListener("DOMContentLoaded", function () {
         config.field_scope === "annual_result" ||
         config.result_role === "aggregate_result" ||
         config.result_role === "formula_result" ||
-        config.display_region === "below_monthly_table"
+        config.display_region === "below_monthly_table" ||
+        config.display_region === "under_input_column"
       )
     );
   }
@@ -218,6 +221,7 @@ document.addEventListener("DOMContentLoaded", function () {
       staticWrap: previewStaticWrap,
       staticHead: previewStaticHead,
       staticBody: previewStaticBody,
+      overflowEl: previewResultsOverflow,
     };
   }
 
@@ -230,7 +234,25 @@ document.addEventListener("DOMContentLoaded", function () {
       staticWrap: builderPreviewStaticWrap,
       staticHead: builderPreviewStaticHead,
       staticBody: builderPreviewStaticBody,
+      overflowEl: builderPreviewResultsOverflow,
     };
+  }
+
+  function renderPreviewResultsOverflow(target, sheetResults) {
+    if (!target || !target.overflowEl) return;
+    if (!window.WorkbookSheet || typeof window.WorkbookSheet.renderSheetResultsOverflowHtml !== "function") {
+      target.overflowEl.classList.add("hidden");
+      target.overflowEl.innerHTML = "";
+      return;
+    }
+    const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(sheetResults || []);
+    if (!html) {
+      target.overflowEl.classList.add("hidden");
+      target.overflowEl.innerHTML = "";
+      return;
+    }
+    target.overflowEl.innerHTML = html;
+    target.overflowEl.classList.remove("hidden");
   }
 
   function resetPreviewTarget(target, message = "Loading preview...") {
@@ -245,6 +267,10 @@ document.addEventListener("DOMContentLoaded", function () {
     if (target.body) target.body.innerHTML = "";
     if (target.staticHead) target.staticHead.innerHTML = "";
     if (target.staticBody) target.staticBody.innerHTML = "";
+    if (target.overflowEl) {
+      target.overflowEl.classList.add("hidden");
+      target.overflowEl.innerHTML = "";
+    }
   }
 
   function previewUrl(formId, versionId) {
@@ -315,7 +341,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const orderedFields = previewOrderedFields(fields, context.sections || []);
     const monthlyFields = orderedFields.filter(field => !isPreviewNonMonthlyField(field, context));
-    const nonMonthlyFields = orderedFields.filter(field => isPreviewNonMonthlyField(field, context));
+    const nonMonthlyFields = orderedFields.filter(field =>
+      isPreviewNonMonthlyField(field, context) && !isSheetResultField(field)
+    );
+    const sheetResults = context.sheet_results || [];
 
     window.WorkbookSheet.render({
       mode: "calc_results",
@@ -325,9 +354,11 @@ document.addEventListener("DOMContentLoaded", function () {
       sections: context.sections || [],
       workbookValues: context.workbook_values || {},
       rows: context.rows || [],
+      sheetResults,
       selectedRowKey: null,
     });
     enhancePreviewMonthlyCells(target, context, monthlyFields);
+    renderPreviewResultsOverflow(target, sheetResults);
 
     if (nonMonthlyFields.length && target.staticHead && target.staticBody) {
       const unsectionedStaticSectionId = "__preview_static_values";
@@ -1373,7 +1404,13 @@ document.addEventListener("DOMContentLoaded", function () {
       const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
       const calcUnitInput = document.getElementById("prop-calc-unit");
       if (propCalcPlacement) {
-        propCalcPlacement.value = isSheetResultField(field) ? "annual_result" : "monthly";
+        if (!isSheetResultField(field)) {
+          propCalcPlacement.value = "monthly";
+        } else if ((field.field_config || {}).display_region === "below_monthly_table") {
+          propCalcPlacement.value = "annual_result_below";
+        } else {
+          propCalcPlacement.value = "annual_result";
+        }
       }
       if (formulaSelect && config.formula_version_id) {
         formulaSelect.value = config.formula_version_id;
@@ -1468,14 +1505,16 @@ document.addEventListener("DOMContentLoaded", function () {
       const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
       const calcUnitInput = document.getElementById("prop-calc-unit");
       const placement = propCalcPlacement ? propCalcPlacement.value : "monthly";
-      const isAnnualResult = placement === "annual_result";
+      const isAnnualResult = placement === "annual_result" || placement === "annual_result_below";
 
       if (isAnnualResult) {
         field.frequency = "annual";
         if (propFrequency) propFrequency.value = "annual";
         field.field_config.field_scope = "annual_result";
         field.field_config.result_role = "aggregate_result";
-        field.field_config.display_region = "below_monthly_table";
+        field.field_config.display_region = placement === "annual_result_below"
+          ? "below_monthly_table"
+          : "under_input_column";
         field.field_config.blank_policy = field.field_config.blank_policy || "strict";
         field.field_config.is_required = false;
         field.field_config.remarks_required = false;
