@@ -253,6 +253,12 @@ def compose_preview_workbook_context(form_version_id):
                 "remark": None,
             }
 
+    from app.modules.SUBMIT.service import is_sheet_result_field, _compose_sheet_results, monthly_table_fields
+
+    sheet_result_fields = [field for field in fields if is_sheet_result_field(field)]
+    table_fields = monthly_table_fields(fields, sections)
+    sheet_results = _compose_sheet_results(sheet_result_fields, table_fields, rows)
+
     return {
         "financial_year": {
             "start_year": MOCK_FY_START_YEAR,
@@ -282,9 +288,10 @@ def compose_preview_workbook_context(form_version_id):
             "version_number": version.version_number,
             "status": version.status,
         },
-        "fields": fields,
+        "fields": table_fields,
         "sections": sections,
         "workbook_values": workbook_values,
+        "sheet_results": sheet_results,
         "rows": rows,
     }
 
@@ -370,14 +377,15 @@ def normalize_calculated_field_config(field_type, field_config, frequency):
     is_annual_result = (
         config.get("field_scope") == "annual_result"
         or config.get("result_role") in ("aggregate_result", "formula_result")
-        or config.get("display_region") == "below_monthly_table"
+        or config.get("display_region") in ("below_monthly_table", "under_input_column")
     )
 
     if is_annual_result:
         normalized_frequency = "annual"
         config["field_scope"] = "annual_result"
         config["result_role"] = "aggregate_result"
-        config["display_region"] = "below_monthly_table"
+        if config.get("display_region") != "below_monthly_table":
+            config["display_region"] = "under_input_column"
         config["blank_policy"] = config.get("blank_policy") or "strict"
         config["is_required"] = False
         config["remarks_required"] = False
@@ -518,18 +526,6 @@ def publish_form_version(form_version_id, user_id):
     if form_version.status != "Draft":
         raise ValueError("Only Draft versions can be published.")
         
-    form = get_form(form_version.form_id)
-    import json
-    parsed_desc = {}
-    if form and form.description and form.description.startswith("{"):
-        try:
-            parsed_desc = json.loads(form.description)
-        except Exception:
-            pass
-            
-    if not parsed_desc.get("sites"):
-        raise ValueError("Site applicability must be assigned before publishing.")
-
     fields = get_form_version_fields(form_version_id)
     if not fields:
         raise ValueError("Cannot publish an empty form. Add fields first.")

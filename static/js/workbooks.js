@@ -355,6 +355,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const previewTableWrap = document.getElementById("wb-preview-table-wrap");
     const previewHead     = document.getElementById("wb-preview-head");
     const previewBody     = document.getElementById("wb-preview-body");
+    const previewResultsOverflow = document.getElementById("wb-preview-results-overflow");
 
     function applyTabStyle(tab, active) {
       tab.style.cssText = [
@@ -377,6 +378,27 @@ document.addEventListener("DOMContentLoaded", function () {
       previewTableWrap.classList.add("hidden");
       if (previewHead) previewHead.innerHTML = "";
       if (previewBody) previewBody.innerHTML = "";
+      if (previewResultsOverflow) {
+        previewResultsOverflow.classList.add("hidden");
+        previewResultsOverflow.innerHTML = "";
+      }
+    }
+
+    function renderPreviewResultsOverflow(sheetResults) {
+      if (!previewResultsOverflow) return;
+      if (!window.WorkbookSheet || typeof window.WorkbookSheet.renderSheetResultsOverflowHtml !== "function") {
+        previewResultsOverflow.classList.add("hidden");
+        previewResultsOverflow.innerHTML = "";
+        return;
+      }
+      const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(sheetResults || []);
+      if (!html) {
+        previewResultsOverflow.classList.add("hidden");
+        previewResultsOverflow.innerHTML = "";
+        return;
+      }
+      previewResultsOverflow.innerHTML = html;
+      previewResultsOverflow.classList.remove("hidden");
     }
 
     function loadSheetPreview(sheet) {
@@ -399,8 +421,10 @@ document.addEventListener("DOMContentLoaded", function () {
             sections: ctx.sections || [],
             workbookValues: ctx.workbook_values || {},
             rows: ctx.rows || [],
+            sheetResults: ctx.sheet_results || [],
             selectedRowKey: null,
           });
+          renderPreviewResultsOverflow(ctx.sheet_results || []);
         })
         .catch(err => { resetPreview(err.message || "Failed to load sheet preview."); });
     }

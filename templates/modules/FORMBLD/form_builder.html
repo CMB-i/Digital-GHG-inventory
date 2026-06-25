@@ -178,6 +178,7 @@
                   <tbody id="builder-preview-workbook-body" class="divide-y divide-slate-100 text-sm text-slate-700"></tbody>
                 </table>
               </div>
+              <div id="builder-preview-results-overflow" class="hidden"></div>
               <div id="builder-preview-static-wrap" class="mt-5 hidden overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
                 <table class="min-w-full border-collapse">
                   <thead id="builder-preview-static-head" class="hidden"></thead>
@@ -310,9 +311,10 @@
                   <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Calculation placement</label>
                   <select id="prop-calc-placement" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
                     <option value="monthly">Per-month table cell</option>
-                    <option value="annual_result">Sheet/FY result below table</option>
+                    <option value="annual_result">Sheet/FY result under input column</option>
+                    <option value="annual_result_below">Sheet/FY result below table</option>
                   </select>
-                  <p class="mt-1 text-[10px] text-slate-400">Sheet/FY results are read-only formula outputs shown below the real sheet table.</p>
+                  <p class="mt-1 text-[10px] text-slate-400">Sheet/FY results are read-only formula outputs aligned under the source monthly column by default.</p>
                 </div>
                 <select id="prop-formula" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
                   <option value="">Select a formula...</option>
@@ -446,6 +448,7 @@
             <tbody id="preview-workbook-body" class="divide-y divide-slate-100 text-sm text-slate-700"></tbody>
           </table>
         </div>
+        <div id="preview-results-overflow" class="hidden"></div>
         <div id="preview-static-wrap" class="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
           <table class="min-w-full border-collapse">
             <thead id="preview-static-head" class="hidden"></thead>
