@@ -1,142 +1,251 @@
-# Walkthrough — Jaigarh Energy & GHG Workbook Aggregate Configurations
+# Walkthrough — Jaigarh FY25-26 GHG & Energy Workbook Configurations
 
-We have successfully refined the configuration of the **Jaigarh Energy & GHG Workbook** (`wkbk_jaigarh`) to support the separation of monthly calculated table columns and below-table annual aggregate results (Sheet/FY results).
-
-## Workbook Layout & Placements
-
-Calculated fields have been split according to their logical context:
-* **Monthly Calculated Columns** (Per-month table cells): Calculated row-by-row in the table grid.
-* **Annual Aggregate Fields** (Sheet/FY result below table): Displayed as read-only aggregate summary cards below the table.
-
-### Configured Sheets, Fields and Placements
-
-1. **Electricity Consumed** (`form_jaigarh_electricity`)
-   * **Monthly Columns**:
-     * `elec_grid_mwh`: From Grid (MWH) [Input]
-     * `elec_group_sourcing_mwh`: Group Co Sourcing (MWH) [Input]
-     * `elec_total_mwh`: Total Electricity (MWH) = `elec_grid_mwh + elec_group_sourcing_mwh`
-     * `elec_grid_emissions`: Grid Electricity Emissions (tCO2e) = `elec_grid_mwh * 0.71`
-     * `elec_group_sourcing_emissions`: Group Co Sourcing Emissions (tCO2e) = `elec_group_sourcing_mwh * 0.71`
-     * `elec_total_emissions`: Total Electricity Emissions (tCO2e) = `elec_grid_emissions + elec_group_sourcing_emissions`
-     * `elec_energy_gj`: Electrical Energy Consumption (GJ) = `elec_total_mwh * 3.6`
-   * **Aggregate Cards Below Table**:
-     * `elec_grid_emissions_ann`: Total Grid Electricity Emissions (tCO2e) = `SUM_MONTHS(elec_grid_emissions)`
-     * `elec_group_sourcing_emissions_ann`: Total Group Co Sourcing Emissions (tCO2e) = `SUM_MONTHS(elec_group_sourcing_emissions)`
-     * `elec_total_emissions_ann`: Total Electricity Emissions (tCO2e) = `elec_grid_emissions_ann + elec_group_sourcing_emissions_ann`
-     * `elec_energy_gj_ann`: Total Electrical Energy Consumption (GJ) = `SUM_MONTHS(elec_energy_gj)`
-
-2. **Diesel Consumed** (`form_jaigarh_diesel`)
-   * **Monthly Columns**:
-     * `diesel_stationary_kl`: Stationary Eqp (KL) [Input]
-     * `diesel_mobile_kl`: Mobile Eqp (KL) [Input]
-     * `diesel_total_kl`: Total Diesel Qty (KL) = `diesel_stationary_kl + diesel_mobile_kl`
-     * `diesel_stationary_emissions`: Stationary Diesel Emissions (tCO2e) = `diesel_stationary_kl * 2.6898`
-     * `diesel_mobile_emissions`: Mobile Diesel Emissions (tCO2e) = `diesel_mobile_kl * 2.6932`
-     * `diesel_total_emissions`: Total Diesel Emissions (tCO2e) = `diesel_stationary_emissions + diesel_mobile_emissions`
-     * `diesel_energy_gj`: Diesel Energy (GJ) = `diesel_total_kl * 36.12`
-   * **Aggregate Cards Below Table**:
-     * `diesel_stationary_emissions_ann`: Total Stationary Diesel Emissions (tCO2e) = `SUM_MONTHS(diesel_stationary_emissions)`
-     * `diesel_mobile_emissions_ann`: Total Mobile Diesel Emissions (tCO2e) = `SUM_MONTHS(diesel_mobile_emissions)`
-     * `diesel_total_emissions_ann`: Total Diesel Emissions (tCO2e) = `diesel_stationary_emissions_ann + diesel_mobile_emissions_ann`
-     * `diesel_energy_gj_ann`: Total Diesel Energy (GJ) = `SUM_MONTHS(diesel_energy_gj)`
-
-3. **Petrol Consumed** (`form_jaigarh_petrol`)
-   * **Monthly Columns**:
-     * `petrol_qty_kl`: Total Qty (KL) [Input]
-     * `petrol_emissions`: Total Petrol Emissions (tCO2e) = `petrol_qty_kl * 2.3372`
-     * `petrol_energy_gj`: Petrol Energy (GJ) = `petrol_qty_kl * 32.88`
-   * **Aggregate Cards Below Table**:
-     * `petrol_emissions_ann`: Total Petrol Emissions (tCO2e) = `SUM_MONTHS(petrol_emissions)`
-     * `petrol_energy_gj_ann`: Total Petrol Energy (GJ) = `SUM_MONTHS(petrol_energy_gj)`
-
-4. **HFHSD & IFO Consumed** (`form_jaigarh_hfhsd_ifo`)
-   * **Monthly Columns**:
-     * `hfhsd_qty_kl`: HFHSD Qty (KL) [Input]
-     * `ifo_qty_kl`: IFO Qty (KL) [Input]
-     * `hfhsd_ifo_total_kl`: Total Qty (KL) = `hfhsd_qty_kl + ifo_qty_kl`
-     * `hfhsd_ifo_emissions`: Total HFHSD & IFO Emissions (tCO2e) = `hfhsd_ifo_total_kl * 2.8311`
-     * `hfhsd_ifo_energy_gj`: HFHSD & IFO Energy (GJ) = `hfhsd_ifo_total_kl * 36.40`
-   * **Aggregate Cards Below Table**:
-     * `hfhsd_ifo_emissions_ann`: Total HFHSD & IFO Emissions (tCO2e) = `SUM_MONTHS(hfhsd_ifo_emissions)`
-     * `hfhsd_ifo_energy_gj_ann`: Total HFHSD & IFO Energy (GJ) = `SUM_MONTHS(hfhsd_ifo_energy_gj)`
-
-5. **Other Fuels & Refrigerants** (`form_jaigarh_other_fuels`)
-   * **Monthly Columns**:
-     * `acetylene_qty_t`, `lpg_qty_t`, `co2_fire_ext_qty_t` [Inputs]
-     * `r32_qty_kg`, `r410a_qty_kg`, `r22_qty_kg` [Inputs]
-     * `other_fuels_emissions`: Other Fuels & Refrigerants Emissions (tCO2e) = `acetylene_qty_t * 4.2283 + lpg_qty_t * 2.985 + co2_fire_ext_qty_t * 1.0 + r32_qty_kg * 0.771 + r410a_qty_kg * 2.255`
-     * `other_fuels_energy_gj`: Other Fuels Energy (GJ) = `acetylene_qty_t * 59.16 + lpg_qty_t * 47.3`
-   * **Aggregate Cards Below Table**:
-     * `other_fuels_emissions_ann`: Total Other Fuels & Refrigerants Emissions (tCO2e) = `SUM_MONTHS(other_fuels_emissions)`
-     * `other_fuels_energy_gj_ann`: Total Other Fuels Energy (GJ) = `SUM_MONTHS(other_fuels_energy_gj)`
-
-6. **Energy & GHG Summary** (`form_jaigarh_summary`)
-   * **Monthly Columns**:
-     * `production_million_mt`: Production (Million MT) [Input]
-     * `summary_scope1_emissions`: Scope 1 Emissions (tCO2e) = `diesel_total_emissions + petrol_emissions + hfhsd_ifo_emissions + other_fuels_emissions` (resolves cross-sheet dependencies on monthly values)
-     * `summary_scope2_emissions`: Scope 2 Emissions (tCO2e) = `elec_total_emissions`
-     * `summary_ghg_emissions`: Total GHG Emissions (tCO2e) = `summary_scope1_emissions + summary_scope2_emissions`
-     * `summary_energy_gj`: Total Energy Consumption (GJ) = `elec_energy_gj + diesel_energy_gj + petrol_energy_gj + hfhsd_ifo_energy_gj + other_fuels_energy_gj`
-     * `summary_energy_intensity`: Energy Intensity (GJ/Million MT) = `summary_energy_gj / production_million_mt`
-     * `summary_ghg_intensity`: GHG Intensity (tCO2e/Million MT) = `summary_ghg_emissions / production_million_mt`
-   * **Aggregate Cards Below Table**:
-     * `total_scope1_emissions`: Total Scope 1 (Direct) Emissions (tCO2e) = `SUM_MONTHS(summary_scope1_emissions)`
-     * `total_scope2_emissions`: Total Scope 2 (Indirect) Emissions (tCO2e) = `SUM_MONTHS(summary_scope2_emissions)`
-     * `total_ghg_emissions`: Total GHG Emissions (tCO2e) = `total_scope1_emissions + total_scope2_emissions`
-     * `total_energy_gj`: Total Energy Consumption (GJ) = `SUM_MONTHS(summary_energy_gj)`
-     * `energy_intensity`: Energy Intensity (GJ/Million MT) = `total_energy_gj / SUM_MONTHS(production_million_mt)`
-     * `ghg_intensity`: GHG Intensity (tCO2e/Million MT) = `total_ghg_emissions / SUM_MONTHS(production_million_mt)`
+We have successfully seeded the new template workbook **Jaigarh FY25–26 GHG + Energy Workbook** (`wkbk_jaigarh_demo`), containing 9 distinct sheets and its associated **GHG Emission & Energy Constants** Value Set, while completely cleaning up all references to the previous Jaigarh workbook.
 
 ---
 
-## Verification & Validation Results
+## 1. Value Set Configuration
+A dedicated Value Set with code `GHG_CONSTANTS` was seeded with the following constants:
 
-We verified that the monthly columns calculate correctly across sheets, and the annual summary aggregates evaluate perfectly at the sheet level.
+### Electricity Constants
+* `grid_emission_factor`: `0.710` tCO2/MWh
+* `other_source_emission_factor`: `0.710` tCO2/MWh
+* `mwh_to_gj`: `3.6` GJ/MWh
 
-### Test Inputs (April 2025)
-* Grid Electricity = `100.0` MWH, Sourcing = `200.0` MWH
-* Diesel (Stationary) = `10.0` KL, Diesel (Mobile) = `20.0` KL
+### GWP Constants
+* `r22_gwp`: `1960`
+* `r32_gwp`: `771`
+* `r410a_gwp`: `2256`
+* `ch4_gwp`: `29.8`
+* `n2o_gwp`: `273`
+
+### Other Fuels & Fuel Constants
+* `acetylene_ncv_gj_per_t`: `47.30` GJ/T
+* `acetylene_emission_factor_tco2_per_t`: `3.38` tCO2/T
+* `lpg_ncv_gj_per_t`: `47.30` GJ/T
+* `lpg_emission_factor_tco2_per_t`: `2.985` tCO2/T
+* `co2_fire_extinguisher_ef_tco2_per_t`: `1.0` tCO2/T
+* `diesel_co2_ef`: `2.6898`, `diesel_ch4_ef`: `0.000108`, `diesel_n2o_ef`: `0.000022`, `diesel_energy_factor_gj_per_kl`: `36.12`
+* `petrol_co2_ef`: `2.3372`, `petrol_ch4_ef`: `0.000099`, `petrol_n2o_ef`: `0.000020`, `petrol_energy_factor_gj_per_kl`: `32.88`
+* `hfhsd_co2_ef`: `2.8311`, `hfhsd_ch4_ef`: `0.000109`, `hfhsd_n2o_ef`: `0.000022`, `hfhsd_energy_factor_gj_per_kl`: `36.40`
+* `ifo_co2_ef`: `2.8311`, `ifo_ch4_ef`: `0.000109`, `ifo_n2o_ef`: `0.000022`, `ifo_energy_factor_gj_per_kl`: `36.40`
+
+---
+
+## 2. Configured Sheets & Fields
+
+The workbook features 9 sheets, structured as follows:
+
+### 1. Electricity Consumed (`form_jaigarh_electricity`)
+* **Monthly Fields**:
+  * `electricity_from_grid_mwh`: From Grid (MWh) [Input]
+  * `electricity_other_source_mwh`: Other Source (MWh) [Input]
+  * `electricity_total_mwh`: Total Electricity = `electricity_from_grid_mwh + electricity_other_source_mwh`
+* **Aggregate Fields (Below Table)**:
+  * `electricity_from_grid_total_mwh`: Total From Grid = `SUM_MONTHS(electricity_from_grid_mwh)`
+  * `electricity_other_source_total_mwh`: Total Other Source = `SUM_MONTHS(electricity_other_source_mwh)`
+  * `electricity_total_fy_mwh`: Total Electricity Consumed = `SUM_MONTHS(electricity_total_mwh)`
+  * `electricity_from_grid_emission_tco2e`: GHG Emission From Grid = `electricity_from_grid_total_mwh * grid_emission_factor`
+  * `electricity_other_source_emission_tco2e`: GHG Emission Other Source = `electricity_other_source_total_mwh * other_source_emission_factor`
+  * `electricity_total_emission_tco2e`: Total Electricity GHG Emission = `electricity_from_grid_emission_tco2e + electricity_other_source_emission_tco2e`
+  * `electricity_energy_consumption_gj`: Energy Consumption = `electricity_total_fy_mwh * mwh_to_gj`
+
+### 2. Diesel Consumed (`form_jaigarh_diesel`)
+* **Monthly Fields**:
+  * `diesel_stationary_eqp_kl`: Stationary Eqp (KL) [Input]
+  * `diesel_mobile_eqp_kl`: Mobile Eqp (KL) [Input]
+  * `diesel_total_qty_kl`: Total Qty (KL) = `diesel_stationary_eqp_kl + diesel_mobile_eqp_kl`
+* **Aggregate Fields (Below Table)**:
+  * `diesel_stationary_total_kl`: Total Stationary Eqp = `SUM_MONTHS(diesel_stationary_eqp_kl)`
+  * `diesel_mobile_total_kl`: Total Mobile Eqp = `SUM_MONTHS(diesel_mobile_eqp_kl)`
+  * `diesel_total_fy_kl`: Total Diesel Qty = `SUM_MONTHS(diesel_total_qty_kl)`
+  * `diesel_co2_emission_tco2e`: GHG Emission = `diesel_total_fy_kl * diesel_co2_ef`
+  * `diesel_ch4_emission_tco2e`: Total Emissions CH4 = `diesel_total_fy_kl * diesel_ch4_ef * ch4_gwp`
+  * `diesel_n2o_emission_tco2e`: Total Emissions N2O = `diesel_total_fy_kl * diesel_n2o_ef * n2o_gwp`
+  * `diesel_total_emission_tco2e`: Total Diesel Emission = `diesel_co2_emission_tco2e + diesel_ch4_emission_tco2e + diesel_n2o_emission_tco2e`
+  * `diesel_energy_consumption_gj`: Energy Consumption = `diesel_total_fy_kl * diesel_energy_factor_gj_per_kl`
+
+### 3. Petrol Consumed (`form_jaigarh_petrol`)
+* **Monthly Fields**:
+  * `petrol_total_qty_kl`: Total Qty (KL) [Input]
+* **Aggregate Fields (Below Table)**:
+  * `petrol_total_fy_kl`: Total Petrol Qty = `SUM_MONTHS(petrol_total_qty_kl)`
+  * `petrol_co2_emission_tco2e`: GHG Emission = `petrol_total_fy_kl * petrol_co2_ef`
+  * `petrol_ch4_emission_tco2e`: Total Emissions CH4 = `petrol_total_fy_kl * petrol_ch4_ef * ch4_gwp`
+  * `petrol_n2o_emission_tco2e`: Total Emissions N2O = `petrol_total_fy_kl * petrol_n2o_ef * n2o_gwp`
+  * `petrol_total_emission_tco2e`: Total Petrol Emission = `petrol_co2_emission_tco2e + petrol_ch4_emission_tco2e + petrol_n2o_emission_tco2e`
+  * `petrol_energy_consumption_gj`: Energy Consumption = `petrol_total_fy_kl * petrol_energy_factor_gj_per_kl`
+
+### 4. HFHSD & IFO Consumed (`form_jaigarh_hfhsd_ifo`)
+* **Monthly Fields**:
+  * `hfhsd_qty_kl`: HFHSD Qty (KL) [Input]
+  * `ifo_qty_kl`: IFO Qty (KL) [Input]
+  * `hfhsd_ifo_total_qty_kl`: Total Qty = `hfhsd_qty_kl + ifo_qty_kl`
+* **Aggregate Fields (Below Table)**:
+  * `hfhsd_total_fy_kl`: Total HFHSD Qty = `SUM_MONTHS(hfhsd_qty_kl)`
+  * `ifo_total_fy_kl`: Total IFO Qty = `SUM_MONTHS(ifo_qty_kl)`
+  * `hfhsd_ifo_total_fy_kl`: Total HFHSD & IFO Qty = `SUM_MONTHS(hfhsd_ifo_total_qty_kl)`
+  * `hfhsd_ifo_co2_emission_tco2e`: GHG Emission = `hfhsd_total_fy_kl * hfhsd_co2_ef + ifo_total_fy_kl * ifo_co2_ef`
+  * `hfhsd_ifo_ch4_emission_tco2e`: Total Emissions CH4 = `(hfhsd_total_fy_kl * hfhsd_ch4_ef + ifo_total_fy_kl * ifo_ch4_ef) * ch4_gwp`
+  * `hfhsd_ifo_n2o_emission_tco2e`: Total Emissions N2O = `(hfhsd_total_fy_kl * hfhsd_n2o_ef + ifo_total_fy_kl * ifo_n2o_ef) * n2o_gwp`
+  * `hfhsd_ifo_total_emission_tco2e`: Total HFHSD & IFO Emission = `hfhsd_ifo_co2_emission_tco2e + hfhsd_ifo_ch4_emission_tco2e + hfhsd_ifo_n2o_emission_tco2e`
+  * `hfhsd_energy_consumption_gj`: HFHSD Energy = `hfhsd_total_fy_kl * hfhsd_energy_factor_gj_per_kl`
+  * `ifo_energy_consumption_gj`: IFO Energy = `ifo_total_fy_kl * ifo_energy_factor_gj_per_kl`
+  * `hfhsd_ifo_energy_consumption_gj`: Total HFHSD & IFO Energy = `hfhsd_energy_consumption_gj + ifo_energy_consumption_gj`
+
+### 5. Other Fuels - Emissions (`form_jaigarh_other_fuels_emissions`)
+* **Monthly Fields**:
+  * `acetylene_quantity_t`: Acetylene Quantity (T) [Input]
+  * `acetylene_emission_tco2`: Acetylene tCO2 = `acetylene_quantity_t * acetylene_emission_factor_tco2_per_t`
+  * `lpg_quantity_t`: LPG Quantity (T) [Input]
+  * `lpg_emission_tco2`: LPG tCO2 = `lpg_quantity_t * lpg_emission_factor_tco2_per_t`
+  * `co2_fire_extinguisher_quantity_t`: CO2 Fire Extinguisher Quantity (T) [Input]
+  * `co2_fire_extinguisher_emission_tco2`: CO2 Fire Extinguisher tCO2 = `co2_fire_extinguisher_quantity_t * co2_fire_extinguisher_ef_tco2_per_t`
+  * `hfcs_emission_tco2`: HFCs Emission = `refrigerants_total_emission_mth` (Cross-sheet mirror)
+  * `other_fuels_total_emissions_tco2_mth`: Total Other Fuels Emissions Mth = sum of above acetylene, lpg, fire extinguisher, and hfcs emissions
+* **Aggregate Fields (Below Table)**:
+  * `other_fuels_total_emissions_tco2`: Total Other Fuels Emissions = `SUM_MONTHS(other_fuels_total_emissions_tco2_mth)`
+
+### 6. Refrigerants / GWP (`form_jaigarh_refrigerants_gwp`)
+* **Monthly Fields**:
+  * `r22_quantity_kg`, `r32_quantity_kg`, `r410a_quantity_kg`, `ch4_quantity_kg`, `n2o_quantity_kg` [Inputs]
+  * `r22_emission_tco2e`: R22 Emission = `r22_quantity_kg * r22_gwp / 1000`
+  * `r32_emission_tco2e`: R32 Emission = `r32_quantity_kg * r32_gwp / 1000`
+  * `r410a_emission_tco2e`: 410A Emission = `r410a_quantity_kg * r410a_gwp / 1000`
+  * `ch4_refrigerant_emission_tco2e`: CH4 Emission = `ch4_quantity_kg * ch4_gwp / 1000`
+  * `n2o_refrigerant_emission_tco2e`: N2O Emission = `n2o_quantity_kg * n2o_gwp / 1000`
+  * `refrigerants_total_emission_mth`: Total Refrigerants/HFCs Emission Mth = sum of above refrigerant emissions
+* **Aggregate Fields (Below Table)**:
+  * `refrigerants_total_emission_tco2e`: Total Refrigerants / HFCs Emission = `SUM_MONTHS(refrigerants_total_emission_mth)`
+
+### 7. GHG Summary (`form_jaigarh_ghg_summary`)
+* **Monthly Fields**:
+  * `summary_electricity_emissions_mth`: Electricity Emissions Mth = `electricity_from_grid_mwh * grid_emission_factor + electricity_other_source_mwh * other_source_emission_factor`
+  * `summary_diesel_emissions_mth`: Diesel Emissions Mth = sum of CO2, CH4, N2O diesel emissions
+  * `summary_petrol_emissions_mth`: Petrol Emissions Mth = sum of CO2, CH4, N2O petrol emissions
+  * `summary_hfhsd_ifo_emissions_mth`: HFHSD & IFO Emissions Mth = sum of CO2, CH4, N2O HFHSD/IFO emissions (using mirror inputs)
+  * `summary_other_fuels_emissions_mth`: Other Fuels Emissions Mth = `other_fuels_total_emissions_tco2_mth`
+  * `summary_refrigerants_emissions_mth`: Refrigerants Emissions Mth = `refrigerants_total_emission_mth`
+  * `summary_total_emissions_mth`: Total Emissions Mth = sum of all monthly source emissions
+  * `cargo_throughput_million_mt`: Cargo / Throughput (Million MT) [Input]
+  * `hfhsd_total_fy_kl_mirror`: HFHSD Qty (KL) Mirror = `hfhsd_qty_kl`
+  * `ifo_total_fy_kl_mirror`: IFO Qty (KL) Mirror = `ifo_qty_kl`
+* **Aggregate Fields (Below Table)**:
+  * `summary_electricity_emissions_tco2e`: Electricity Emissions = `SUM_MONTHS(summary_electricity_emissions_mth)`
+  * `summary_diesel_emissions_tco2e`: Diesel Emissions = `SUM_MONTHS(summary_diesel_emissions_mth)`
+  * `summary_petrol_emissions_tco2e`: Petrol Emissions = `SUM_MONTHS(summary_petrol_emissions_mth)`
+  * `summary_hfhsd_ifo_emissions_tco2e`: HFHSD & IFO Emissions = `SUM_MONTHS(summary_hfhsd_ifo_emissions_mth)`
+  * `summary_other_fuels_emissions_tco2e`: Other Fuels Emissions = `SUM_MONTHS(summary_other_fuels_emissions_mth)`
+  * `summary_refrigerants_emissions_tco2e`: Refrigerants / HFCs Emissions = `SUM_MONTHS(summary_refrigerants_emissions_mth)`
+  * `total_emissions_tco2e`: Total Emissions = sum of all aggregate source emissions
+  * `ghg_intensity_000_tco2e_per_million_mt`: GHG Intensity = `(total_emissions_tco2e / 1000) / SUM_MONTHS(cargo_throughput_million_mt)`
+
+### 8. Energy Consumption Summary (`form_jaigarh_energy_summary`)
+* **Monthly Fields**:
+  * `summary_electricity_energy_gj_mth`: Electrical Energy Mth = `electricity_total_mwh * mwh_to_gj`
+  * `summary_diesel_energy_gj_mth`: Diesel Energy Mth = `diesel_total_qty_kl * diesel_energy_factor_gj_per_kl`
+  * `summary_petrol_energy_gj_mth`: Petrol Energy Mth = `petrol_total_qty_kl * petrol_energy_factor_gj_per_kl`
+  * `summary_hfhsd_ifo_energy_gj_mth`: HFHSD & IFO Energy Mth = sum of HFHSD and IFO energy
+  * `summary_other_fuels_energy_gj_mth`: Other Fuels Energy Mth = `other_fuels_energy_consumption_gj_mth`
+  * `summary_fossil_fuel_energy_gj_mth`: Fossil Fuel Energy Mth = sum of diesel, petrol, HFHSD/IFO, and other fuels energy
+  * `summary_total_energy_gj_mth`: Total Energy Mth = `summary_electricity_energy_gj_mth + summary_fossil_fuel_energy_gj_mth`
+  * `energy_cargo_throughput_million_mt`: Cargo / Throughput (Million MT) [Input]
+* **Aggregate Fields (Below Table)**:
+  * `electrical_energy_consumption_gj`: Electrical Energy Consumption = `SUM_MONTHS(summary_electricity_energy_gj_mth)`
+  * `summary_diesel_energy_gj`: Diesel Energy Consumption = `SUM_MONTHS(summary_diesel_energy_gj_mth)`
+  * `summary_petrol_energy_gj`: Petrol Energy Consumption = `SUM_MONTHS(summary_petrol_energy_gj_mth)`
+  * `summary_hfhsd_ifo_energy_gj`: HFHSD & IFO Energy Consumption = `SUM_MONTHS(summary_hfhsd_ifo_energy_gj_mth)`
+  * `summary_other_fuels_energy_gj`: Other Fuels Energy Consumption = `SUM_MONTHS(summary_other_fuels_energy_gj_mth)`
+  * `fossil_fuel_energy_consumption_gj`: Fossil Fuel Energy Consumption = sum of diesel, petrol, HFHSD/IFO, other fuels aggregate energy
+  * `total_energy_consumption_gj`: Total Energy Consumption = `electrical_energy_consumption_gj + fossil_fuel_energy_consumption_gj`
+  * `electrical_energy_intensity_kj_per_mt`: Electrical Energy Intensity = `electrical_energy_consumption_gj / SUM_MONTHS(energy_cargo_throughput_million_mt)`
+  * `fossil_fuel_energy_intensity_kj_per_mt`: Fossil Fuel Energy Intensity = `fossil_fuel_energy_consumption_gj / SUM_MONTHS(energy_cargo_throughput_million_mt)`
+  * `energy_intensity_000_gj_per_million_mt`: Total Energy Intensity = `(total_energy_consumption_gj / 1000) / SUM_MONTHS(energy_cargo_throughput_million_mt)`
+
+### 9. Other Fuels - Energy (`form_jaigarh_other_fuels_energy`)
+* **Monthly Fields**:
+  * `acetylene_energy_quantity_t`: Acetylene Quantity (T) [Input]
+  * `acetylene_energy_gj`: Acetylene Energy = `acetylene_energy_quantity_t * acetylene_ncv_gj_per_t`
+  * `lpg_energy_quantity_t`: LPG Quantity (T) [Input]
+  * `lpg_energy_gj`: LPG Energy = `lpg_energy_quantity_t * lpg_ncv_gj_per_t`
+  * `other_fuels_energy_quantity_total_t`: Energy Consumption Quantity = `acetylene_energy_quantity_t + lpg_energy_quantity_t`
+  * `other_fuels_energy_consumption_gj_mth`: Other Fuels Energy Consumption Mth = `acetylene_energy_gj + lpg_energy_gj`
+* **Aggregate Fields (Below Table)**:
+  * `other_fuels_energy_consumption_gj`: Other Fuels Energy Consumption = `SUM_MONTHS(other_fuels_energy_consumption_gj_mth)`
+
+---
+
+## 3. Mathematical Validation Results
+
+The mathematical validation script [test_demo_calculations.py](file:///c:/Users/SHATAM%20RAI/Desktop/jsw/mywork/Digital-GHG-inventory/scratch/test_demo_calculations.py) was executed to test the calculations under mock inputs for April 2025. 
+
+### A. Mock Inputs (April 2025)
+* Grid Electricity = `100.0` MWh, Other Source = `200.0` MWh
+* Diesel: Stationary = `10.0` KL, Mobile = `20.0` KL
 * Petrol = `5.0` KL
 * HFHSD = `50.0` KL, IFO = `50.0` KL
-* Acetylene = `2.0` T, LPG = `0.0` T, CO2 = `0.0` T
-* R32 = `10.0` kg, R410A = `20.0` kg, R22 = `0.0` kg
-* Production = `10.0` Million MT
+* Acetylene = `2.0` T, LPG = `1.5` T, CO2 Fire Ext. = `0.5` T
+* R22 = `5.0` kg, R32 = `10.0` kg, 410A = `20.0` kg, CH4 = `1.0` kg, N2O = `2.0` kg
+* Cargo Throughput = `10.0` Million MT
 
-### Monthly Calculation Results (April 2025)
-* `diesel_total_kl` = `30.0`
-* `elec_total_mwh` = `300.0`
-* `hfhsd_ifo_total_kl` = `100.0`
-* `summary_scope1_emissions` = `436.8246`
-* `summary_scope2_emissions` = `213.0`
-* `summary_ghg_emissions` = `649.8246`
-* `summary_energy_gj` = `6086.32`
-* `summary_energy_intensity` = `608.632`
-* `summary_ghg_intensity` = `64.98246`
+### B. Verified Outputs (April 2025 Monthly)
+* Total Electricity = `300.0` MWh
+* Total Diesel = `30.0` KL
+* Total HFHSD & IFO = `100.0` KL
+* Acetylene Emissions = `6.76` tCO2
+* LPG Emissions = `4.4775` tCO2
+* CO2 Fire Ext. Emissions = `0.5` tCO2
+* Total Refrigerants/HFCs Emissions = `63.2058` tCO2e
+* Total Other Fuels Emissions = `74.9433` tCO2e
+* GHG Summary Monthly:
+  * Electricity Emissions: `213.0` tCO2e
+  * Diesel Emissions: `80.970732` tCO2e
+  * Petrol Emissions: `11.728051` tCO2e
+  * HFHSD & IFO Emissions: `284.03542` tCO2e
+  * Other Fuels Emissions: `74.9433` tCO2e
+  * Refrigerants Emissions: `63.2058` tCO2e
+  * **Total Monthly Emissions**: `727.883303` tCO2e
+* Energy Consumption Summary Monthly:
+  * Electrical Energy: `1080.0` GJ
+  * Diesel Energy: `1083.6` GJ
+  * Petrol Energy: `164.4` GJ
+  * HFHSD & IFO Energy: `3640.0` GJ
+  * Other Fuels Energy: `165.55` GJ
+  * Fossil Fuel Energy: `5053.55` GJ
+  * **Total Monthly Energy**: `6133.55` GJ
 
-### Sheet-Level Aggregate Results (Below-Table Summary Cards)
+### C. Verified Sheet-Level Aggregates (Sheet Results)
 * **Electricity Consumed**:
-  * Total Grid Emissions: `71.0` tCO2e
-  * Total Sourcing Emissions: `142.0` tCO2e
-  * Total Electricity Emissions: `213.0` tCO2e
-  * Total Electrical Energy: `1080.0` GJ
+  * Total Electricity Consumed: `300.0` MWh
+  * GHG Emission From Grid: `71.0` tCO2e
+  * GHG Emission Other Source: `142.0` tCO2e
+  * Total Electricity GHG Emission: `213.0` tCO2e
+  * Energy Consumption: `1080.0` GJ
 * **Diesel Consumed**:
-  * Total Stationary Emissions: `26.898` tCO2e
-  * Total Mobile Emissions: `53.864` tCO2e
-  * Total Diesel Emissions: `80.762` tCO2e
-  * Total Diesel Energy: `1083.6` GJ
+  * GHG Emission: `80.694` tCO2e
+  * Total Emissions CH4: `0.096552` tCO2e
+  * Total Emissions N2O: `0.18018` tCO2e
+  * Total Diesel Emission: `80.970732` tCO2e
+  * Energy Consumption: `1083.6` GJ
 * **Petrol Consumed**:
-  * Total Petrol Emissions: `11.686` tCO2e
-  * Total Petrol Energy: `164.4` GJ
+  * Total Petrol Emission: `11.728051` tCO2e
+  * Energy Consumption: `164.4` GJ
 * **HFHSD & IFO Consumed**:
-  * Total HFHSD & IFO Emissions: `283.11` tCO2e
+  * Total HFHSD & IFO Emission: `284.03542` tCO2e
   * Total HFHSD & IFO Energy: `3640.0` GJ
-* **Other Fuels & Refrigerants**:
-  * Total Other Fuels & Refrigerants Emissions: `61.2666` tCO2e
-  * Total Other Fuels Energy: `118.32` GJ
-* **Energy & GHG Summary**:
-  * Total Scope 1 (Direct) Emissions: `436.8246` tCO2e
-  * Total Scope 2 (Indirect) Emissions: `213.0` tCO2e
-  * Total GHG Emissions: `649.8246` tCO2e
-  * Total Energy Consumption: `6086.32` GJ
-  * Energy Intensity: `608.632` GJ/Million MT
-  * GHG Intensity: `64.98246` tCO2e/Million MT
+* **Other Fuels - Emissions**:
+  * Total Other Fuels Emissions: `74.9433` tCO2
+* **Refrigerants / GWP**:
+  * Total Refrigerants / HFCs Emission: `63.2058` tCO2e
+* **GHG Summary**:
+  * Total Emissions: `727.883303` tCO2e
+  * GHG Intensity: `0.0727883303` 000' tCO2e/Million MT
+* **Energy Consumption Summary**:
+  * Electrical Energy Consumption: `1080.0` GJ
+  * Fossil Fuel Energy Consumption: `5053.55` GJ
+  * Total Energy Consumption: `6133.55` GJ
+  * Electrical Energy Intensity: `108.0` KJ/MT
+  * Fossil Fuel Energy Intensity: `505.355` KJ/MT
+  * Total Energy Intensity: `0.613355` 000' GJ/Million MT
+* **Other Fuels - Energy**:
+  * Other Fuels Energy Consumption: `165.55` GJ
