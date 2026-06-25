@@ -183,8 +183,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function setEmpty(title, body) {
     tableWrap.classList.add("hidden");
-    if (sheetResultsSection) sheetResultsSection.classList.add("hidden");
-    if (sheetResultsList) sheetResultsList.innerHTML = "";
+    if (sheetResultsSection) {
+      sheetResultsSection.classList.add("hidden");
+      sheetResultsSection.innerHTML = "";
+    }
     formTabs.innerHTML = "";
     emptyTitleEl.textContent = title;
     emptyBodyEl.textContent = body;
