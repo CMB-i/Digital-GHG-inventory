@@ -63,6 +63,17 @@ def run():
             f.current_version_id = None
         db.session.commit()
 
+        # Delete dependent submissions and submission values
+        from app.modules.SUBMIT.model import Submission, SubmissionValue
+        old_form_ids = [f.id for f in old_forms]
+        if old_form_ids:
+            subs = Submission.query.filter(Submission.form_id.in_(old_form_ids)).all()
+            sub_ids = [s.id for s in subs]
+            if sub_ids:
+                SubmissionValue.query.filter(SubmissionValue.submission_id.in_(sub_ids)).delete()
+                Submission.query.filter(Submission.id.in_(sub_ids)).delete()
+            db.session.commit()
+
         # Clean up formulas
         formula_codes = [
             # Electricity
