@@ -69,6 +69,12 @@ def run():
 
         for f in old_forms:
             old_fields = Field.query.filter_by(form_id=f.id).all()
+            for fd in old_fields:
+                fd.current_version_id = None
+        db.session.commit()
+
+        for f in old_forms:
+            old_fields = Field.query.filter_by(form_id=f.id).all()
             field_ids = [fd.id for fd in old_fields]
             if field_ids:
                 FieldVersion.query.filter(FieldVersion.field_id.in_(field_ids)).delete()
@@ -102,13 +108,21 @@ def run():
                 "code": "form_jaigarh_electricity",
                 "display_order": 1,
                 "fields": [
-                    {"code": "elec_grid_mwh", "name": "From Grid (MWH)", "type": "number", "display_order": 1},
-                    {"code": "elec_group_sourcing_mwh", "name": "Group Co Sourcing (MWH)", "type": "number", "display_order": 2},
-                    {"code": "elec_total_mwh", "name": "Total Electricity (MWH)", "type": "calculated", "formula_expression": "elec_grid_mwh + elec_group_sourcing_mwh", "display_order": 3},
-                    {"code": "elec_grid_emissions", "name": "Grid Electricity Emissions (tCO2e)", "type": "calculated", "formula_expression": "elec_grid_mwh * 0.71", "display_order": 4},
-                    {"code": "elec_group_sourcing_emissions", "name": "Group Co Sourcing Emissions (tCO2e)", "type": "calculated", "formula_expression": "elec_group_sourcing_mwh * 0.71", "display_order": 5},
-                    {"code": "elec_total_emissions", "name": "Total Electricity Emissions (tCO2e)", "type": "calculated", "formula_expression": "elec_grid_emissions + elec_group_sourcing_emissions", "display_order": 6},
-                    {"code": "elec_energy_gj", "name": "Electrical Energy Consumption (GJ)", "type": "calculated", "formula_expression": "elec_total_mwh * 3.6", "display_order": 7},
+                    {"code": "elec_grid_mwh", "name": "From Grid (MWH)", "type": "number", "unit": "MWH", "display_order": 1},
+                    {"code": "elec_group_sourcing_mwh", "name": "Group Co Sourcing (MWH)", "type": "number", "unit": "MWH", "display_order": 2},
+                    {"code": "elec_total_mwh", "name": "Total Electricity (MWH)", "type": "calculated", "formula_expression": "elec_grid_mwh + elec_group_sourcing_mwh", "unit": "MWH", "display_order": 3},
+                    
+                    # Monthly calculations (columns)
+                    {"code": "elec_grid_emissions", "name": "Grid Electricity Emissions (tCO2e)", "type": "calculated", "formula_expression": "elec_grid_mwh * 0.71", "unit": "tCO2e", "display_order": 4},
+                    {"code": "elec_group_sourcing_emissions", "name": "Group Co Sourcing Emissions (tCO2e)", "type": "calculated", "formula_expression": "elec_group_sourcing_mwh * 0.71", "unit": "tCO2e", "display_order": 5},
+                    {"code": "elec_total_emissions", "name": "Total Electricity Emissions (tCO2e)", "type": "calculated", "formula_expression": "elec_grid_emissions + elec_group_sourcing_emissions", "unit": "tCO2e", "display_order": 6},
+                    {"code": "elec_energy_gj", "name": "Electrical Energy Consumption (GJ)", "type": "calculated", "formula_expression": "elec_total_mwh * 3.6", "unit": "GJ", "display_order": 7},
+                    
+                    # Below-table aggregates
+                    {"code": "elec_grid_emissions_ann", "name": "Total Grid Electricity Emissions (tCO2e)", "type": "calculated", "formula_expression": "SUM_MONTHS(elec_grid_emissions)", "is_aggregate": True, "unit": "tCO2e", "display_order": 8},
+                    {"code": "elec_group_sourcing_emissions_ann", "name": "Total Group Co Sourcing Emissions (tCO2e)", "type": "calculated", "formula_expression": "SUM_MONTHS(elec_group_sourcing_emissions)", "is_aggregate": True, "unit": "tCO2e", "display_order": 9},
+                    {"code": "elec_total_emissions_ann", "name": "Total Electricity Emissions (tCO2e)", "type": "calculated", "formula_expression": "elec_grid_emissions_ann + elec_group_sourcing_emissions_ann", "is_aggregate": True, "unit": "tCO2e", "display_order": 10},
+                    {"code": "elec_energy_gj_ann", "name": "Total Electrical Energy Consumption (GJ)", "type": "calculated", "formula_expression": "SUM_MONTHS(elec_energy_gj)", "is_aggregate": True, "unit": "GJ", "display_order": 11},
                 ]
             },
             {
@@ -116,13 +130,21 @@ def run():
                 "code": "form_jaigarh_diesel",
                 "display_order": 2,
                 "fields": [
-                    {"code": "diesel_stationary_kl", "name": "Stationary Eqp (KL)", "type": "number", "display_order": 1},
-                    {"code": "diesel_mobile_kl", "name": "Mobile Eqp (KL)", "type": "number", "display_order": 2},
-                    {"code": "diesel_total_kl", "name": "Total Diesel Qty (KL)", "type": "calculated", "formula_expression": "diesel_stationary_kl + diesel_mobile_kl", "display_order": 3},
-                    {"code": "diesel_stationary_emissions", "name": "Stationary Diesel Emissions (tCO2e)", "type": "calculated", "formula_expression": "diesel_stationary_kl * 2.6898", "display_order": 4},
-                    {"code": "diesel_mobile_emissions", "name": "Mobile Diesel Emissions (tCO2e)", "type": "calculated", "formula_expression": "diesel_mobile_kl * 2.6932", "display_order": 5},
-                    {"code": "diesel_total_emissions", "name": "Total Diesel Emissions (tCO2e)", "type": "calculated", "formula_expression": "diesel_stationary_emissions + diesel_mobile_emissions", "display_order": 6},
-                    {"code": "diesel_energy_gj", "name": "Diesel Energy (GJ)", "type": "calculated", "formula_expression": "diesel_total_kl * 36.12", "display_order": 7},
+                    {"code": "diesel_stationary_kl", "name": "Stationary Eqp (KL)", "type": "number", "unit": "KL", "display_order": 1},
+                    {"code": "diesel_mobile_kl", "name": "Mobile Eqp (KL)", "type": "number", "unit": "KL", "display_order": 2},
+                    {"code": "diesel_total_kl", "name": "Total Diesel Qty (KL)", "type": "calculated", "formula_expression": "diesel_stationary_kl + diesel_mobile_kl", "unit": "KL", "display_order": 3},
+                    
+                    # Monthly calculations (columns)
+                    {"code": "diesel_stationary_emissions", "name": "Stationary Diesel Emissions (tCO2e)", "type": "calculated", "formula_expression": "diesel_stationary_kl * 2.6898", "unit": "tCO2e", "display_order": 4},
+                    {"code": "diesel_mobile_emissions", "name": "Mobile Diesel Emissions (tCO2e)", "type": "calculated", "formula_expression": "diesel_mobile_kl * 2.6932", "unit": "tCO2e", "display_order": 5},
+                    {"code": "diesel_total_emissions", "name": "Total Diesel Emissions (tCO2e)", "type": "calculated", "formula_expression": "diesel_stationary_emissions + diesel_mobile_emissions", "unit": "tCO2e", "display_order": 6},
+                    {"code": "diesel_energy_gj", "name": "Diesel Energy (GJ)", "type": "calculated", "formula_expression": "diesel_total_kl * 36.12", "unit": "GJ", "display_order": 7},
+                    
+                    # Below-table aggregates
+                    {"code": "diesel_stationary_emissions_ann", "name": "Total Stationary Diesel Emissions (tCO2e)", "type": "calculated", "formula_expression": "SUM_MONTHS(diesel_stationary_emissions)", "is_aggregate": True, "unit": "tCO2e", "display_order": 8},
+                    {"code": "diesel_mobile_emissions_ann", "name": "Total Mobile Diesel Emissions (tCO2e)", "type": "calculated", "formula_expression": "SUM_MONTHS(diesel_mobile_emissions)", "is_aggregate": True, "unit": "tCO2e", "display_order": 9},
+                    {"code": "diesel_total_emissions_ann", "name": "Total Diesel Emissions (tCO2e)", "type": "calculated", "formula_expression": "diesel_stationary_emissions_ann + diesel_mobile_emissions_ann", "is_aggregate": True, "unit": "tCO2e", "display_order": 10},
+                    {"code": "diesel_energy_gj_ann", "name": "Total Diesel Energy (GJ)", "type": "calculated", "formula_expression": "SUM_MONTHS(diesel_energy_gj)", "is_aggregate": True, "unit": "GJ", "display_order": 11},
                 ]
             },
             {
@@ -130,9 +152,15 @@ def run():
                 "code": "form_jaigarh_petrol",
                 "display_order": 3,
                 "fields": [
-                    {"code": "petrol_qty_kl", "name": "Total Qty (KL)", "type": "number", "display_order": 1},
-                    {"code": "petrol_emissions", "name": "Total Petrol Emissions (tCO2e)", "type": "calculated", "formula_expression": "petrol_qty_kl * 2.3372", "display_order": 2},
-                    {"code": "petrol_energy_gj", "name": "Petrol Energy (GJ)", "type": "calculated", "formula_expression": "petrol_qty_kl * 32.88", "display_order": 3},
+                    {"code": "petrol_qty_kl", "name": "Total Qty (KL)", "type": "number", "unit": "KL", "display_order": 1},
+                    
+                    # Monthly calculations (columns)
+                    {"code": "petrol_emissions", "name": "Total Petrol Emissions (tCO2e)", "type": "calculated", "formula_expression": "petrol_qty_kl * 2.3372", "unit": "tCO2e", "display_order": 2},
+                    {"code": "petrol_energy_gj", "name": "Petrol Energy (GJ)", "type": "calculated", "formula_expression": "petrol_qty_kl * 32.88", "unit": "GJ", "display_order": 3},
+                    
+                    # Below-table aggregates
+                    {"code": "petrol_emissions_ann", "name": "Total Petrol Emissions (tCO2e)", "type": "calculated", "formula_expression": "SUM_MONTHS(petrol_emissions)", "is_aggregate": True, "unit": "tCO2e", "display_order": 4},
+                    {"code": "petrol_energy_gj_ann", "name": "Total Petrol Energy (GJ)", "type": "calculated", "formula_expression": "SUM_MONTHS(petrol_energy_gj)", "is_aggregate": True, "unit": "GJ", "display_order": 5},
                 ]
             },
             {
@@ -140,11 +168,17 @@ def run():
                 "code": "form_jaigarh_hfhsd_ifo",
                 "display_order": 4,
                 "fields": [
-                    {"code": "hfhsd_qty_kl", "name": "HFHSD Qty (KL)", "type": "number", "display_order": 1},
-                    {"code": "ifo_qty_kl", "name": "IFO Qty (KL)", "type": "number", "display_order": 2},
-                    {"code": "hfhsd_ifo_total_kl", "name": "Total Qty (KL)", "type": "calculated", "formula_expression": "hfhsd_qty_kl + ifo_qty_kl", "display_order": 3},
-                    {"code": "hfhsd_ifo_emissions", "name": "Total HFHSD & IFO Emissions (tCO2e)", "type": "calculated", "formula_expression": "hfhsd_ifo_total_kl * 2.8311", "display_order": 4},
-                    {"code": "hfhsd_ifo_energy_gj", "name": "HFHSD & IFO Energy (GJ)", "type": "calculated", "formula_expression": "hfhsd_ifo_total_kl * 36.40", "display_order": 5},
+                    {"code": "hfhsd_qty_kl", "name": "HFHSD Qty (KL)", "type": "number", "unit": "KL", "display_order": 1},
+                    {"code": "ifo_qty_kl", "name": "IFO Qty (KL)", "type": "number", "unit": "KL", "display_order": 2},
+                    {"code": "hfhsd_ifo_total_kl", "name": "Total Qty (KL)", "type": "calculated", "formula_expression": "hfhsd_qty_kl + ifo_qty_kl", "unit": "KL", "display_order": 3},
+                    
+                    # Monthly calculations (columns)
+                    {"code": "hfhsd_ifo_emissions", "name": "Total HFHSD & IFO Emissions (tCO2e)", "type": "calculated", "formula_expression": "hfhsd_ifo_total_kl * 2.8311", "unit": "tCO2e", "display_order": 4},
+                    {"code": "hfhsd_ifo_energy_gj", "name": "HFHSD & IFO Energy (GJ)", "type": "calculated", "formula_expression": "hfhsd_ifo_total_kl * 36.40", "unit": "GJ", "display_order": 5},
+                    
+                    # Below-table aggregates
+                    {"code": "hfhsd_ifo_emissions_ann", "name": "Total HFHSD & IFO Emissions (tCO2e)", "type": "calculated", "formula_expression": "SUM_MONTHS(hfhsd_ifo_emissions)", "is_aggregate": True, "unit": "tCO2e", "display_order": 6},
+                    {"code": "hfhsd_ifo_energy_gj_ann", "name": "Total HFHSD & IFO Energy (GJ)", "type": "calculated", "formula_expression": "SUM_MONTHS(hfhsd_ifo_energy_gj)", "is_aggregate": True, "unit": "GJ", "display_order": 7},
                 ]
             },
             {
@@ -152,14 +186,20 @@ def run():
                 "code": "form_jaigarh_other_fuels",
                 "display_order": 5,
                 "fields": [
-                    {"code": "acetylene_qty_t", "name": "Acetylene Qty (T)", "type": "number", "display_order": 1},
-                    {"code": "lpg_qty_t", "name": "LPG Qty (T)", "type": "number", "display_order": 2},
-                    {"code": "co2_fire_ext_qty_t", "name": "CO2 Fire Ext Qty (T)", "type": "number", "display_order": 3},
-                    {"code": "r32_qty_kg", "name": "R32 Qty (Kg)", "type": "number", "display_order": 4},
-                    {"code": "r410a_qty_kg", "name": "R410A Qty (Kg)", "type": "number", "display_order": 5},
-                    {"code": "r22_qty_kg", "name": "R22 Qty (Kg)", "type": "number", "display_order": 6},
-                    {"code": "other_fuels_emissions", "name": "Other Fuels & Refrigerants Emissions (tCO2e)", "type": "calculated", "formula_expression": "acetylene_qty_t * 4.2283 + lpg_qty_t * 2.985 + co2_fire_ext_qty_t * 1.0 + r32_qty_kg * 0.771 + r410a_qty_kg * 2.255", "display_order": 7},
-                    {"code": "other_fuels_energy_gj", "name": "Other Fuels Energy (GJ)", "type": "calculated", "formula_expression": "acetylene_qty_t * 59.16 + lpg_qty_t * 47.3", "display_order": 8},
+                    {"code": "acetylene_qty_t", "name": "Acetylene Qty (T)", "type": "number", "unit": "T", "display_order": 1},
+                    {"code": "lpg_qty_t", "name": "LPG Qty (T)", "type": "number", "unit": "T", "display_order": 2},
+                    {"code": "co2_fire_ext_qty_t", "name": "CO2 Fire Ext Qty (T)", "type": "number", "unit": "T", "display_order": 3},
+                    {"code": "r32_qty_kg", "name": "R32 Qty (Kg)", "type": "number", "unit": "Kg", "display_order": 4},
+                    {"code": "r410a_qty_kg", "name": "R410A Qty (Kg)", "type": "number", "unit": "Kg", "display_order": 5},
+                    {"code": "r22_qty_kg", "name": "R22 Qty (Kg)", "type": "number", "unit": "Kg", "display_order": 6},
+                    
+                    # Monthly calculations (columns)
+                    {"code": "other_fuels_emissions", "name": "Other Fuels & Refrigerants Emissions (tCO2e)", "type": "calculated", "formula_expression": "acetylene_qty_t * 4.2283 + lpg_qty_t * 2.985 + co2_fire_ext_qty_t * 1.0 + r32_qty_kg * 0.771 + r410a_qty_kg * 2.255", "unit": "tCO2e", "display_order": 7},
+                    {"code": "other_fuels_energy_gj", "name": "Other Fuels Energy (GJ)", "type": "calculated", "formula_expression": "acetylene_qty_t * 59.16 + lpg_qty_t * 47.3", "unit": "GJ", "display_order": 8},
+                    
+                    # Below-table aggregates
+                    {"code": "other_fuels_emissions_ann", "name": "Total Other Fuels & Refrigerants Emissions (tCO2e)", "type": "calculated", "formula_expression": "SUM_MONTHS(other_fuels_emissions)", "is_aggregate": True, "unit": "tCO2e", "display_order": 9},
+                    {"code": "other_fuels_energy_gj_ann", "name": "Total Other Fuels Energy (GJ)", "type": "calculated", "formula_expression": "SUM_MONTHS(other_fuels_energy_gj)", "is_aggregate": True, "unit": "GJ", "display_order": 10},
                 ]
             },
             {
@@ -167,13 +207,23 @@ def run():
                 "code": "form_jaigarh_summary",
                 "display_order": 6,
                 "fields": [
-                    {"code": "production_million_mt", "name": "Production (Million MT)", "type": "number", "display_order": 1},
-                    {"code": "total_scope1_emissions", "name": "Total Scope 1 (Direct) Emissions (tCO2e)", "type": "calculated", "formula_expression": "diesel_total_emissions + petrol_emissions + hfhsd_ifo_emissions + other_fuels_emissions", "display_order": 2},
-                    {"code": "total_scope2_emissions", "name": "Total Scope 2 (Indirect) Emissions (tCO2e)", "type": "calculated", "formula_expression": "elec_total_emissions", "display_order": 3},
-                    {"code": "total_ghg_emissions", "name": "Total GHG Emissions (tCO2e)", "type": "calculated", "formula_expression": "total_scope1_emissions + total_scope2_emissions", "display_order": 4},
-                    {"code": "total_energy_gj", "name": "Total Energy Consumption (GJ)", "type": "calculated", "formula_expression": "elec_energy_gj + diesel_energy_gj + petrol_energy_gj + hfhsd_ifo_energy_gj + other_fuels_energy_gj", "display_order": 5},
-                    {"code": "energy_intensity", "name": "Energy Intensity (GJ/Million MT)", "type": "calculated", "formula_expression": "total_energy_gj / production_million_mt", "display_order": 6},
-                    {"code": "ghg_intensity", "name": "GHG Intensity (tCO2e/Million MT)", "type": "calculated", "formula_expression": "total_ghg_emissions / production_million_mt", "display_order": 7},
+                    {"code": "production_million_mt", "name": "Production (Million MT)", "type": "number", "unit": "Million MT", "display_order": 1},
+                    
+                    # Monthly calculations (columns)
+                    {"code": "summary_scope1_emissions", "name": "Scope 1 Emissions (tCO2e)", "type": "calculated", "formula_expression": "diesel_total_emissions + petrol_emissions + hfhsd_ifo_emissions + other_fuels_emissions", "unit": "tCO2e", "display_order": 2},
+                    {"code": "summary_scope2_emissions", "name": "Scope 2 Emissions (tCO2e)", "type": "calculated", "formula_expression": "elec_total_emissions", "unit": "tCO2e", "display_order": 3},
+                    {"code": "summary_ghg_emissions", "name": "Total GHG Emissions (tCO2e)", "type": "calculated", "formula_expression": "summary_scope1_emissions + summary_scope2_emissions", "unit": "tCO2e", "display_order": 4},
+                    {"code": "summary_energy_gj", "name": "Total Energy Consumption (GJ)", "type": "calculated", "formula_expression": "elec_energy_gj + diesel_energy_gj + petrol_energy_gj + hfhsd_ifo_energy_gj + other_fuels_energy_gj", "unit": "GJ", "display_order": 5},
+                    {"code": "summary_energy_intensity", "name": "Energy Intensity (GJ/Million MT)", "type": "calculated", "formula_expression": "summary_energy_gj / production_million_mt", "unit": "GJ/Million MT", "display_order": 6},
+                    {"code": "summary_ghg_intensity", "name": "GHG Intensity (tCO2e/Million MT)", "type": "calculated", "formula_expression": "summary_ghg_emissions / production_million_mt", "unit": "tCO2e/Million MT", "display_order": 7},
+                    
+                    # Below-table aggregates
+                    {"code": "total_scope1_emissions", "name": "Total Scope 1 (Direct) Emissions (tCO2e)", "type": "calculated", "formula_expression": "SUM_MONTHS(summary_scope1_emissions)", "is_aggregate": True, "unit": "tCO2e", "display_order": 8},
+                    {"code": "total_scope2_emissions", "name": "Total Scope 2 (Indirect) Emissions (tCO2e)", "type": "calculated", "formula_expression": "SUM_MONTHS(summary_scope2_emissions)", "is_aggregate": True, "unit": "tCO2e", "display_order": 9},
+                    {"code": "total_ghg_emissions", "name": "Total GHG Emissions (tCO2e)", "type": "calculated", "formula_expression": "total_scope1_emissions + total_scope2_emissions", "is_aggregate": True, "unit": "tCO2e", "display_order": 10},
+                    {"code": "total_energy_gj", "name": "Total Energy Consumption (GJ)", "type": "calculated", "formula_expression": "SUM_MONTHS(summary_energy_gj)", "is_aggregate": True, "unit": "GJ", "display_order": 11},
+                    {"code": "energy_intensity", "name": "Energy Intensity (GJ/Million MT)", "type": "calculated", "formula_expression": "total_energy_gj / SUM_MONTHS(production_million_mt)", "is_aggregate": True, "unit": "GJ/Million MT", "display_order": 12},
+                    {"code": "ghg_intensity", "name": "GHG Intensity (tCO2e/Million MT)", "type": "calculated", "formula_expression": "total_ghg_emissions / SUM_MONTHS(production_million_mt)", "is_aggregate": True, "unit": "tCO2e/Million MT", "display_order": 13},
                 ]
             }
         ]
@@ -233,13 +283,23 @@ def run():
                 db.session.flush()
 
                 field_config = {}
+                if field_def.get("unit"):
+                    field_config["unit"] = field_def["unit"]
+
+                is_agg = field_def.get("is_aggregate", False)
+                if is_agg:
+                    field_config["display_region"] = "below_monthly_table"
+                    field_config["field_scope"] = "annual_result"
+                    field_config["result_role"] = "aggregate_result"
+                    field_config["blank_policy"] = "strict"
+
                 if field_def["type"] == "calculated":
                     # Create Formula
                     formula = Formula(
-                        name=field_def["name"] + " Formula",
-                        code=field_def["code"] + "_formula",
-                        created_by=admin_user.id,
-                        updated_by=admin_user.id
+                         name=field_def["name"] + " Formula",
+                         code=field_def["code"] + "_formula",
+                         created_by=admin_user.id,
+                         updated_by=admin_user.id
                     )
                     db.session.add(formula)
                     db.session.flush()
@@ -272,6 +332,7 @@ def run():
                     field_name=field_def["name"],
                     field_type=field_def["type"],
                     field_config=field_config,
+                    frequency="annual" if is_agg else "monthly",
                     section_id=section.id,
                     created_by=admin_user.id
                 )

@@ -11,7 +11,7 @@ from app.modules.SITEMST.model import Site
 from app.modules.FORMBLD.model import Form, Field
 from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.SUBMIT.model import Submission, SubmissionValue
-from app.modules.SUBMIT.service import compose_calculation_results
+from app.modules.SUBMIT.service import compose_calculation_results, compose_annual_workbook_data
 from app.modules.USRMGMT.model import User
 from app.modules.WFLWBLD.model import WorkflowVersion
 
@@ -50,12 +50,17 @@ with app.app_context():
         db.session.flush()
         print("Temporarily assigned user as submitter.")
     
-    # 3. Get or create Reporting Period for April 2025
-    period = ReportingPeriod.query.filter_by(site_id=site.id, year=2025, month=4, is_deleted=False).first()
-    if not period:
-        period = ReportingPeriod(site_id=site.id, year=2025, month=4, status="OPEN", created_by=user.id)
-        db.session.add(period)
-        db.session.flush()
+    # 3. Get or create Reporting Periods for all 12 months (April 2025 - March 2026)
+    periods = []
+    for month_idx in range(12):
+        m = (4 + month_idx - 1) % 12 + 1
+        y = 2025 if m >= 4 else 2026
+        p = ReportingPeriod.query.filter_by(site_id=site.id, year=y, month=m, is_deleted=False).first()
+        if not p:
+            p = ReportingPeriod(site_id=site.id, year=y, month=m, status="OPEN", created_by=user.id)
+            db.session.add(p)
+            db.session.flush()
+        periods.append(p)
         
     # 4. Get a valid workflow version
     wv = WorkflowVersion.query.first()
@@ -76,42 +81,49 @@ with app.app_context():
         "r32_qty_kg": "10.0",
         "r410a_qty_kg": "20.0",
         "r22_qty_kg": "0.0",
-        "production_million_mt": "10.0"
+        "production_million_mt": "10.0",
+        "summary_scope1_emissions": "436.8246",
+        "summary_scope2_emissions": "213.0",
+        "summary_ghg_emissions": "649.8246",
+        "summary_energy_gj": "6086.32"
     }
     
-    # 6. Create Mock Submissions and Submission Values
+    # 6. Create Mock Submissions and Submission Values for all 12 months
     forms = Form.query.filter(Form.code.startswith("form_jaigarh_")).all()
     for form in forms:
-        sub = Submission(
-            site_id=site.id,
-            form_id=form.id,
-            form_version_id=form.current_version_id,
-            reporting_period_id=period.id,
-            workflow_version_id=wv.id,
-            status="Draft",
-            submitted_by=user.id,
-            created_by=user.id
-        )
-        db.session.add(sub)
-        db.session.flush()
-        
-        fields = Field.query.filter_by(form_id=form.id, is_deleted=False).all()
-        for field in fields:
-            if field.field_code in mock_values:
-                val = SubmissionValue(
-                    submission_id=sub.id,
-                    field_id=field.id,
-                    field_version_id=field.current_version_id,
-                    raw_value=mock_values[field.field_code],
-                    created_by=user.id
-                )
-                db.session.add(val)
+        for p in periods:
+            sub = Submission(
+                site_id=site.id,
+                form_id=form.id,
+                form_version_id=form.current_version_id,
+                reporting_period_id=p.id,
+                workflow_version_id=wv.id,
+                status="Approved",
+                submitted_by=user.id,
+                created_by=user.id
+            )
+            db.session.add(sub)
+            db.session.flush()
+            
+            fields = Field.query.filter_by(form_id=form.id, is_deleted=False).all()
+            for field in fields:
+                if field.field_code in mock_values:
+                    # Provide values for April 2025, 0.0 for others
+                    raw_val = mock_values[field.field_code] if p.month == 4 else "0.0"
+                    val = SubmissionValue(
+                        submission_id=sub.id,
+                        field_id=field.id,
+                        field_version_id=field.current_version_id,
+                        raw_value=raw_val,
+                        created_by=user.id
+                    )
+                    db.session.add(val)
                 
     db.session.flush()
-    print("Mock submissions and values created.")
+    print("Mock submissions and values created for all 12 months.")
     
-    # 7. Run calculations
-    print("Running calculations...")
+    # 7. Run calculations (monthly calculated fields only)
+    print("\nRunning monthly calculations...")
     results = compose_calculation_results(
         site_id=site.id,
         workbook_id=wkbk.id,
@@ -119,15 +131,12 @@ with app.app_context():
         user_id=user.id
     )
     
-    # Let's inspect the results
-    print("\nCalculated Row values for April 2025:")
+    print("\nCalculated Row values for April 2025 (Monthly Fields):")
     print("-" * 60)
-    
-    # Find April row in results
     rows = results.get("rows", [])
     april_row = next((r for r in rows if r.get("month") == 4), None)
     if not april_row:
-        print("Error: April row not found in results!")
+        print("Error: April row not found in monthly results!")
     else:
         values = april_row.get("values", {})
         for field in results.get("fields", []):
@@ -138,6 +147,22 @@ with app.app_context():
             status = val_info.get("status")
             warnings = val_info.get("warnings", [])
             print(f"{name:<45} | {code:<30} = {val} ({status}) {warnings}")
+
+    # 8. Run sheet-level annual aggregate calculations
+    print("\nRunning sheet-level aggregate calculations (Below-Table Results):")
+    print("-" * 60)
+    for form in forms:
+        print(f"\nSheet results for form: {form.name} ({form.code})")
+        sheet_data = compose_annual_workbook_data(
+            user_id=user.id,
+            site_id=site.id,
+            workbook_id=wkbk.id,
+            fy_start_year=2025,
+            selected_form_id=form.id
+        )
+        sheet_results = sheet_data.get("sheet_results", [])
+        for res in sheet_results:
+            print(f"  {res['label']:<45} | {res['field_code']:<30} = {res['value']} ({res['status']}) {res['message']}")
             
     # Rollback to keep database clean
     db.session.rollback()
