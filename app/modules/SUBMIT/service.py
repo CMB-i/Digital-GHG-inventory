@@ -554,7 +554,7 @@ def is_sheet_result_field(field):
         and (
             config.get("field_scope") == "annual_result"
             or config.get("result_role") in ("aggregate_result", "formula_result")
-            or config.get("display_region") == "below_monthly_table"
+            or config.get("display_region") in ("below_monthly_table", "under_input_column")
         )
     )
 
@@ -566,6 +566,11 @@ def is_non_monthly_field(field, sections):
         return True
     section = _section_by_id(sections).get(field.get("section_id"))
     return bool(section and _normalized_layout_type(section.get("layout_type")) in NON_MONTHLY_LAYOUT_TYPES)
+
+
+def monthly_table_fields(fields, sections):
+    """Fields that belong in the monthly grid and SUM_MONTHS operand series."""
+    return [field for field in fields if not is_non_monthly_field(field, sections)]
 
 
 def is_editable_workbook_field(field, sections):
@@ -996,6 +1001,8 @@ def _monthly_series_for_results(rows, monthly_fields):
         code = field.get("field_code")
         if not code or _normalized_field_type(field.get("field_type")) == "file":
             continue
+        if _normalized_frequency(field.get("frequency")) in ("annual", "static"):
+            continue
         values = []
         missing_labels = []
         for row in rows:
@@ -1041,6 +1048,7 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
                 results_by_code[code] = {
                     "status": "not_configured",
                     "message": "Formula is not configured.",
+                    "source_field_codes": [],
                 }
                 continue
 
@@ -1049,6 +1057,7 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
                 results_by_code[code] = {
                     "status": "not_configured",
                     "message": "Formula version not found.",
+                    "source_field_codes": [],
                 }
                 continue
 
@@ -1071,6 +1080,7 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
                 results_by_code[code] = {
                     "status": "needs_input",
                     "message": "Cannot calculate: " + " ".join(missing_messages),
+                    "source_field_codes": sorted(aggregate_names),
                 }
                 continue
 
@@ -1081,11 +1091,13 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
                     "status": "calculated",
                     "value": result,
                     "message": "",
+                    "source_field_codes": sorted(aggregate_names),
                 }
             except Exception as exc:
                 results_by_code[code] = {
                     "status": "error",
                     "message": str(exc),
+                    "source_field_codes": sorted(aggregate_names),
                 }
 
     sheet_results = []
@@ -1093,6 +1105,15 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
         config = field.get("field_config") or {}
         result = results_by_code.get(field["field_code"], {})
         value = result.get("value")
+        source_field_codes = result.get("source_field_codes")
+        if source_field_codes is None:
+            formula_version_id = config.get("formula_version_id")
+            formula_version = formula_versions.get(formula_version_id) if formula_version_id else None
+            source_field_codes = (
+                sorted(aggregate_operand_names(formula_version.expression))
+                if formula_version
+                else []
+            )
         sheet_results.append({
             "field_id": field["field_id"],
             "field_code": field["field_code"],
@@ -1101,6 +1122,8 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
             "unit": config.get("unit") or field.get("unit") or "",
             "status": result.get("status") or "error",
             "message": result.get("message") or "",
+            "source_field_codes": source_field_codes,
+            "display_region": config.get("display_region") or "under_input_column",
         })
     return sheet_results
 
@@ -1127,8 +1150,8 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
 
     fields = _field_payload(form.current_version_id)
     sheet_result_fields = [field for field in fields if is_sheet_result_field(field)]
-    monthly_fields = [field for field in fields if not is_sheet_result_field(field)]
     sections = _sections_payload(form)
+    monthly_fields = monthly_table_fields(fields, sections)
     months = _fy_months(fy_start_year)
     can_edit_monthly = (
         has_permission(user_id, "submission", "edit", scope_site_id=site_id)
@@ -1332,8 +1355,8 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
         raise ValueError("Published form not found.")
 
     fields = _field_payload(form_version_id or form.current_version_id)
-    monthly_fields = [field for field in fields if not is_sheet_result_field(field)]
     sections = _sections_payload(form)
+    monthly_fields = monthly_table_fields(fields, sections)
     months = _fy_months(fy_start_year)
     month_keys = [(item["year"], item["month"]) for item in months]
 

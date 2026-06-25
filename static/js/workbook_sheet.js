@@ -182,7 +182,8 @@
       config.field_scope === "annual_result" ||
       config.result_role === "aggregate_result" ||
       config.result_role === "formula_result" ||
-      config.display_region === "below_monthly_table"
+      config.display_region === "below_monthly_table" ||
+      config.display_region === "under_input_column"
     ) {
       return true;
     }
@@ -534,7 +535,136 @@
     return "bg-slate-100 text-slate-600 border-slate-200";
   }
 
+  function aggregateOperandNames(expression) {
+    const source = expression || "";
+    const names = new Set();
+    const pattern = /\bSUM_MONTHS\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/g;
+    let match;
+    while ((match = pattern.exec(source)) !== null) {
+      names.add(match[1]);
+    }
+    return Array.from(names);
+  }
 
+  function formatSheetResultValue(result) {
+    if (!result || result.value === null || result.value === undefined || result.value === "") {
+      return "—";
+    }
+    const numeric = Number(result.value);
+    const value = Number.isFinite(numeric)
+      ? numeric.toLocaleString("en-IN", { maximumFractionDigits: 6 })
+      : String(result.value);
+    return result.unit ? `${value} ${result.unit}` : value;
+  }
+
+  function splitSheetResults(sheetResults) {
+    const footerResults = [];
+    const overflowResults = [];
+    (sheetResults || []).forEach((result) => {
+      if (result.display_region === "below_monthly_table") {
+        overflowResults.push(result);
+      } else {
+        footerResults.push(result);
+      }
+    });
+    return { footerResults, overflowResults };
+  }
+
+  function renderSheetResultFooterCell(result, showLabel) {
+    const calculated = result.status === "calculated";
+    const valueClass = calculated ? "text-[#1a3a6b] font-bold" : "text-slate-400";
+    const statusClass = calculated
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : "border-amber-200 bg-amber-50 text-amber-700";
+    const statusLabel = calculated ? "Calculated" : "Needs input";
+    return `
+      <div class="px-2 py-1.5 text-right">
+        ${showLabel ? `<div class="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>` : ""}
+        <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
+        <div class="mt-1 flex justify-end">
+          <span class="rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase ${statusClass}">${statusLabel}</span>
+        </div>
+        ${result.message ? `<div class="mt-1 text-left text-[10px] font-medium text-amber-700">${escapeHtml(result.message)}</div>` : ""}
+      </div>
+    `;
+  }
+
+  function renderSheetResultFooter(displayFields, sheetResults, options) {
+    const { footerResults } = splitSheetResults(sheetResults);
+    if (!footerResults.length) return "";
+
+    const isCalcMode = options.mode === "calc_results";
+    const showLabels = footerResults.length > 1;
+    const resultsBySource = {};
+    footerResults.forEach((result) => {
+      const sourceCodes = Array.isArray(result.source_field_codes) && result.source_field_codes.length
+        ? result.source_field_codes
+        : [];
+      const primarySource = sourceCodes[0];
+      if (primarySource) {
+        if (!resultsBySource[primarySource]) resultsBySource[primarySource] = [];
+        resultsBySource[primarySource].push(result);
+      }
+    });
+    const unmappedResults = footerResults.filter((result) => {
+      const sourceCodes = Array.isArray(result.source_field_codes) ? result.source_field_codes : [];
+      return !sourceCodes.length || !displayFields.some((field) => field.field_code === sourceCodes[0]);
+    });
+
+    return `
+      <tr class="sheet-aggregate-row bg-slate-100 border-t-2 border-slate-300">
+        <td class="sticky left-0 z-10 border border-slate-200 bg-slate-200 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
+          FY total
+        </td>
+        ${displayFields.map((field) => {
+          const columnResults = resultsBySource[field.field_code] || [];
+          if (!columnResults.length) {
+            return `<td class="border border-slate-200 bg-slate-50 align-top"></td>`;
+          }
+          return `<td class="border border-slate-200 bg-slate-50 align-top">${columnResults.map((result) => renderSheetResultFooterCell(result, showLabels)).join("")}</td>`;
+        }).join("")}
+        ${!isCalcMode ? '<td class="border border-slate-200 bg-slate-50"></td>' : ""}
+      </tr>
+      ${unmappedResults.length ? `
+        <tr class="sheet-aggregate-row bg-slate-50">
+          <td colspan="${displayFields.length + (isCalcMode ? 1 : 2)}" class="border border-slate-200 px-4 py-2">
+            <div class="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">Unmapped sheet results</div>
+            <div class="flex flex-wrap gap-4">
+              ${unmappedResults.map((result) => `
+                <div class="min-w-[140px] rounded border border-slate-200 bg-white px-3 py-2">
+                  ${renderSheetResultFooterCell(result, true)}
+                </div>
+              `).join("")}
+            </div>
+          </td>
+        </tr>
+      ` : ""}
+    `;
+  }
+
+  function renderSheetResultsOverflowHtml(sheetResults) {
+    const { overflowResults } = splitSheetResults(sheetResults);
+    if (!overflowResults.length) return "";
+
+    return `
+      <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+        <div class="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-600">Sheet results</div>
+        <div class="flex flex-wrap gap-x-6 gap-y-2">
+          ${overflowResults.map((result) => {
+            const calculated = result.status === "calculated";
+            const valueClass = calculated ? "text-[#1a3a6b] font-semibold" : "text-slate-400";
+            return `
+              <div class="min-w-[160px]">
+                <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>
+                <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
+                ${result.message ? `<div class="text-[10px] text-amber-700">${escapeHtml(result.message)}</div>` : ""}
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }
 
   function renderFieldHeader(field, isCalcMode) {
     const isCalc = !isCalcMode && normalizedFieldType(field) === "calculated";
@@ -701,10 +831,15 @@
       `;
     }
 
-    bodyEl.innerHTML = tbodyHtml + (isCalcMode ? "" : nonMonthlyGroups.map((group) => renderWorkbookValueSection(group, {
+    const sheetResults = options.sheetResults || [];
+    const footerHtml = renderSheetResultFooter(displayFields, sheetResults, options);
+
+    bodyEl.innerHTML = tbodyHtml + footerHtml + (isCalcMode ? "" : nonMonthlyGroups.map((group) => renderWorkbookValueSection(group, {
       ...options,
       totalColumns: displayFields.length + 2,
     })).join(""));
+
+    const overflowResults = splitSheetResults(sheetResults).overflowResults;
 
     // Event Bindings
     bodyEl.querySelectorAll("tr[data-row-key]").forEach((tr) => {
@@ -758,6 +893,7 @@
       });
     });
 
+    return { overflowResults };
   }
 
   window.WorkbookSheet = {
@@ -769,6 +905,10 @@
     cellIssues,
     isFieldNonMonthly,
     isEditableWorkbookField,
+    formatSheetResultValue,
+    renderSheetResultsOverflowHtml,
+    splitSheetResults,
+    aggregateOperandNames,
     render,
   };
 })();
