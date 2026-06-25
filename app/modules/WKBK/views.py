@@ -389,6 +389,13 @@ def api_publish_workbook(workbook_id):
 # ── Chain builder helpers + routes ─────────────────────────────────────────────
 
 def _build_chain_payload(wb):
+    available_users = [
+        {"id": u.id, "full_name": u.full_name, "email": u.email}
+        for u in User.query.filter_by(is_deleted=False, is_active=True)
+        .order_by(User.full_name.asc())
+        .all()
+    ]
+
     if not wb.workflow_id:
         return {
             "workflow_id": None,
@@ -396,7 +403,7 @@ def _build_chain_payload(wb):
             "version_status": None,
             "levels": [],
             "approvers_by_site": {},
-            "available_users": [],
+            "available_users": available_users,
         }
 
     workflow = Workflow.query.filter_by(id=wb.workflow_id, is_deleted=False).first()
@@ -407,7 +414,7 @@ def _build_chain_payload(wb):
             "version_status": None,
             "levels": [],
             "approvers_by_site": {},
-            "available_users": [],
+            "available_users": available_users,
         }
 
     latest_version = (
@@ -458,13 +465,6 @@ def _build_chain_payload(wb):
                         "user_name": user.full_name,
                         "scope_site_id": approver.scope_site_id,
                     })
-
-    available_users = [
-        {"id": u.id, "full_name": u.full_name, "email": u.email}
-        for u in User.query.filter_by(is_deleted=False, is_active=True)
-        .order_by(User.full_name.asc())
-        .all()
-    ]
 
     version_status = None
     if latest_version:
