@@ -518,18 +518,6 @@ def publish_form_version(form_version_id, user_id):
     if form_version.status != "Draft":
         raise ValueError("Only Draft versions can be published.")
         
-    form = get_form(form_version.form_id)
-    import json
-    parsed_desc = {}
-    if form and form.description and form.description.startswith("{"):
-        try:
-            parsed_desc = json.loads(form.description)
-        except Exception:
-            pass
-            
-    if not parsed_desc.get("sites"):
-        raise ValueError("Site applicability must be assigned before publishing.")
-
     fields = get_form_version_fields(form_version_id)
     if not fields:
         raise ValueError("Cannot publish an empty form. Add fields first.")
