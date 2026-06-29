@@ -53,7 +53,7 @@ def index():
         .order_by(Form.name.asc(), FormVersion.version_number.desc())
         .all()
     )
-    selected_form_version_id = request.values.get("form_version_id", type=int)
+    selected_form_version_id = request.values.get("form_version_id", type=int) or request.values.get("version_id", type=int)
     if selected_form_version_id is None and form_versions:
         selected_form_version_id = form_versions[0][0].id
 
