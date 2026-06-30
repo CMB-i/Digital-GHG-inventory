@@ -51,8 +51,9 @@ document.addEventListener("DOMContentLoaded", function () {
   const builderPreviewStaticHead = document.getElementById("builder-preview-static-head");
   const builderPreviewStaticBody = document.getElementById("builder-preview-static-body");
   const builderPreviewResultsOverflow = document.getElementById("builder-preview-results-overflow");
+  const builderPreviewAggregateHint = document.getElementById("builder-preview-aggregate-hint");
 
-  // Inspector elements
+  const AGGREGATE_PREVIEW_HINT = "No FY totals in this preview. Add a Calculated field with placement “Sheet/FY result under input column”, attach a published SUM_MONTHS(field_code) formula, then Save Draft.";
   const inspectorPanel = document.getElementById("inspector-panel");
   const inspectorEmpty = document.getElementById("inspector-empty-state");
   const inspectorSummary = document.getElementById("inspector-summary");
@@ -235,7 +236,21 @@ document.addEventListener("DOMContentLoaded", function () {
       staticHead: builderPreviewStaticHead,
       staticBody: builderPreviewStaticBody,
       overflowEl: builderPreviewResultsOverflow,
+      hintEl: builderPreviewAggregateHint,
     };
+  }
+
+  function renderPreviewAggregateHint(target, sheetResults) {
+    if (!target || !target.hintEl) return;
+    const results = Array.isArray(sheetResults) ? sheetResults : [];
+    const hasFooter = target.body && target.body.querySelector(".sheet-aggregate-row");
+    if (results.length > 0 || hasFooter) {
+      target.hintEl.classList.add("hidden");
+      target.hintEl.textContent = "";
+      return;
+    }
+    target.hintEl.classList.remove("hidden");
+    target.hintEl.textContent = AGGREGATE_PREVIEW_HINT;
   }
 
   function renderPreviewResultsOverflow(target, sheetResults) {
@@ -270,6 +285,10 @@ document.addEventListener("DOMContentLoaded", function () {
     if (target.overflowEl) {
       target.overflowEl.classList.add("hidden");
       target.overflowEl.innerHTML = "";
+    }
+    if (target.hintEl) {
+      target.hintEl.classList.add("hidden");
+      target.hintEl.textContent = "";
     }
   }
 
@@ -359,6 +378,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     enhancePreviewMonthlyCells(target, context, monthlyFields);
     renderPreviewResultsOverflow(target, sheetResults);
+    renderPreviewAggregateHint(target, sheetResults);
 
     if (nonMonthlyFields.length && target.staticHead && target.staticBody) {
       const unsectionedStaticSectionId = "__preview_static_values";
@@ -2040,13 +2060,7 @@ document.addEventListener("DOMContentLoaded", function () {
   };
 
   // Wrapper for calling preview from builder context (uses active state variables)
-  window.openPreviewFromBuilder = function () {
-    if (selectedFormId && selectedVersionId) {
-      openPreview(selectedFormId, selectedVersionId);
-    } else {
-      showToast("No sheet is currently loaded for preview.", "error");
-    }
-  };
+  // Toolbar button removed; use workspace Preview tab instead.
 
   window.closePreview = function () {
     previewOverlay.classList.add("hidden");
