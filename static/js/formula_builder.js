@@ -1060,6 +1060,11 @@ document.addEventListener("DOMContentLoaded", function () {
     } else if (_returnFieldId) {
       const friendlyName = fieldNameMap[_returnFieldId] || _returnFieldId;
       openNewFormulaEditor(friendlyName);
+    } else {
+      const landingView = document.getElementById("landing-view");
+      if (editorView) editorView.classList.add("hidden");
+      if (listView) listView.classList.add("hidden");
+      if (landingView) landingView.classList.remove("hidden");
     }
   });
 });

@@ -311,9 +311,59 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════ -->
+  <!-- 0. LANDING VIEW                                 -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <div id="landing-view" class="hidden max-w-2xl mx-auto my-12 bg-white border border-slate-200 p-8 shadow-sm">
+    <div class="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6">
+      <span class="bg-[#1a3a6b] text-white w-8 h-8 flex items-center justify-center font-mono text-lg font-bold">ƒ</span>
+      <div>
+        <h1 class="text-xl font-bold text-slate-800">Formula Configuration Guide</h1>
+        <p class="text-xs text-slate-500 mt-0.5">Learn how formulas work in the Digital GHG Inventory.</p>
+      </div>
+    </div>
+
+    <div class="space-y-5 text-sm text-slate-600 leading-relaxed mb-8">
+      <div class="bg-indigo-50/50 border border-indigo-100/50 p-4 flex gap-3.5">
+        <svg class="h-5 w-5 text-indigo-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div>
+          <h3 class="font-bold text-indigo-900 text-xs uppercase tracking-wider mb-1">Getting Started</h3>
+          <p class="text-xs text-indigo-950">Formulas are always attached to calculated fields and cannot be configured in isolation. Please open the formula builder from the sheet builder layout instead.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div>
+          <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider mb-1">1. Connected to Sheets</h4>
+          <p class="text-xs">Formulas are bound directly to calculated fields in your sheets (e.g. converting MWh to tCO₂e or summing monthly values).</p>
+        </div>
+        <div>
+          <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider mb-1">2. Launch from Sheet Builder</h4>
+          <p class="text-xs">To configure or edit a formula, go to the sheet layout designer, add/select a calculated field, and click <strong>Open Formula Builder</strong>.</p>
+        </div>
+        <div>
+          <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider mb-1">3. Immutable Versions</h4>
+          <p class="text-xs">Once published, formula versions are immutable to preserve audit trails. Any sheet referencing them stays locked to that version.</p>
+        </div>
+        <div>
+          <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider mb-1">4. Versioning Iterations</h4>
+          <p class="text-xs">To update a calculation, save draft changes and publish a new version. You can then link the new version in your sheet builder field inspector.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="border-t border-slate-100 pt-6 flex justify-end">
+      <a href="/workbooks/" class="inline-flex items-center justify-center px-5 py-2.5 bg-[#1a3a6b] hover:bg-[#15305a] text-white text-xs font-bold transition">
+        Go to Workbooks →
+      </a>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ -->
   <!-- 2. EDITOR VIEW                                  -->
   <!-- ═══════════════════════════════════════════════ -->
-  <div id="editor-view" class="space-y-3">
+  <div id="editor-view" class="hidden space-y-3">
 
     <!-- Header strip: back button + status + ? manual + action buttons -->
     <div class="flex items-center justify-between border-b border-slate-200 pb-2.5">
