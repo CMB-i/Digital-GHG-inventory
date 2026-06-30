@@ -37,8 +37,10 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   // ── Element refs ──────────────────────────────────────────────────────
+  const landingView = document.getElementById("landing-view");
   const listView = document.getElementById("list-view");
   const editorView = document.getElementById("editor-view");
+  const btnBrowseFormulas = document.getElementById("btn-browse-formulas");
   const formulasListBody = document.getElementById("formulas-list-body");
   const editorStatusBadge = document.getElementById("editor-status-badge");
   const btnSaveFormula = document.getElementById("btn-save-formula");
@@ -495,10 +497,17 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // ── View switching ────────────────────────────────────────────────────
   window.showList = function () {
-    editorView.classList.add("hidden");
-    listView.classList.remove("hidden");
+    if (landingView) landingView.classList.add("hidden");
+    if (editorView) editorView.classList.add("hidden");
+    if (listView) listView.classList.remove("hidden");
     loadFormulas();
   };
+
+  if (btnBrowseFormulas) {
+    btnBrowseFormulas.addEventListener("click", function () {
+      window.showList();
+    });
+  }
 
   window.startNewFormula = function () {
     modalCreate.classList.remove("hidden");
@@ -510,6 +519,7 @@ document.addEventListener("DOMContentLoaded", function () {
   window.editFormula = function (formulaId, versionId) {
     selectedFormulaId = formulaId;
     selectedVersionId = versionId;
+    if (landingView) landingView.classList.add("hidden");
     listView.classList.add("hidden");
     editorView.classList.remove("hidden");
     validationResultContainer.classList.add("hidden");
@@ -540,8 +550,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
     validationResultContainer.classList.add("hidden");
 
-    listView.classList.add("hidden");
-    editorView.classList.remove("hidden");
+    if (landingView) landingView.classList.add("hidden");
+    if (listView) listView.classList.add("hidden");
+    if (editorView) editorView.classList.remove("hidden");
 
     scanVariablesAndInitPreview();
   }
@@ -1056,12 +1067,16 @@ document.addEventListener("DOMContentLoaded", function () {
   const initialFormVerId = formVersionSelect.value;
   loadFormFields(initialFormVerId).then(() => {
     if (_openVersionId) {
+      if (landingView) landingView.classList.add("hidden");
+      if (listView) listView.classList.add("hidden");
+      if (editorView) editorView.classList.remove("hidden");
       loadVersionDetails(_openVersionId);
+    } else if (_openFormulaId) {
+      window.showList();
     } else if (_returnFieldId) {
       const friendlyName = fieldNameMap[_returnFieldId] || _returnFieldId;
       openNewFormulaEditor(friendlyName);
     } else {
-      const landingView = document.getElementById("landing-view");
       if (editorView) editorView.classList.add("hidden");
       if (listView) listView.classList.add("hidden");
       if (landingView) landingView.classList.remove("hidden");
