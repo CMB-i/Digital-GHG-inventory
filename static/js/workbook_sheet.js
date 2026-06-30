@@ -557,17 +557,13 @@
     return result.unit ? `${value} ${result.unit}` : value;
   }
 
+  function normalizeFieldCode(code) {
+    return String(code || "").trim().toLowerCase();
+  }
+
   function splitSheetResults(sheetResults) {
-    const footerResults = [];
-    const overflowResults = [];
-    (sheetResults || []).forEach((result) => {
-      if (result.display_region === "below_monthly_table") {
-        overflowResults.push(result);
-      } else {
-        footerResults.push(result);
-      }
-    });
-    return { footerResults, overflowResults };
+    // All sheet results render in the column footer; overflow strip is unused.
+    return { footerResults: sheetResults || [], overflowResults: [] };
   }
 
   function renderSheetResultFooterCell(result, showLabel) {
@@ -575,8 +571,14 @@
     const valueClass = calculated ? "text-[#1a3a6b] font-bold" : "text-slate-400";
     const statusClass = calculated
       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-      : "border-amber-200 bg-amber-50 text-amber-700";
-    const statusLabel = calculated ? "Calculated" : "Needs input";
+      : result.status === "not_configured"
+        ? "border-rose-200 bg-rose-50 text-rose-700"
+        : "border-amber-200 bg-amber-50 text-amber-700";
+    const statusLabel = calculated
+      ? "Calculated"
+      : result.status === "not_configured"
+        ? "Not configured"
+        : "Needs input";
     return `
       <div class="px-2 py-1.5 text-right">
         ${showLabel ? `<div class="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>` : ""}
@@ -590,25 +592,32 @@
   }
 
   function renderSheetResultFooter(displayFields, sheetResults, options) {
-    const { footerResults } = splitSheetResults(sheetResults);
-    if (!footerResults.length) return "";
+    const allResults = Array.isArray(sheetResults) ? sheetResults : [];
+    if (!allResults.length) return "";
 
     const isCalcMode = options.mode === "calc_results";
-    const showLabels = footerResults.length > 1;
+    const showLabels = allResults.length > 1;
+    const fieldByCode = {};
+    displayFields.forEach((field) => {
+      fieldByCode[normalizeFieldCode(field.field_code)] = field;
+    });
+
     const resultsBySource = {};
-    footerResults.forEach((result) => {
+    allResults.forEach((result) => {
       const sourceCodes = Array.isArray(result.source_field_codes) && result.source_field_codes.length
         ? result.source_field_codes
         : [];
       const primarySource = sourceCodes[0];
-      if (primarySource) {
-        if (!resultsBySource[primarySource]) resultsBySource[primarySource] = [];
-        resultsBySource[primarySource].push(result);
-      }
+      if (!primarySource) return;
+      const key = normalizeFieldCode(primarySource);
+      if (!resultsBySource[key]) resultsBySource[key] = [];
+      resultsBySource[key].push(result);
     });
-    const unmappedResults = footerResults.filter((result) => {
+
+    const unmappedResults = allResults.filter((result) => {
       const sourceCodes = Array.isArray(result.source_field_codes) ? result.source_field_codes : [];
-      return !sourceCodes.length || !displayFields.some((field) => field.field_code === sourceCodes[0]);
+      if (!sourceCodes.length) return true;
+      return !fieldByCode[normalizeFieldCode(sourceCodes[0])];
     });
 
     return `
@@ -617,7 +626,7 @@
           FY total
         </td>
         ${displayFields.map((field) => {
-          const columnResults = resultsBySource[field.field_code] || [];
+          const columnResults = resultsBySource[normalizeFieldCode(field.field_code)] || [];
           if (!columnResults.length) {
             return `<td class="border border-slate-200 bg-slate-50 align-top"></td>`;
           }
@@ -626,12 +635,12 @@
         ${!isCalcMode ? '<td class="border border-slate-200 bg-slate-50"></td>' : ""}
       </tr>
       ${unmappedResults.length ? `
-        <tr class="sheet-aggregate-row bg-slate-50">
-          <td colspan="${displayFields.length + (isCalcMode ? 1 : 2)}" class="border border-slate-200 px-4 py-2">
-            <div class="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">Unmapped sheet results</div>
+        <tr class="sheet-aggregate-row bg-amber-50/80 border-t border-amber-200">
+          <td colspan="${displayFields.length + (isCalcMode ? 1 : 2)}" class="border border-amber-200 px-4 py-3">
+            <div class="mb-2 text-[10px] font-bold uppercase tracking-wide text-amber-800">Sheet results (no matching column)</div>
             <div class="flex flex-wrap gap-4">
               ${unmappedResults.map((result) => `
-                <div class="min-w-[140px] rounded border border-slate-200 bg-white px-3 py-2">
+                <div class="min-w-[160px] rounded-lg border border-amber-200 bg-white px-3 py-2 shadow-sm">
                   ${renderSheetResultFooterCell(result, true)}
                 </div>
               `).join("")}

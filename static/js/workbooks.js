@@ -356,6 +356,9 @@ document.addEventListener("DOMContentLoaded", function () {
     const previewHead     = document.getElementById("wb-preview-head");
     const previewBody     = document.getElementById("wb-preview-body");
     const previewResultsOverflow = document.getElementById("wb-preview-results-overflow");
+    const previewAggregateHint = document.getElementById("wb-preview-aggregate-hint");
+
+    const AGGREGATE_PREVIEW_HINT = "No FY totals in this preview. Add a Calculated field with placement “Sheet/FY result under input column”, attach a published SUM_MONTHS(field_code) formula, then Save Draft.";
 
     function applyTabStyle(tab, active) {
       tab.style.cssText = [
@@ -382,6 +385,23 @@ document.addEventListener("DOMContentLoaded", function () {
         previewResultsOverflow.classList.add("hidden");
         previewResultsOverflow.innerHTML = "";
       }
+      if (previewAggregateHint) {
+        previewAggregateHint.classList.add("hidden");
+        previewAggregateHint.textContent = "";
+      }
+    }
+
+    function renderPreviewAggregateHint(sheetResults) {
+      if (!previewAggregateHint) return;
+      const results = sheetResults || [];
+      const hasFooter = previewBody && previewBody.querySelector(".sheet-aggregate-row");
+      if (results.length > 0 || hasFooter) {
+        previewAggregateHint.classList.add("hidden");
+        previewAggregateHint.textContent = "";
+        return;
+      }
+      previewAggregateHint.classList.remove("hidden");
+      previewAggregateHint.textContent = AGGREGATE_PREVIEW_HINT;
     }
 
     function renderPreviewResultsOverflow(sheetResults) {
@@ -425,6 +445,7 @@ document.addEventListener("DOMContentLoaded", function () {
             selectedRowKey: null,
           });
           renderPreviewResultsOverflow(ctx.sheet_results || []);
+          renderPreviewAggregateHint(ctx.sheet_results || []);
         })
         .catch(err => { resetPreview(err.message || "Failed to load sheet preview."); });
     }
