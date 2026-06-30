@@ -2078,10 +2078,15 @@ document.addEventListener("DOMContentLoaded", function () {
     btnOpenFormulaBuilder.onclick = function (e) {
       e.preventDefault();
       if (!selectedFormId || !selectedVersionId) return;
-      const url = "/module/FRMULA/?return_to=" + encodeURIComponent("/module/FORMBLD/") +
+      const field = currentFields.find(x => x.field_code === selectedFieldCode);
+      const formulaVerId = field && field.field_config ? field.field_config.formula_version_id : null;
+      let url = "/module/FRMULA/?return_to=" + encodeURIComponent("/module/FORMBLD/") +
         "&form_id=" + selectedFormId +
         "&version_id=" + selectedVersionId +
         "&field_id=" + encodeURIComponent(selectedFieldCode || "");
+      if (formulaVerId) {
+        url += "&open_version_id=" + formulaVerId;
+      }
       window.location.href = url;
     };
   }

@@ -16,6 +16,7 @@ document.addEventListener("DOMContentLoaded", function () {
   // Saved cursor range for operator/chip insertion into contenteditable
   let savedRange = null;
   let pendingAggregateHelper = null;
+  let selectedChip = null;
 
   // ── Return-to params ──────────────────────────────────────────────────
   const _fbUrlParams = new URLSearchParams(window.location.search);
@@ -24,6 +25,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const _returnFormId = _fbUrlParams.get("form_id");
   const _returnVersionId = _fbUrlParams.get("version_id");
   const _openFormulaId = parseInt(_fbUrlParams.get("open_formula_id")) || null;
+  const _openVersionId = parseInt(_fbUrlParams.get("open_version_id")) || null;
 
   function returnToUrl() {
     if (!_returnTo) return "/module/FRMULA/";
@@ -35,8 +37,10 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   // ── Element refs ──────────────────────────────────────────────────────
+  const landingView = document.getElementById("landing-view");
   const listView = document.getElementById("list-view");
   const editorView = document.getElementById("editor-view");
+  const btnBrowseFormulas = document.getElementById("btn-browse-formulas");
   const formulasListBody = document.getElementById("formulas-list-body");
   const editorStatusBadge = document.getElementById("editor-status-badge");
   const btnSaveFormula = document.getElementById("btn-save-formula");
@@ -56,6 +60,24 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnCancelModal = document.getElementById("btn-cancel-modal");
   const formCreateFormula = document.getElementById("form-create-formula");
   const btnInsertSumMonths = document.getElementById("btn-insert-sum-months");
+
+  // ── Help Manual Drawer Refs ───────────────────────────────────────────
+  const btnOpenHelp = document.getElementById("btn-open-help");
+  const btnCloseHelp = document.getElementById("btn-close-help");
+  const helpDrawer = document.getElementById("help-drawer");
+
+  if (btnOpenHelp && helpDrawer) {
+    btnOpenHelp.onclick = function (e) {
+      e.preventDefault();
+      helpDrawer.classList.add("open");
+    };
+  }
+  if (btnCloseHelp && helpDrawer) {
+    btnCloseHelp.onclick = function (e) {
+      e.preventDefault();
+      helpDrawer.classList.remove("open");
+    };
+  }
 
   // ── Back button ───────────────────────────────────────────────────────
   const btnEditorBack = document.getElementById("btn-editor-back");
@@ -80,7 +102,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const container = document.getElementById("toast-container");
     if (!container) return;
     const toast = document.createElement("div");
-    toast.className = `p-4 rounded-xl shadow-lg border text-xs font-bold transition-all duration-300 transform translate-y-2 opacity-0 flex items-center justify-between ${
+    toast.className = `p-4 rounded shadow-lg border text-xs font-bold transition-all duration-300 transform translate-y-2 opacity-0 flex items-center justify-between ${
       type === "success"
         ? "bg-emerald-50 border-emerald-200 text-emerald-800"
         : "bg-rose-50 border-rose-200 text-rose-800"
@@ -185,6 +207,41 @@ document.addEventListener("DOMContentLoaded", function () {
     syncToTextarea();
   }
 
+  // Wrap a chip in SUM_MONTHS(...)
+  function wrapChipInSum(chip) {
+    const code = chip.dataset.code;
+    const name = chip.textContent;
+    const isValset = chip.classList.contains("formula-chip-valset");
+    if (isValset) {
+      showToast("SUM_MONTHS only accepts sheet fields, not constants.", "error");
+      return;
+    }
+    
+    // Replace the chip with "SUM_MONTHS(chip)"
+    const parent = chip.parentNode;
+    const openParen = document.createTextNode("SUM_MONTHS(");
+    const closeParen = document.createTextNode(")");
+    
+    parent.insertBefore(openParen, chip);
+    parent.insertBefore(closeParen, chip.nextSibling);
+    syncToTextarea();
+  }
+
+  // Click handler to select chips for wrapping
+  expressionDisplay.addEventListener("click", function (e) {
+    const chip = e.target.closest(".formula-chip");
+    // Clear previous selection
+    document.querySelectorAll(".formula-chip").forEach(c => {
+      c.style.outline = "none";
+    });
+    selectedChip = null;
+    
+    if (chip) {
+      chip.style.outline = "2px solid #7c3aed";
+      selectedChip = chip;
+    }
+  });
+
   // Serialize contenteditable children → expression string of field codes
   function syncToTextarea() {
     let expr = "";
@@ -230,10 +287,7 @@ document.addEventListener("DOMContentLoaded", function () {
     pendingAggregateHelper = helper;
     if (!btnInsertSumMonths) return;
     const active = helper === "SUM_MONTHS";
-    btnInsertSumMonths.classList.toggle("bg-violet-50", active);
-    btnInsertSumMonths.classList.toggle("border-violet-400", active);
-    btnInsertSumMonths.classList.toggle("ring-2", active);
-    btnInsertSumMonths.classList.toggle("ring-violet-100", active);
+    btnInsertSumMonths.classList.toggle("active", active);
   }
 
   function selectedExpressionText() {
@@ -286,6 +340,13 @@ document.addEventListener("DOMContentLoaded", function () {
   if (btnInsertSumMonths) {
     btnInsertSumMonths.addEventListener("click", function () {
       if (isPublished) return;
+      if (selectedChip) {
+        wrapChipInSum(selectedChip);
+        selectedChip.style.outline = "none";
+        selectedChip = null;
+        return;
+      }
+      
       const selectedText = selectedExpressionText();
       if (selectedText && !isSingleFieldReference(selectedText)) {
         setPendingAggregateHelper(null);
@@ -294,17 +355,159 @@ document.addEventListener("DOMContentLoaded", function () {
       }
       setPendingAggregateHelper(pendingAggregateHelper === "SUM_MONTHS" ? null : "SUM_MONTHS");
       if (pendingAggregateHelper === "SUM_MONTHS") {
-        showToast("Click a field to insert SUM_MONTHS(field_code).");
+        showToast("Click a field, or drop a field onto Σ SUM to wrap it.");
+      }
+    });
+  }
+
+  // ── Drag & Drop Event Listeners ───────────────────────────────────────
+  document.addEventListener("dragstart", function (e) {
+    const el = e.target.closest("[draggable='true']");
+    if (el) {
+      el.classList.add("draggable-dragging");
+      
+      let dragData = {};
+      if (el.dataset.code) {
+        dragData.type = "operand";
+        dragData.code = el.dataset.code;
+      } else if (el.dataset.op) {
+        dragData.type = "operator";
+        dragData.op = el.dataset.op;
+      }
+      
+      e.dataTransfer.setData("application/json", JSON.stringify(dragData));
+      e.dataTransfer.effectAllowed = "copyMove";
+    }
+  });
+
+  document.addEventListener("dragend", function (e) {
+    const el = e.target.closest("[draggable='true']");
+    if (el) {
+      el.classList.remove("draggable-dragging");
+    }
+    expressionDisplay.classList.remove("drag-hover");
+  });
+
+  expressionDisplay.addEventListener("dragenter", function (e) {
+    e.preventDefault();
+    if (!isPublished) {
+      expressionDisplay.classList.add("drag-hover");
+    }
+  });
+
+  expressionDisplay.addEventListener("dragover", function (e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+
+  expressionDisplay.addEventListener("dragleave", function (e) {
+    if (e.relatedTarget && expressionDisplay.contains(e.relatedTarget)) return;
+    expressionDisplay.classList.remove("drag-hover");
+  });
+
+  expressionDisplay.addEventListener("drop", function (e) {
+    e.preventDefault();
+    expressionDisplay.classList.remove("drag-hover");
+    if (isPublished) return;
+
+    try {
+      const dataStr = e.dataTransfer.getData("application/json");
+      if (!dataStr) return;
+      const data = JSON.parse(dataStr);
+
+      // Determine insertion caret position
+      let range = null;
+      if (document.caretRangeFromPoint) {
+        range = document.caretRangeFromPoint(e.clientX, e.clientY);
+      } else if (document.caretPositionFromPoint) {
+        const pos = document.caretPositionFromPoint(e.clientX, e.clientY);
+        if (pos) {
+          range = document.createRange();
+          range.setStart(pos.offsetNode, pos.offset);
+          range.collapse(true);
+        }
+      }
+
+      const sel = window.getSelection();
+      if (range && expressionDisplay.contains(range.startContainer)) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+        savedRange = range.cloneRange();
+      } else {
+        const rangeEnd = document.createRange();
+        rangeEnd.selectNodeContents(expressionDisplay);
+        rangeEnd.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(rangeEnd);
+        savedRange = rangeEnd.cloneRange();
+      }
+
+      if (data.type === "operand") {
+        insertToken(data.code);
+      } else if (data.type === "operator") {
+        if (data.op === "SUM_MONTHS") {
+          // Check if dropped onto a field chip
+          const targetEl = e.target.closest(".formula-chip");
+          if (targetEl && !targetEl.classList.contains("formula-chip-valset")) {
+            wrapChipInSum(targetEl);
+          } else {
+            insertOperator("SUM_MONTHS(");
+            setPendingAggregateHelper("SUM_MONTHS");
+          }
+        } else {
+          insertOperator(data.op);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  });
+
+  // Drop onto SUM_MONTHS button
+  if (btnInsertSumMonths) {
+    btnInsertSumMonths.addEventListener("dragover", function (e) {
+      e.preventDefault();
+      btnInsertSumMonths.classList.add("bg-violet-100", "border-violet-400");
+    });
+    btnInsertSumMonths.addEventListener("dragleave", function () {
+      btnInsertSumMonths.classList.remove("bg-violet-100", "border-violet-400");
+    });
+    btnInsertSumMonths.addEventListener("drop", function (e) {
+      e.preventDefault();
+      btnInsertSumMonths.classList.remove("bg-violet-100", "border-violet-400");
+      if (isPublished) return;
+      try {
+        const dataStr = e.dataTransfer.getData("application/json");
+        if (!dataStr) return;
+        const data = JSON.parse(dataStr);
+        if (data.type === "operand" && !valsetCodeSet.has(data.code)) {
+          const name = fieldNameMap[data.code] || data.code;
+          getOrRestoreRange();
+          insertTextAtCursor("SUM_MONTHS(");
+          insertNodeAtCursor(makeChip(data.code, name, "field"));
+          insertTextAtCursor(")");
+        } else {
+          showToast("SUM_MONTHS only accepts sheet fields, not constants.", "error");
+        }
+      } catch (err) {
+        console.error(err);
       }
     });
   }
 
   // ── View switching ────────────────────────────────────────────────────
   window.showList = function () {
-    editorView.classList.add("hidden");
-    listView.classList.remove("hidden");
+    if (landingView) landingView.classList.add("hidden");
+    if (editorView) editorView.classList.add("hidden");
+    if (listView) listView.classList.remove("hidden");
     loadFormulas();
   };
+
+  if (btnBrowseFormulas) {
+    btnBrowseFormulas.addEventListener("click", function () {
+      window.showList();
+    });
+  }
 
   window.startNewFormula = function () {
     modalCreate.classList.remove("hidden");
@@ -316,6 +519,7 @@ document.addEventListener("DOMContentLoaded", function () {
   window.editFormula = function (formulaId, versionId) {
     selectedFormulaId = formulaId;
     selectedVersionId = versionId;
+    if (landingView) landingView.classList.add("hidden");
     listView.classList.add("hidden");
     editorView.classList.remove("hidden");
     validationResultContainer.classList.add("hidden");
@@ -346,8 +550,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
     validationResultContainer.classList.add("hidden");
 
-    listView.classList.add("hidden");
-    editorView.classList.remove("hidden");
+    if (landingView) landingView.classList.add("hidden");
+    if (listView) listView.classList.add("hidden");
+    if (editorView) editorView.classList.remove("hidden");
 
     scanVariablesAndInitPreview();
   }
@@ -481,12 +686,46 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
-  // ── Field palette: load on form version select change ─────────────────
-  formVersionSelect.onchange = function () {
-    const formVerId = formVersionSelect.value;
-    if (!formVerId) return;
+  // ── Sidebar Tabs switching logic ──────────────────────────────────────
+  window.switchSidebarTab = function (tabName) {
+    const tabFields = document.getElementById("tab-fields");
+    const tabValsets = document.getElementById("tab-valsets");
+    const panelFields = document.getElementById("panel-fields");
+    const panelValsets = document.getElementById("panel-valsets");
 
-    fetch(`/module/FORMBLD/api/version/${formVerId}`)
+    if (tabName === "fields") {
+      tabFields.classList.add("active");
+      tabValsets.classList.remove("active");
+      panelFields.classList.remove("hidden");
+      panelValsets.classList.add("hidden");
+    } else {
+      tabFields.classList.remove("active");
+      tabValsets.classList.add("active");
+      panelFields.classList.add("hidden");
+      panelValsets.classList.remove("hidden");
+    }
+  };
+
+  // ── Sample Values Drawer Toggle ───────────────────────────────────────
+  window.toggleDrawer = function () {
+    const drawerBody = document.getElementById("drawer-body");
+    const chevron = document.getElementById("drawer-chevron");
+    if (drawerBody.classList.contains("open")) {
+      drawerBody.classList.remove("open");
+      chevron.style.transform = "rotate(0deg)";
+    } else {
+      drawerBody.classList.add("open");
+      chevron.style.transform = "rotate(180deg)";
+    }
+  };
+
+  // ── Field palette: load on form version select change ─────────────────
+  function loadFormFields(formVerId) {
+    if (!formVerId) return Promise.resolve();
+    const searchFieldsInput = document.getElementById("search-fields");
+    if (searchFieldsInput) searchFieldsInput.value = "";
+
+    return fetch(`/module/FORMBLD/api/version/${formVerId}`)
       .then(res => res.json())
       .then(data => {
         const fieldsPalette = document.getElementById("fields-palette");
@@ -506,26 +745,27 @@ document.addEventListener("DOMContentLoaded", function () {
           const unit = (field.field_config && field.field_config.unit) ? field.field_config.unit : "";
           const btn = document.createElement("button");
           btn.type = "button";
-          btn.className = "flex items-center justify-between w-full px-2.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-300 text-left transition text-xs";
+          btn.className = "palette-btn-field skeuo-chip skeuo-chip-field flex items-center justify-between w-full text-left";
+          btn.setAttribute("draggable", "true");
           btn.dataset.code = field.field_code;
           btn.innerHTML = `
-            <span class="font-semibold text-slate-700 truncate flex-1 mr-2">${field.field_name}</span>
-            ${unit ? `<span class="text-[10px] text-slate-400 font-mono whitespace-nowrap">${unit}</span>` : ""}
+            <span class="font-semibold text-slate-700 truncate flex-1 mr-1.5">${field.field_name}</span>
+            ${unit ? `<span class="text-[9px] text-slate-400 font-mono whitespace-nowrap">${unit}</span>` : ""}
           `;
           btn.onclick = () => insertToken(field.field_code);
           fieldsPalette.appendChild(btn);
         });
 
-        // Refresh the expression display now that fieldNameMap has more entries
         refreshDisplay();
       })
       .catch(err => {
         console.error("Error loading fields:", err);
       });
-  };
+  }
 
-  // Trigger initial field load
-  formVersionSelect.dispatchEvent(new Event("change"));
+  formVersionSelect.onchange = function () {
+    loadFormFields(formVersionSelect.value);
+  };
 
   // ── Live preview ──────────────────────────────────────────────────────
   function scanVariables() {
@@ -556,7 +796,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (variables.length === 0) {
       previewInputsGrid.innerHTML = '<p class="col-span-2 text-xs text-slate-400 italic">No variables detected in the formula expression yet.</p>';
       previewResultValue.textContent = "—";
-      previewResultValue.className = "text-3xl font-black text-slate-300 tabular-nums";
+      previewResultValue.className = "text-2xl font-black text-slate-300 tabular-nums";
       return;
     }
 
@@ -571,7 +811,7 @@ document.addEventListener("DOMContentLoaded", function () {
       wrapper.innerHTML = `
         <div class="flex flex-col">${labelHtml}</div>
         <input type="number" step="any" value="${val}" data-var="${v}"
-          class="preview-var-input block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border">
+          class="preview-var-input block w-full rounded border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border skeuo-input">
       `;
       previewInputsGrid.appendChild(wrapper);
     });
@@ -587,7 +827,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const expr = expressionTextarea.value;
     if (!expr || !expr.trim()) {
       previewResultValue.textContent = "—";
-      previewResultValue.className = "text-3xl font-black text-slate-300 tabular-nums";
+      previewResultValue.className = "text-2xl font-black text-slate-300 tabular-nums";
       return;
     }
     const values = {};
@@ -607,10 +847,10 @@ document.addEventListener("DOMContentLoaded", function () {
       const result = window.FormulaRuntime.evaluate(expr, values);
       if (result !== null && result !== undefined && !isNaN(result)) {
         previewResultValue.textContent = parseFloat(result.toFixed(6));
-        previewResultValue.className = "text-3xl font-black text-[#1a3a6b] tabular-nums";
+        previewResultValue.className = "text-2xl font-black text-indigo-900 tabular-nums";
       } else {
         previewResultValue.textContent = "Error";
-        previewResultValue.className = "text-2xl font-black text-rose-500 tabular-nums";
+        previewResultValue.className = "text-xl font-black text-rose-500 tabular-nums";
       }
     }
   }
@@ -637,10 +877,10 @@ document.addEventListener("DOMContentLoaded", function () {
       .then(data => {
         validationResultContainer.classList.remove("hidden");
         if (data.valid) {
-          validationResult.className = "p-3 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100";
+          validationResult.className = "p-2 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100";
           validationResult.textContent = "✓ Formula syntax is valid.";
         } else {
-          validationResult.className = "p-3 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-100";
+          validationResult.className = "p-2 rounded text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-100";
           validationResult.textContent = `⚠ Syntax error: ${data.error || "Invalid expression."}`;
         }
       })
@@ -788,6 +1028,58 @@ document.addEventListener("DOMContentLoaded", function () {
     openNewFormulaEditor(name);
   };
 
+  // ── Search & Filter Logic ─────────────────────────────────────────────
+  const searchFieldsInput = document.getElementById("search-fields");
+  const searchValsetsInput = document.getElementById("search-valsets");
+
+  if (searchFieldsInput) {
+    searchFieldsInput.addEventListener("input", function () {
+      const q = searchFieldsInput.value.toLowerCase().trim();
+      document.querySelectorAll("#fields-palette .palette-btn-field").forEach(btn => {
+        const name = btn.querySelector("span").textContent.toLowerCase();
+        const code = btn.dataset.code ? btn.dataset.code.toLowerCase() : "";
+        if (name.includes(q) || code.includes(q)) {
+          btn.style.display = "flex";
+        } else {
+          btn.style.display = "none";
+        }
+      });
+    });
+  }
+
+  if (searchValsetsInput) {
+    searchValsetsInput.addEventListener("input", function () {
+      const q = searchValsetsInput.value.toLowerCase().trim();
+      document.querySelectorAll("#valsets-palette .palette-btn-valset").forEach(btn => {
+        const label = btn.querySelector("span").textContent.toLowerCase();
+        const desc = btn.querySelector("span:last-child") ? btn.querySelector("span:last-child").textContent.toLowerCase() : "";
+        const code = btn.dataset.code ? btn.dataset.code.toLowerCase() : "";
+        if (label.includes(q) || desc.includes(q) || code.includes(q)) {
+          btn.style.display = "flex";
+        } else {
+          btn.style.display = "none";
+        }
+      });
+    });
+  }
+
   // ── Initial load ──────────────────────────────────────────────────────
-  loadFormulas();
+  const initialFormVerId = formVersionSelect.value;
+  loadFormFields(initialFormVerId).then(() => {
+    if (_openVersionId) {
+      if (landingView) landingView.classList.add("hidden");
+      if (listView) listView.classList.add("hidden");
+      if (editorView) editorView.classList.remove("hidden");
+      loadVersionDetails(_openVersionId);
+    } else if (_openFormulaId) {
+      window.showList();
+    } else if (_returnFieldId) {
+      const friendlyName = fieldNameMap[_returnFieldId] || _returnFieldId;
+      openNewFormulaEditor(friendlyName);
+    } else {
+      if (editorView) editorView.classList.add("hidden");
+      if (listView) listView.classList.add("hidden");
+      if (landingView) landingView.classList.remove("hidden");
+    }
+  });
 });

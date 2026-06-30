@@ -423,11 +423,7 @@ def build_nav_items(user):
                     "href": "/module/VALSET/",
                     "visible": capabilities["can_manage_setup"] and user_can(user, "value_set", "view"),
                 },
-                {
-                    "label": "Formula Builder",
-                    "href": "/module/FRMULA/",
-                    "visible": capabilities["can_manage_setup"] and user_can(user, "formula", "view"),
-                },
+
                 {
                     "label": "Workflow Paths",
                     "href": "/module/WFLWBLD/",

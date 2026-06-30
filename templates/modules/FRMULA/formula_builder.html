@@ -3,14 +3,136 @@
 
 {% block content %}
 <style>
-  /* Inline field/valset chips inside the expression display */
+  /* ─── Skeuomorphic CSS Design System ─── */
+
+  /* ─── Flat Brand-aligned CSS Design System ─── */
+
+  /* Flat Screen for Expression Display */
+  .skeuo-lcd-container {
+    background-color: #ffffff;
+    border-radius: 0px;
+    padding: 0px;
+    box-shadow: none;
+    border: none;
+  }
+  .skeuo-lcd {
+    background-color: #ffffff;
+    border: 1px solid #c4d4e8; /* inputBorder */
+    font-family: inherit;
+    font-weight: 400;
+    color: #1f2937; /* slate-800 */
+    border-radius: 0px;
+    min-height: 80px;
+    padding: 12px;
+    line-height: 2;
+    position: relative;
+    box-shadow: none;
+  }
+
+  /* LCD Empty/Placeholder Text */
+  #expression-display:empty::before {
+    content: attr(data-placeholder);
+    color: #94a3b8;
+    opacity: 0.8;
+    pointer-events: none;
+    font-weight: 400;
+  }
+
+  /* Flat Calculator Keys */
+  .skeuo-key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0px;
+    font-weight: 700;
+    transition: all 0.15s ease;
+    user-select: none;
+    border: 1px solid transparent;
+    box-shadow: none;
+  }
+
+  /* Operator keys: JSW Navy Blue */
+  .skeuo-key-op {
+    color: #ffffff;
+    background-color: #1a3a6b;
+    border-color: #15305a;
+  }
+  .skeuo-key-op:hover {
+    background-color: #15305a;
+  }
+  .skeuo-key-op:active, .skeuo-key-op.active {
+    background-color: #0f223f;
+  }
+
+  /* Parentheses keys: Soft Blue */
+  .skeuo-key-paren {
+    color: #1a3a6b;
+    background-color: #dfeaf8;
+    border-color: #c4d4e8;
+  }
+  .skeuo-key-paren:hover {
+    background-color: #c4d4e8;
+  }
+  .skeuo-key-paren:active, .skeuo-key-paren.active {
+    background-color: #b0c9e8;
+  }
+
+  /* Function/Aggregate keys: Vibrant JSW Red */
+  .skeuo-key-fn {
+    color: #ffffff;
+    background-color: #c8102e;
+    border-color: #9a1224;
+  }
+  .skeuo-key-fn:hover {
+    background-color: #9a1224;
+  }
+  .skeuo-key-fn:active, .skeuo-key-fn.active {
+    background-color: #7a0e1c;
+  }
+
+  /* Flat Draggable Chips */
+  .skeuo-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 0px;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: grab;
+    user-select: none;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+    box-shadow: none;
+  }
+  
+  /* Fields: soft blue */
+  .skeuo-chip-field {
+    background-color: #dfeaf8;
+    border-color: #c4d4e8;
+    color: #1a3a6b;
+  }
+  .skeuo-chip-field:hover {
+    background-color: #c4d4e8;
+  }
+
+  /* Value Sets: soft reddish hint */
+  .skeuo-chip-valset {
+    background-color: #fee2e2;
+    border-color: #fca5a5;
+    color: #b91c1c;
+  }
+  .skeuo-chip-valset:hover {
+    background-color: #fca5a5;
+  }
+
+  /* Editor Inline Formula Chips */
   .formula-chip {
     display: inline-flex;
     align-items: center;
     background-color: #1a3a6b;
-    color: #fff;
-    border-radius: 4px;
-    padding: 1px 7px;
+    color: #ffffff;
+    border-radius: 0px;
+    padding: 1px 6px;
     font-size: 11px;
     font-weight: 700;
     font-family: inherit;
@@ -19,41 +141,148 @@
     user-select: none;
     white-space: nowrap;
     vertical-align: middle;
-    margin: 0 1px;
+    margin: 0 2px;
+    border: 1px solid #15305a;
   }
   .formula-chip-valset {
     background-color: #065f46;
+    border-color: #044e39;
   }
-  /* Placeholder on empty contenteditable */
-  #expression-display:empty::before {
-    content: attr(data-placeholder);
-    color: #94a3b8;
-    pointer-events: none;
-    font-weight: 400;
+
+  /* Left Sidebar Tab Deck */
+  .tab-deck {
+    display: flex;
+    border-bottom: 1px solid #c4d4e8;
+    margin-bottom: 12px;
   }
-  /* Read-only state for published formulas */
-  #expression-display[contenteditable="false"] {
-    background-color: #f8fafc;
+  .tab-btn {
+    padding: 8px 14px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    border: 1px solid #c4d4e8;
+    border-bottom: none;
+    border-top-left-radius: 0px;
+    border-top-right-radius: 0px;
+    cursor: pointer;
+    background-color: #e8eff8;
     color: #64748b;
-    cursor: not-allowed;
-    opacity: 0.85;
+    transition: all 0.15s ease;
+    margin-right: 2px;
+  }
+  .tab-btn.active {
+    background-color: #ffffff;
+    color: #1a3a6b;
+    border-top: 3px solid #c8102e;
+    border-bottom: 1px solid #ffffff;
+    margin-bottom: -1px;
+    z-index: 10;
+  }
+
+  /* Flat Input & Select Well */
+  .skeuo-well {
+    background-color: #f0f4f8;
+    border: 1px solid #c4d4e8;
+    border-radius: 0px;
+    padding: 4px;
+  }
+  .skeuo-select {
+    background-color: #ffffff;
+    border: 1px solid #c4d4e8;
+    border-radius: 0px;
+    cursor: pointer;
+  }
+  .skeuo-input {
+    background-color: #ffffff;
+    border: 1px solid #c4d4e8;
+    border-radius: 0px !important;
+  }
+
+  /* Collapsible Bottom Drawer */
+  .drawer-container {
+    border-radius: 0px;
+    border: 1px solid #c4d4e8;
+    background-color: #ffffff;
+  }
+  .drawer-header {
+    background-color: #e8eff8;
+    border-bottom: 1px solid #c4d4e8;
+    cursor: pointer;
+    user-select: none;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .drawer-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease-out;
+    background-color: #ffffff;
+  }
+  .drawer-content.open {
+    max-height: 500px;
+    border-top: 1px solid #c4d4e8;
+  }
+
+  /* Help slide-out manual drawer */
+  .help-drawer {
+    position: fixed;
+    top: 0; right: -420px; width: 420px; height: 100vh;
+    background-color: #ffffff;
+    border-left: 3px solid #c8102e;
+    box-shadow: -4px 0 15px rgba(0, 0, 0, 0.05);
+    z-index: 100;
+    transition: right 0.25s ease-out;
+    display: flex;
+    flex-direction: column;
+  }
+  .help-drawer.open {
+    right: 0;
+  }
+
+  /* Help button styling (exactly 5mm square) */
+  .help-icon-btn {
+    width: 5mm;
+    height: 5mm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0px;
+    background-color: #fee2e2;
+    border: 1px solid #fca5a5;
+    cursor: pointer;
+    padding: 0;
+    font-size: 11px;
+    font-weight: 900;
+    color: #b91c1c;
+  }
+
+  /* Dragging ghost visual indicators */
+  .drag-hover {
+    border: 2px dashed #1a3a6b !important;
+    background-color: #dfeaf8 !important;
+  }
+  .draggable-dragging {
+    opacity: 0.5;
   }
 </style>
-<div class="space-y-5">
+
+<div class="space-y-4">
   <!-- Toast notification container -->
   <div id="toast-container" class="fixed top-5 right-5 z-50 space-y-2 pointer-events-none"></div>
 
   <!-- ═══════════════════════════════════════════════ -->
   <!-- 1. LIST VIEW                                    -->
   <!-- ═══════════════════════════════════════════════ -->
-  <div id="list-view">
-    <div class="text-xs text-slate-500 mb-2">Configuration · <strong class="text-indigo-600">All Formulas</strong></div>
-    <div class="flex items-center justify-between border-b border-slate-200 pb-4 mb-6">
+  <div id="list-view" class="hidden">
+    <div class="text-xs text-slate-500 mb-1">Configuration · <strong class="text-indigo-600">All Formulas</strong></div>
+    <div class="flex items-center justify-between border-b border-slate-200 pb-3 mb-5">
       <div>
         <h1 class="text-2xl font-bold text-slate-800">Formula Builder</h1>
-        <p class="text-xs text-slate-500 mt-1">Configure arithmetic formulas and expressions to calculate emission metrics.</p>
+        <p class="text-xs text-slate-500 mt-0.5">Configure expressions and formulas to calculate workbook metrics.</p>
       </div>
-      <button onclick="startNewFormula()" class="inline-flex items-center justify-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
+      <button onclick="startNewFormula()" class="inline-flex items-center justify-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded shadow transition-colors">
         <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
         </svg>
@@ -61,7 +290,7 @@
       </button>
     </div>
 
-    <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+    <div class="bg-white border border-slate-200 shadow-sm overflow-hidden">
       <table class="min-w-full divide-y divide-slate-200 text-left text-xs">
         <thead class="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
           <tr>
@@ -82,25 +311,83 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════ -->
+  <!-- 0. LANDING VIEW                                 -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <div id="landing-view" class="hidden max-w-2xl mx-auto my-12 bg-white border border-slate-200 p-8 shadow-sm">
+    <div class="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6">
+      <span class="bg-[#1a3a6b] text-white w-8 h-8 flex items-center justify-center font-mono text-lg font-bold">ƒ</span>
+      <div>
+        <h1 class="text-xl font-bold text-slate-800">Formula Configuration Guide</h1>
+        <p class="text-xs text-slate-500 mt-0.5">Learn how formulas work in the Digital GHG Inventory.</p>
+      </div>
+    </div>
+
+    <div class="space-y-5 text-sm text-slate-600 leading-relaxed mb-8">
+      <div class="bg-indigo-50/50 border border-indigo-100/50 p-4 flex gap-3.5">
+        <svg class="h-5 w-5 text-indigo-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div>
+          <h3 class="font-bold text-indigo-900 text-xs uppercase tracking-wider mb-1">Getting Started</h3>
+          <p class="text-xs text-indigo-950">Formulas are always attached to calculated fields and cannot be configured in isolation. Please open the formula builder from the sheet builder layout instead.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div>
+          <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider mb-1">1. Connected to Sheets</h4>
+          <p class="text-xs">Formulas are bound directly to calculated fields in your sheets (e.g. converting MWh to tCO₂e or summing monthly values).</p>
+        </div>
+        <div>
+          <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider mb-1">2. Launch from Sheet Builder</h4>
+          <p class="text-xs">To configure or edit a formula, go to the sheet layout designer, add/select a calculated field, and click <strong>Open Formula Builder</strong>.</p>
+        </div>
+        <div>
+          <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider mb-1">3. Immutable Versions</h4>
+          <p class="text-xs">Once published, formula versions are immutable to preserve audit trails. Any sheet referencing them stays locked to that version.</p>
+        </div>
+        <div>
+          <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider mb-1">4. Versioning Iterations</h4>
+          <p class="text-xs">To update a calculation, save draft changes and publish a new version. You can then link the new version in your sheet builder field inspector.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="border-t border-slate-100 pt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+      <button id="btn-browse-formulas" type="button" class="inline-flex items-center justify-center border border-slate-300 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50">
+        Browse existing formulas
+      </button>
+      <a href="/workbooks/" class="inline-flex items-center justify-center px-5 py-2.5 bg-[#1a3a6b] hover:bg-[#15305a] text-white text-xs font-bold transition">
+        Go to Workbooks →
+      </a>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ -->
   <!-- 2. EDITOR VIEW                                  -->
   <!-- ═══════════════════════════════════════════════ -->
-  <div id="editor-view" class="hidden space-y-4">
+  <div id="editor-view" class="hidden space-y-3">
 
-    <!-- Header strip: back button + status + action buttons -->
-    <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+    <!-- Header strip: back button + status + ? manual + action buttons -->
+    <div class="flex items-center justify-between border-b border-slate-200 pb-2.5">
       <div class="flex items-center space-x-3">
         <button id="btn-editor-back" onclick="showList()" class="inline-flex items-center text-xs text-slate-500 hover:text-slate-700 font-semibold transition-colors">
           ← Formula Builder
         </button>
         <span id="editor-status-badge" class="px-2 py-0.5 rounded-full font-bold uppercase text-[9px] bg-amber-100 text-amber-800">Draft</span>
       </div>
-      <div class="flex items-center space-x-2">
-        <button id="btn-save-formula" class="inline-flex items-center justify-center px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow transition">
-          Save Draft
-        </button>
-        <button id="btn-publish-formula" class="inline-flex items-center justify-center px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition">
-          Publish Version
-        </button>
+      <div class="flex items-center space-x-3">
+        <!-- 5mm Help Button -->
+        <button id="btn-open-help" class="help-icon-btn" title="View Manual">?</button>
+        
+        <div class="flex items-center space-x-2">
+          <button id="btn-save-formula" class="inline-flex items-center justify-center px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded shadow transition">
+            Save Draft
+          </button>
+          <button id="btn-publish-formula" class="inline-flex items-center justify-center px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded shadow transition">
+            Publish Version
+          </button>
+        </div>
       </div>
     </div>
 
@@ -108,16 +395,15 @@
     <div class="flex gap-5 items-start">
 
       <!-- ─────────────────────────────────────── -->
-      <!-- LEFT SIDEBAR: operand palette (~224px)  -->
+      <!-- LEFT SIDEBAR: operand palette           -->
       <!-- ─────────────────────────────────────── -->
-      <div class="w-64 shrink-0 space-y-3">
+      <div class="w-64 shrink-0 space-y-4">
 
         <!-- Form context selector -->
-        <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div class="px-3.5 py-3 bg-slate-50 border-b border-slate-200/80">
-            <label class="block text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Form context</label>
-            <select id="form-version-select" class="w-full text-xs rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 py-1.5 border bg-white">
-              {# form_versions is ordered by name asc, version_number desc — first per form is latest #}
+        <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm p-5 space-y-2 hidden" aria-hidden="true">
+          <label class="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Form context</label>
+          <div class="skeuo-well">
+            <select id="form-version-select" class="w-full text-xs py-1 px-2 border-none skeuo-select focus:ring-0 focus:outline-none bg-transparent">
               {% set ns = namespace(seen=[]) %}
               {% for form_version, form in form_versions %}
                 {% if form.id not in ns.seen %}
@@ -129,70 +415,55 @@
               {% endfor %}
             </select>
           </div>
+        </div>
 
-          <!-- Form fields -->
-          <div class="p-3.5 space-y-1.5 max-h-52 overflow-y-auto">
-            <p class="text-[9px] font-bold text-indigo-500 uppercase tracking-wider pb-1 border-b border-slate-100 flex items-center justify-between">
-              <span>Fields</span>
-              <span class="text-[8px] bg-indigo-50 px-1.5 py-0.5 rounded font-bold">click to insert</span>
-            </p>
-            <div id="fields-palette" class="space-y-1 mt-1">
+        <!-- tabbed lists deck (Fields & Value Sets) -->
+        <div class="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm min-h-[320px] flex flex-col">
+          <div class="tab-deck">
+            <button id="tab-fields" class="tab-btn active" onclick="switchSidebarTab('fields')">Fields</button>
+            <button id="tab-valsets" class="tab-btn" onclick="switchSidebarTab('valsets')">Value Sets</button>
+          </div>
+
+          <!-- Fields tab panel -->
+          <div id="panel-fields" class="space-y-2 flex-1 flex flex-col min-h-0">
+            <!-- Search bar fields -->
+            <div class="pb-1.5">
+              <input type="text" id="search-fields" placeholder="Search fields..." class="w-full text-xs py-1.5 px-2.5 border border-slate-300 rounded skeuo-input focus:ring-1 focus:ring-indigo-500/20 focus:outline-none bg-slate-50/50">
+            </div>
+            <div id="fields-palette" class="space-y-1 overflow-y-auto max-h-[320px] pr-1 flex-1">
               <p class="text-xs text-slate-400 italic">Select a form above.</p>
             </div>
           </div>
-        </div>
 
-        <!-- Aggregate helpers -->
-        <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div class="p-3.5 space-y-2">
-            <p class="text-[9px] font-bold text-violet-600 uppercase tracking-wider pb-1 border-b border-slate-100">
-              Aggregate Helpers
-            </p>
-            <button
-              type="button"
-              id="btn-insert-sum-months"
-              class="flex items-center justify-between w-full px-2.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-violet-50 hover:border-violet-300 text-left transition text-xs">
-              <span class="font-bold text-slate-700">Σ SUM MONTHS</span>
-              <span class="text-[10px] font-mono text-slate-400">SUM_MONTHS(field)</span>
-            </button>
-            <p class="text-[10px] text-slate-400 leading-relaxed">
-              SUM_MONTHS accepts one monthly field only. For multiple fields, use SUM_MONTHS(field_a) + SUM_MONTHS(field_b).
-            </p>
-          </div>
-        </div>
-
-        <!-- Value set constants -->
-        <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div class="p-3.5 space-y-1.5">
-            <p class="text-[9px] font-bold text-emerald-600 uppercase tracking-wider pb-1 border-b border-slate-100 flex items-center justify-between">
-              <span>Value Set Entries</span>
-              {% if valset_options %}
-              <span class="text-[8px] bg-emerald-50 px-1.5 py-0.5 rounded font-bold text-emerald-600">click to insert</span>
-              {% endif %}
-            </p>
-            <div id="valsets-palette" class="space-y-1 mt-1 max-h-44 overflow-y-auto">
+          <!-- Value Sets tab panel -->
+          <div id="panel-valsets" class="space-y-2 hidden flex-1 flex flex-col min-h-0">
+            <!-- Search bar valsets -->
+            <div class="pb-1.5">
+              <input type="text" id="search-valsets" placeholder="Search constants..." class="w-full text-xs py-1.5 px-2.5 border border-slate-300 rounded skeuo-input focus:ring-1 focus:ring-indigo-500/20 focus:outline-none bg-slate-50/50">
+            </div>
+            <div id="valsets-palette" class="space-y-1 overflow-y-auto max-h-[320px] pr-1 flex-1">
               {% if valset_options %}
                 {% for opt in valset_options %}
                 <button
-                  class="palette-btn-valset flex items-center justify-between w-full px-2.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 hover:border-emerald-300 text-left transition text-xs"
+                  class="palette-btn-valset skeuo-chip skeuo-chip-valset flex items-center justify-between w-full text-left"
+                  draggable="true"
                   data-code="{{ opt.entry_code }}"
                   data-label="{{ opt.entry_label }}"
                   title="{{ opt.value_set_name }}">
-                  <span class="font-semibold text-slate-700 truncate flex-1 mr-2">{{ opt.entry_code }}</span>
-                  <span class="text-[10px] text-slate-400 truncate max-w-[80px] text-right">{{ opt.entry_label }}</span>
+                  <span class="font-semibold text-slate-700 truncate flex-1 mr-1.5">{{ opt.entry_code }}</span>
+                  <span class="text-[9px] text-slate-400 font-mono truncate max-w-[70px] text-right">{{ opt.entry_label }}</span>
                 </button>
                 {% endfor %}
               {% else %}
-                <p class="text-xs text-slate-400 mt-1">No value set entries found.</p>
-                <p class="text-[10px] text-slate-400 leading-relaxed mt-1">Use value sets for emission factors, conversion rates, and GWP constants.</p>
+                <p class="text-xs text-slate-400">No constants found.</p>
               {% endif %}
             </div>
             {% if valset_options %}
-            <a id="btn-goto-valset" href="#" class="block text-center text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline pt-0.5">
-              + Add another value set →
+            <a id="btn-goto-valset" href="#" class="block text-center text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline pt-2 border-t border-slate-100 mt-2">
+              + Manage Value Sets →
             </a>
             {% else %}
-            <a id="btn-goto-valset" href="#" class="flex items-center justify-center w-full px-3 py-2 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-xs font-bold rounded-lg transition mt-1">
+            <a id="btn-goto-valset" href="#" class="flex items-center justify-center w-full px-3 py-1.5 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-[10px] font-bold rounded transition mt-2">
               + Create Value Set →
             </a>
             {% endif %}
@@ -205,96 +476,90 @@
       <!-- ─────────────────────────────────────── -->
       <!-- RIGHT PANEL: editor + preview          -->
       <!-- ─────────────────────────────────────── -->
-      <div class="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+      <div class="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/80 p-6 shadow-sm space-y-4">
 
-        <!-- Formula identity + expression editor -->
-        <div class="p-5 space-y-4">
-
-          <!-- Formula name (prominent editable) + code (read-only) -->
-          <div class="pb-3 border-b border-slate-100 space-y-0.5">
+        <!-- Formula Name (Prominent editable) + Code -->
+        <div class="pb-2 border-b border-slate-100 flex items-center justify-between">
+          <div class="flex-1 mr-4">
             <input
               type="text"
               id="df-name"
               required
-              placeholder="Formula name…"
-              class="block w-full text-[18px] font-bold text-slate-800 border-0 border-b-2 border-slate-200 focus:border-indigo-500 focus:outline-none focus:ring-0 pb-1 bg-transparent placeholder-slate-300">
-            <p id="df-code-display" class="text-[11px] font-mono text-slate-400 pt-0.5 min-h-[1rem]"></p>
-            <!-- Hidden legacy reference kept for JS compatibility -->
+              placeholder="Formula Name…"
+              class="block w-full text-base font-bold text-slate-800 border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:outline-none focus:ring-0 bg-white placeholder-slate-300 rounded-none">
+            <p id="df-code-display" class="text-[10px] font-mono text-slate-400 pt-0.5 min-h-[1rem]"></p>
             <span id="editor-title" class="hidden"></span>
           </div>
+        </div>
 
-          <!-- Expression: operators + textarea -->
-          <div class="space-y-2">
-            <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Formula Expression</label>
-
-            <!-- Calculator-style operator buttons -->
-            <div class="flex flex-wrap items-center gap-1.5">
-              <button type="button" onclick="insertOperator(' + ')" class="op-btn w-11 h-11 border-2 border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-400 rounded-lg font-bold shadow-sm transition text-indigo-600 text-lg leading-none">+</button>
-              <button type="button" onclick="insertOperator(' - ')" class="op-btn w-11 h-11 border-2 border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-400 rounded-lg font-bold shadow-sm transition text-indigo-600 text-lg leading-none">−</button>
-              <button type="button" onclick="insertOperator(' * ')" class="op-btn w-11 h-11 border-2 border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-400 rounded-lg font-bold shadow-sm transition text-indigo-600 text-lg leading-none">×</button>
-              <button type="button" onclick="insertOperator(' / ')" class="op-btn w-11 h-11 border-2 border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-400 rounded-lg font-bold shadow-sm transition text-indigo-600 text-lg leading-none">÷</button>
-              <span class="w-px h-7 bg-slate-200"></span>
-              <button type="button" onclick="insertOperator('(')" class="op-btn w-11 h-11 border-2 border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-400 rounded-lg font-bold shadow-sm transition text-indigo-600 text-base leading-none">(</button>
-              <button type="button" onclick="insertOperator(')')" class="op-btn w-11 h-11 border-2 border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-400 rounded-lg font-bold shadow-sm transition text-indigo-600 text-base leading-none">)</button>
-              <span class="w-px h-7 bg-slate-200"></span>
-              <button type="button" onclick="insertOperator('min(')" class="op-btn px-3 h-11 border-2 border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-400 rounded-lg font-bold shadow-sm transition text-indigo-600 text-sm leading-none">min</button>
-              <button type="button" onclick="insertOperator('max(')" class="op-btn px-3 h-11 border-2 border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-400 rounded-lg font-bold shadow-sm transition text-indigo-600 text-sm leading-none">max</button>
-            </div>
-
-            <!-- Expression display: contenteditable chips + hidden textarea holding real codes -->
+        <!-- Expression Box and Tactile Operators -->
+        <div class="space-y-3">
+          <!-- Backlit LCD Calculator Display -->
+          <div class="skeuo-lcd-container">
             <div
               id="expression-display"
               contenteditable="true"
               spellcheck="false"
-              data-placeholder="e.g. net_electricity × grid_ef"
-              class="block w-full rounded-lg border border-slate-300 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm p-3 min-h-[72px] leading-loose cursor-text"></div>
-            <!-- Hidden textarea: canonical field-code expression used for save/validate/preview -->
-            <textarea id="expression" class="hidden" aria-hidden="true"></textarea>
-
-            <p class="text-[10px] text-slate-400 leading-normal">
-              Click fields from the left panel. Use operator buttons or type numbers and parentheses.
-              <span class="font-mono">min(a, b)</span> and <span class="font-mono">max(a, b)</span> select the smaller/larger of two values.
-            </p>
+              data-placeholder="Drag fields and operators here to build formula..."
+              class="skeuo-lcd focus:outline-none text-sm cursor-text select-text"></div>
           </div>
+          <textarea id="expression" class="hidden" aria-hidden="true"></textarea>
 
-          <!-- Validate syntax -->
-          <div class="flex items-center pt-1">
-            <button id="btn-validate-formula" class="inline-flex items-center justify-center px-3.5 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold rounded-lg shadow-sm transition">
-              Validate Syntax
+          <!-- 3D Tactile calculator keys panel -->
+          <div class="flex flex-wrap items-center gap-1.5 p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl shadow-inner">
+            <button type="button" draggable="true" data-op=" + " onclick="insertOperator(' + ')" class="skeuo-key skeuo-key-op w-10 h-10 text-base">+</button>
+            <button type="button" draggable="true" data-op=" - " onclick="insertOperator(' - ')" class="skeuo-key skeuo-key-op w-10 h-10 text-base">−</button>
+            <button type="button" draggable="true" data-op=" * " onclick="insertOperator(' * ')" class="skeuo-key skeuo-key-op w-10 h-10 text-base">×</button>
+            <button type="button" draggable="true" data-op=" / " onclick="insertOperator(' / ')" class="skeuo-key skeuo-key-op w-10 h-10 text-base">÷</button>
+            <span class="w-px h-6 bg-slate-300"></span>
+            <button type="button" draggable="true" data-op="(" onclick="insertOperator('(')" class="skeuo-key skeuo-key-paren w-10 h-10 text-sm">(</button>
+            <button type="button" draggable="true" data-op=")" onclick="insertOperator(')')" class="skeuo-key skeuo-key-paren w-10 h-10 text-sm">)</button>
+            <span class="w-px h-6 bg-slate-300"></span>
+            <button type="button" draggable="true" data-op="min(" onclick="insertOperator('min(')" class="skeuo-key skeuo-key-fn px-3.5 h-10 text-xs">min</button>
+            <button type="button" draggable="true" data-op="max(" onclick="insertOperator('max(')" class="skeuo-key skeuo-key-fn px-3.5 h-10 text-xs">max</button>
+            <button type="button" draggable="true" data-op="SUM_MONTHS" id="btn-insert-sum-months" class="skeuo-key skeuo-key-fn px-4 h-10 text-xs flex items-center gap-1">
+              <span>Σ SUM</span>
             </button>
           </div>
 
-          <div id="validation-result-container" class="hidden">
-            <p id="validation-result" class="p-3 rounded-lg text-xs font-medium"></p>
+          <div class="flex items-center justify-between">
+            <button id="btn-validate-formula" class="inline-flex items-center justify-center px-4 py-1.5 border border-slate-300 hover:bg-slate-50 text-xs font-bold rounded shadow-sm transition bg-white">
+              Validate Syntax
+            </button>
+            <div id="validation-result-container" class="hidden flex-1 ml-4">
+              <p id="validation-result" class="p-2 rounded text-[11px] font-semibold"></p>
+            </div>
           </div>
         </div>
 
-        <!-- Live preview section -->
-        <div class="p-5 bg-slate-50/50 border-t border-slate-100 space-y-4">
-
-          <div>
-            <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Sample Values</h3>
-            <p class="text-[10px] text-slate-400 mt-0.5">Enter test numbers to preview the result instantly.</p>
-          </div>
-
-          <!-- Dynamic inputs per detected variable -->
-          <div id="preview-inputs-grid" class="grid grid-cols-2 gap-3">
-            <p class="col-span-2 text-xs text-slate-400 italic">No variables detected in the formula expression yet.</p>
-          </div>
-
-          <!-- Preview result — large and prominent -->
-          <div class="flex items-center justify-between px-5 py-4 bg-indigo-50 border border-indigo-100 rounded-xl">
-            <span class="text-xs font-bold text-indigo-600 uppercase tracking-widest">Preview Result</span>
-            <span id="preview-result-value" class="text-3xl font-black text-indigo-900 tabular-nums">—</span>
-          </div>
-
-          <p class="text-[10px] text-slate-400 flex items-center space-x-1.5">
-            <svg class="h-3.5 w-3.5 opacity-60 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="9"/>
-              <path d="M12 8h.01M11 12h1v4h1"/>
+        <!-- Expandable Drawer for Sample Values and Results Preview -->
+        <div class="drawer-container">
+          <div class="drawer-header" onclick="toggleDrawer()">
+            <span class="text-xs font-extrabold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+              <svg class="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              Sample Values & Test Calculations
+            </span>
+            <!-- Expand/Collapse Chevron -->
+            <svg id="drawer-chevron" class="h-4 w-4 text-slate-400 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" />
             </svg>
-            <span>Submitters only see the calculated read-only result, not this formula math or code.</span>
-          </p>
+          </div>
+          <div id="drawer-body" class="drawer-content">
+            <div class="p-4 space-y-4">
+              <!-- Inputs Grid -->
+              <div id="preview-inputs-grid" class="grid grid-cols-2 gap-3 max-h-48 overflow-y-auto pr-1">
+                <p class="col-span-2 text-xs text-slate-400 italic">No variables detected in the formula expression yet.</p>
+              </div>
+
+              <!-- LCD backlit simulation display for live preview result -->
+              <div class="flex items-center justify-between px-5 py-3.5 bg-indigo-50/50 border border-indigo-100/80 rounded-xl shadow-inner">
+                <span class="text-[10px] font-black text-indigo-700 uppercase tracking-widest">Test Calculation Result</span>
+                <span id="preview-result-value" class="text-2xl font-black text-indigo-900 tabular-nums">—</span>
+              </div>
+            </div>
+          </div>
         </div>
 
       </div>
@@ -307,10 +572,67 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->
+<!-- 3. SLIDE-OUT HELP MANUAL DRAWER                 -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="help-drawer" class="help-drawer">
+  <!-- Header -->
+  <div class="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+    <h3 class="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+      <span class="bg-[#1a3a6b] text-white w-5 h-5 flex items-center justify-center rounded-full text-xs">?</span>
+      Formula Manual
+    </h3>
+    <button id="btn-close-help" class="text-slate-400 hover:text-slate-600 transition-colors">
+      <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+
+  <!-- Body -->
+  <div class="p-5 flex-1 overflow-y-auto space-y-5 text-xs text-slate-600 leading-relaxed">
+    
+    <div>
+      <h4 class="font-bold text-slate-800 text-[13px] border-b border-slate-100 pb-1 mb-2 flex items-center gap-1">
+        <span class="text-indigo-600 font-mono">01.</span> Drag or Click Operands
+      </h4>
+      <p>Locate the numeric variables under the <strong>Fields</strong> tab or Value Set constants under the <strong>Value Sets</strong> tab. You can click them to insert at the cursor, or <strong>drag and drop</strong> them directly onto the LCD screen.</p>
+    </div>
+
+    <div>
+      <h4 class="font-bold text-slate-800 text-[13px] border-b border-slate-100 pb-1 mb-2 flex items-center gap-1">
+        <span class="text-indigo-600 font-mono">02.</span> Drop Math Keys
+      </h4>
+      <p>Drag calculator math keys (`+`, `-`, `*`, `/`) or click them to build arithmetic expressions. Use parentheses to control execution hierarchy.</p>
+    </div>
+
+    <div>
+      <h4 class="font-bold text-slate-800 text-[13px] border-b border-slate-100 pb-1 mb-2 flex items-center gap-1">
+        <span class="text-indigo-600 font-mono">03.</span> Sheet Aggregation
+      </h4>
+      <p>Use the <strong>SUM MONTHS</strong> function to sum a monthly input across the financial year (for below-table aggregates):</p>
+      <div class="mt-2 bg-indigo-50 border border-indigo-100 p-2.5 rounded font-mono text-[10px] text-indigo-900 flex flex-col space-y-1">
+        <strong>Examples:</strong>
+        <span>• SUM_MONTHS(from_grid)</span>
+        <span>• SUM_MONTHS(diesel) * diesel_ef</span>
+      </div>
+      <p class="mt-1.5 text-[10px] text-slate-400">💡 You can drag and drop a Field chip directly onto the <strong>Σ SUM</strong> button to wrap it instantly.</p>
+    </div>
+
+    <div>
+      <h4 class="font-bold text-slate-800 text-[13px] border-b border-slate-100 pb-1 mb-2 flex items-center gap-1">
+        <span class="text-indigo-600 font-mono">05.</span> Test Calculations
+      </h4>
+      <p>Expand the bottom drawer. Type values for each detected variable to see live results immediately. Click <strong>Validate Syntax</strong> to run formal backend parser checks.</p>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
 <!-- CREATE FORMULA MODAL — name only               -->
 <!-- ═══════════════════════════════════════════════ -->
 <div id="modal-create" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
-  <div class="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-sm overflow-hidden">
+  <div class="bg-white rounded border border-slate-200 shadow-xl w-full max-w-sm overflow-hidden">
     <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
       <h3 class="text-base font-bold text-slate-800">Create New Formula</h3>
       <button id="btn-close-modal" class="text-slate-400 hover:text-slate-600 transition-colors">
@@ -328,13 +650,13 @@
           required
           placeholder="e.g. Scope 2 Emissions"
           autocomplete="off"
-          class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm h-10 px-3 border">
+          class="block w-full rounded border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm h-10 px-3 border skeuo-input">
       </div>
       <div class="flex justify-end space-x-2 pt-1">
-        <button type="button" id="btn-cancel-modal" class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded-lg transition-colors">
+        <button type="button" id="btn-cancel-modal" class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded transition-colors">
           Cancel
         </button>
-        <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
+        <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded shadow transition-colors">
           Create Formula →
         </button>
       </div>
