@@ -40,40 +40,59 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function getStatusClass(status) {
     switch (status) {
-      case "Approved": return "bg-emerald-100 text-emerald-800 border border-emerald-200";
-      case "Under Review": return "bg-indigo-100 text-indigo-800 border border-indigo-200";
-      case "Changes Requested": return "bg-amber-100 text-amber-800 border border-amber-200";
-      case "Rejected": return "bg-rose-100 text-rose-800 border border-rose-200";
-      default: return "bg-slate-100 text-slate-800 border border-slate-200";
+      case "Approved": return "ghg-status ghg-status-success";
+      case "Under Review": return "ghg-status ghg-status-info";
+      case "Submitted":
+      case "Resubmitted": return "ghg-status ghg-status-info";
+      case "Changes Requested": return "ghg-status ghg-status-warning";
+      case "Rejected": return "ghg-status ghg-status-danger";
+      default: return "ghg-status ghg-status-neutral";
     }
   }
 
   const escapeHtml = window.WorkbookSheet.escapeHtml;
 
   function renderSubmissionTable(data) {
-    const valuesByCode = {};
-    (data.fields || []).forEach((field) => {
-      valuesByCode[field.field_code] = data.values ? data.values[field.field_id] : null;
-    });
+    const rows = Array.isArray(data.rows) && data.rows.length
+      ? data.rows
+      : (() => {
+          const valuesByCode = {};
+          (data.fields || []).forEach((field) => {
+            valuesByCode[field.field_code] = data.values ? data.values[field.field_id] : null;
+          });
+          return [{
+            row_key: `submission-${submissionId}`,
+            label: data.metadata.period_label || "Submission",
+            period_label: data.metadata.form_name || "",
+            status: data.metadata.status,
+            submission_status: data.metadata.status,
+            submission_id: data.metadata.submission_id,
+            values: valuesByCode,
+            proofs: data.proofs || {},
+            is_locked: data.metadata.is_locked,
+            editable: false,
+            is_active_period: true,
+          }];
+        })();
 
     window.WorkbookSheet.render({
       mode: "review",
       headEl: document.getElementById("review-sheet-head"),
       bodyEl: document.getElementById("review-sheet-body"),
       fields: data.fields || [],
-      rows: [{
-        row_key: `submission-${submissionId}`,
-        label: data.metadata.period_label || "Submission",
-        period_label: data.metadata.form_name || "",
-        status: data.metadata.status,
-        submission_status: data.metadata.status,
-        submission_id: data.metadata.submission_id,
-        values: valuesByCode,
-        proofs: data.proofs || {},
-        is_locked: data.metadata.is_locked,
-        editable: false,
-      }]
+      sections: data.sections || [],
+      workbookValues: data.workbook_values || {},
+      rows,
+      selectedRowKey: rows.find(row => row.is_active_period)?.row_key || null,
     });
+
+    const activeRow = rows.find(row => row.is_active_period);
+    if (activeRow) {
+      const key = window.WorkbookSheet.rowKey(activeRow);
+      const rowEl = Array.from(document.getElementById("review-sheet-body")?.querySelectorAll("tr[data-row-key]") || [])
+        .find(row => row.dataset.rowKey === key);
+      if (rowEl) rowEl.classList.add("approver-reviewed-month-row");
+    }
   }
 
   function loadSubmissionDetails() {
@@ -88,9 +107,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
         // 1. Titles & Status
         reviewTitle.textContent = `${data.metadata.form_name}`;
-        reviewSubtitle.textContent = `Site: ${data.metadata.site_name} · Period: ${data.metadata.period_label} · Submitted by ${data.metadata.submitted_by} on ${formatDate(data.metadata.submitted_at)}`;
+        reviewSubtitle.textContent = `${data.metadata.site_name} · ${data.metadata.period_label} · Submitted by ${data.metadata.submitted_by || "—"} · ${formatDate(data.metadata.submitted_at)}`;
 
-        badgeStatus.className = `inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${getStatusClass(data.metadata.status)}`;
+        badgeStatus.className = `inline-flex w-max items-center px-3 py-1 text-xs font-bold ${getStatusClass(data.metadata.status)}`;
         badgeStatus.textContent = data.metadata.status;
 
         // Hide action controls if already Approved, Rejected, or Changes Requested
@@ -222,43 +241,56 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function renderWorkflowLog(actions) {
     workflowLog.innerHTML = "";
-    if (actions.length === 0) {
+    const events = [];
+    if (submissionData && submissionData.metadata && submissionData.metadata.submitted_at) {
+      events.push({
+        action: "Submitted",
+        actor_name: submissionData.metadata.submitted_by || "Submitter",
+        acted_at: submissionData.metadata.submitted_at,
+        comment: "",
+      });
+    }
+    (actions || []).forEach((act) => {
+      const label = {
+        Approve: "Approved",
+        "Request Changes": "Changes Requested",
+        Reject: "Rejected",
+      }[act.action] || act.action;
+      events.push({ ...act, action: label });
+    });
+
+    if (events.length === 0) {
       workflowLog.innerHTML = `<li class="text-slate-400 italic text-xs py-2">No workflow actions recorded yet.</li>`;
       return;
     }
 
-    actions.forEach((act, idx) => {
+    events.forEach((act) => {
       const li = document.createElement("li");
-      li.className = "relative pb-8";
+      const actionKey = String(act.action || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      li.className = "audit-timeline-item";
 
-      const isLast = idx === actions.length - 1;
-      const timelineLine = isLast ? "" : '<span class="absolute top-4 left-4 -ml-px h-full w-0.5 bg-slate-200" aria-hidden="true"></span>';
-
-      let actionColorClass = "bg-slate-400";
-      if (act.action === "Approve") actionColorClass = "bg-emerald-500";
-      else if (act.action === "Request Changes") actionColorClass = "bg-amber-500";
-      else if (act.action === "Reject") actionColorClass = "bg-rose-500";
+      let dotClass = "dot-submitted";
+      if (act.action === "Approved") dotClass = "dot-approved";
+      else if (act.action === "Changes Requested") dotClass = "dot-changes-requested";
+      else if (act.action === "Rejected") dotClass = "dot-rejected";
 
       li.innerHTML = `
-        <div class="relative flex space-x-3">
-          ${timelineLine}
-          <div>
-            <span class="h-8 w-8 rounded-full ${actionColorClass} flex items-center justify-center ring-8 ring-white text-white">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4" />
-              </svg>
-            </span>
-          </div>
-          <div class="flex-1 min-w-0 pt-1.5 flex justify-between space-x-4">
-            <div>
-              <p class="text-xs text-slate-500">${act.action} by <span class="font-bold text-slate-800">${act.actor_name}</span> at level ${act.level_number}</p>
-              ${act.comment ? `<p class="mt-1 text-xs text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100 italic">"${act.comment}"</p>` : ""}
+        <span class="audit-timeline-dot ${dotClass}" aria-hidden="true"></span>
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="inline-flex items-center border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide audit-action-badge audit-action-${escapeHtml(actionKey)}">
+              ${escapeHtml(act.action || "Action")}
             </div>
-            <div class="text-right text-[10px] whitespace-nowrap text-slate-400">
-              <time>${formatDate(act.acted_at)}</time>
-            </div>
+            <div class="mt-1 text-xs font-bold text-slate-800">${escapeHtml(act.actor_name || "Unknown actor")}</div>
+            ${act.level_number ? `<div class="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Level ${escapeHtml(act.level_number)}</div>` : ""}
           </div>
+          <time class="shrink-0 text-right text-[10px] font-semibold text-slate-400">${formatDate(act.acted_at)}</time>
         </div>
+        ${act.comment ? `
+          <div class="audit-comment-bubble border-slate-200 bg-slate-50 text-slate-600">
+            ${escapeHtml(act.comment)}
+          </div>
+        ` : ""}
       `;
       workflowLog.appendChild(li);
     });

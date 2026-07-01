@@ -2099,6 +2099,30 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id, work
 
     return sub
 
+
+def assign_submission_workflow_from_workbook(submission_id, workbook_id, user_id):
+    """
+    Ensures a submission uses the approval workflow configured on its workbook.
+    Annual workbook section submission remains per-sheet; the workbook only
+    supplies the shared approval chain.
+    """
+    submission = Submission.query.get(submission_id)
+    if not submission or submission.is_deleted:
+        raise ValueError("Submission not found.")
+
+    workbook, _site = _require_workbook_runtime_access(user_id, workbook_id, submission.site_id)
+    _require_form_in_workbook(workbook.id, submission.form_id)
+    workflow = _get_workflow_for_workbook(workbook)
+    if not workflow or not workflow.current_version_id:
+        raise ValueError(
+            "This workbook is not ready for submission: no published approval path has been assigned."
+        )
+
+    submission.workflow_version_id = workflow.current_version_id
+    submission.updated_by = user_id
+    db.session.flush()
+    return submission
+
 def _values_have_content(values):
     if not isinstance(values, dict):
         return False

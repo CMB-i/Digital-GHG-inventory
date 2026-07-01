@@ -1462,3 +1462,246 @@ td.workbook-cell-calculated {
   color: #94a3b8;
 }
 
+/* Individual approver submission review page only. */
+body[data-theme="jsw-excel"] .approver-submission-review {
+  color: var(--ghg-text);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review > .grid {
+  align-items: start;
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review #form-container,
+body[data-theme="jsw-excel"] .approver-submission-review #actions-panel,
+body[data-theme="jsw-excel"] .approver-submission-review .workflow-audit-card {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review #actions-panel {
+  position: sticky;
+  top: 1rem;
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .workflow-audit-card {
+  max-height: 420px;
+  overflow: hidden;
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .workflow-audit-card .audit-timeline {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-left: 1.5rem;
+  padding-right: 0.25rem;
+}
+
+/* Approver review sheet only: imitate the workbook grid without touching SPOC. */
+body[data-theme="jsw-excel"] .approver-workbook-review {
+  --approver-review-border: #dde5ef;
+  --approver-review-border-strong: #c4d4e8;
+  --approver-review-current-bg: #edf4ff;
+  --approver-review-muted-bg: #eef3fa;
+  --approver-review-remarks-bg: #f8fafc;
+  --approver-review-warning-bg: #fcf3d7;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review .approver-review-table {
+  width: 100% !important;
+  min-width: 1240px;
+  table-layout: auto !important;
+  border-collapse: collapse !important;
+  border: 1px solid var(--approver-review-border-strong) !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review thead th {
+  min-width: 90px;
+  background: var(--ghg-navy) !important;
+  border: 1px solid var(--ghg-navy-dark) !important;
+  color: #ffffff !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.6px !important;
+  line-height: 1.25 !important;
+  padding: 10px 14px !important;
+  text-transform: uppercase !important;
+  white-space: normal !important;
+  word-break: break-word !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review td {
+  border: 1px solid var(--approver-review-border) !important;
+  color: var(--ghg-text) !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  min-height: 48px;
+  padding: 8px 14px !important;
+  vertical-align: middle !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review td[data-field-code] {
+  padding: 0 14px !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review td[data-field-code] div.px-2.py-2 {
+  padding: 0 !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review td.month-cell,
+body[data-theme="jsw-excel"] .approver-workbook-review thead th:first-child {
+  width: 150px !important;
+  min-width: 150px !important;
+  max-width: 150px !important;
+  white-space: nowrap !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review td.month-cell {
+  background: #f8fafc !important;
+  border-right: 1px solid var(--approver-review-border) !important;
+  color: var(--ghg-text) !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review td[data-field-code][data-cell-state="blank_editable"] {
+  background: #ffffff !important;
+  border-color: var(--approver-review-border) !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review td[data-field-code][data-cell-state="submitted"] {
+  background: var(--approver-review-current-bg) !important;
+  border-color: #c4d4e8 !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review td[data-field-code][data-cell-state="approved_locked"],
+body[data-theme="jsw-excel"] .approver-workbook-review td[data-field-code][data-row-locked="true"] {
+  background: var(--approver-review-muted-bg) !important;
+  border-color: #d7e1ee !important;
+  color: var(--ghg-muted) !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review td[data-field-code][data-cell-state="changes_requested"],
+body[data-theme="jsw-excel"] .approver-workbook-review td[data-field-code][data-has-issues="true"] {
+  background: #fff5f6 !important;
+  border-color: #f1c7cf !important;
+  border-left: 2px solid var(--ghg-red) !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review td.workbook-cell-calculated {
+  background: #f3f4f6 !important;
+  color: var(--ghg-muted) !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review tbody td:last-child {
+  background: var(--approver-review-remarks-bg) !important;
+  color: var(--ghg-muted) !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review tr.approver-reviewed-month-row > td {
+  background: var(--approver-review-current-bg) !important;
+  box-shadow:
+    inset 0 2px 0 var(--ghg-navy),
+    inset 0 -2px 0 var(--ghg-navy) !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review tr.approver-reviewed-month-row > td:first-child {
+  background: var(--ghg-info-bg) !important;
+  box-shadow:
+    inset 0 2px 0 var(--ghg-navy),
+    inset 0 -2px 0 var(--ghg-navy),
+    inset 2px 0 0 var(--ghg-navy) !important;
+}
+
+body[data-theme="jsw-excel"] .approver-workbook-review tr.approver-reviewed-month-row > td:last-child {
+  box-shadow:
+    inset 0 2px 0 var(--ghg-navy),
+    inset 0 -2px 0 var(--ghg-navy),
+    inset -2px 0 0 var(--ghg-navy) !important;
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-timeline {
+  position: relative;
+  padding-left: 1.5rem;
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-timeline::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--ghg-row-border);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-timeline-item {
+  position: relative;
+  margin-bottom: 1.25rem;
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-timeline-item:last-child {
+  margin-bottom: 0;
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-timeline-dot {
+  position: absolute;
+  left: -24px;
+  top: 5px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #fff;
+  border-radius: 9999px;
+  background: var(--ghg-navy);
+  box-shadow: 0 0 0 1px var(--ghg-row-border);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-timeline-dot.dot-submitted {
+  background: var(--ghg-navy);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-timeline-dot.dot-approved {
+  background: var(--ghg-success-text);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-timeline-dot.dot-changes-requested {
+  background: var(--ghg-warning-text);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-timeline-dot.dot-rejected {
+  background: var(--ghg-danger-text);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-action-badge {
+  border-color: var(--ghg-input-border);
+  background: var(--ghg-neutral-bg);
+  color: var(--ghg-neutral-text);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-action-submitted {
+  border-color: var(--ghg-navy);
+  background: var(--ghg-info-bg);
+  color: var(--ghg-navy);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-action-approved {
+  border-color: var(--ghg-success-text);
+  background: var(--ghg-success-bg);
+  color: var(--ghg-success-text);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-action-changes-requested {
+  border-color: var(--ghg-warning-text);
+  background: var(--ghg-warning-bg);
+  color: var(--ghg-warning-text);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-action-rejected {
+  border-color: var(--ghg-danger-text);
+  background: var(--ghg-danger-bg);
+  color: var(--ghg-danger-text);
+}
+
+body[data-theme="jsw-excel"] .approver-submission-review .audit-comment-bubble {
+  margin-top: 0.5rem;
+  padding: 0.625rem;
+  border-radius: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}

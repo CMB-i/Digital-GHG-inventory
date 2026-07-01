@@ -25,6 +25,7 @@ from app.modules.APPROV.service import (
     reject_package,
 )
 from app.modules.SUBMIT.service import (
+    compose_readonly_workbook_context,
     format_period_label,
     human_sheet_label,
     serialize_submission_value_issue,
@@ -376,6 +377,14 @@ def get_submission_details(submission_id):
         form = Form.query.get(submission.form_id)
         site = Site.query.get(submission.site_id)
         period = ReportingPeriod.query.get(submission.reporting_period_id)
+        fy_start_year = period.year if period and period.month >= 4 else (period.year - 1 if period else None)
+        workbook_context = compose_readonly_workbook_context(
+            submission.site_id,
+            submission.form_id,
+            fy_start_year,
+            active_period_id=submission.reporting_period_id,
+            form_version_id=submission.form_version_id,
+        ) if fy_start_year else None
 
         from app.common.permissions import has_permission
         can_resubmit = (
@@ -400,7 +409,10 @@ def get_submission_details(submission_id):
 
         return success_response(data={
             "metadata": metadata,
-            "fields": fields_data,
+            "fields": workbook_context["fields"] if workbook_context else fields_data,
+            "sections": workbook_context.get("sections", []) if workbook_context else [],
+            "workbook_values": workbook_context.get("workbook_values", {}) if workbook_context else {},
+            "rows": workbook_context.get("rows", []) if workbook_context else [],
             "values": values_data,
             "proofs": proofs_data,
             "issues": issues_list,
@@ -559,4 +571,3 @@ def get_submission_audit_logs(submission_id):
     events = [item[1] for item in events_raw]
 
     return success_response(data=events)
-

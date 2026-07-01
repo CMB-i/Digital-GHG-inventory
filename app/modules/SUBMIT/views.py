@@ -18,6 +18,7 @@ from app.modules.SUBMIT.service import (
     compose_calculation_results,
     create_draft_submission,
     autosave_submission_values,
+    assign_submission_workflow_from_workbook,
     submit_submission,
     submit_monthly_workbook_package,
     human_sheet_label,
@@ -507,6 +508,9 @@ def submit_endpoint(submission_id):
     """
     user = current_user()
     try:
+        data = request.get_json(silent=True) or {}
+        if data.get("workbook_id"):
+            assign_submission_workflow_from_workbook(submission_id, data.get("workbook_id"), user.id)
         submit_submission(submission_id, user.id)
         db.session.commit()
         return success_response(message="Sheet submitted successfully.")
