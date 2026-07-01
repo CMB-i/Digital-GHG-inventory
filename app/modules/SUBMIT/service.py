@@ -968,6 +968,18 @@ def _compute_preview_calculated_values(submissions, fields):
                     continue
                 try:
                     computed_val = evaluate_formula(fv.expression, field_values, value_set_snapshot)
+                    decimals = f.get("field_config", {}).get("round_off_decimals", 3)
+                    try:
+                        decimals = int(decimals)
+                        if not (1 <= decimals <= 9):
+                            decimals = 3
+                    except (ValueError, TypeError):
+                        decimals = 3
+                    if computed_val is not None:
+                        try:
+                            computed_val = round(float(computed_val), decimals)
+                        except (ValueError, TypeError):
+                            pass
                     computed[code] = computed_val
                     field_values[code] = computed_val
                 except Exception:
@@ -1086,6 +1098,18 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
 
             try:
                 result = evaluate_formula(formula_version.expression, context_values, value_set_snapshot)
+                decimals = config.get("round_off_decimals", 3)
+                try:
+                    decimals = int(decimals)
+                    if not (1 <= decimals <= 9):
+                        decimals = 3
+                except (ValueError, TypeError):
+                    decimals = 3
+                if result is not None:
+                    try:
+                        result = round(float(result), decimals)
+                    except (ValueError, TypeError):
+                        pass
                 result_values[code] = result
                 results_by_code[code] = {
                     "status": "calculated",
@@ -1715,6 +1739,26 @@ def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
                         preview_field_values[code] = preview_val
                     if reportable_val is not None:
                         reportable_field_values[code] = reportable_val
+
+            # Round final display values in row_values
+            for code, r_info in row_values.items():
+                f_info = next((fi for fi in calculated_fields if fi["field"].field_code == code), None)
+                if f_info:
+                    fv = f_info["version"]
+                    decimals = fv.field_config.get("round_off_decimals", 3)
+                    try:
+                        decimals = int(decimals)
+                        if not (1 <= decimals <= 9):
+                            decimals = 3
+                    except (ValueError, TypeError):
+                        decimals = 3
+                    for key in ["calculated_value", "preview_value", "reportable_value"]:
+                        val = r_info.get(key)
+                        if val is not None:
+                            try:
+                                r_info[key] = round(float(val), decimals)
+                            except (ValueError, TypeError):
+                                pass
 
         rows.append({
             **item,

@@ -200,8 +200,10 @@ document.addEventListener("DOMContentLoaded", function () {
           // Dynamically update calculations input fields in DOM
           const inputEl = document.getElementById("field_" + code);
           if (inputEl && inputEl.readOnly) {
+            const decAttr = inputEl.getAttribute("data-decimals");
+            const decimals = decAttr ? parseInt(decAttr, 10) : 3;
             inputEl.value = data.data.values[code] !== null && data.data.values[code] !== undefined
-              ? parseFloat(parseFloat(data.data.values[code]).toFixed(6))
+              ? parseFloat(parseFloat(data.data.values[code]).toFixed(decimals))
               : "";
           }
         });

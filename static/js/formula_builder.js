@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // code → friendly display name, populated from field palette + valset palette
   const fieldNameMap = {};
+  const fieldConfigMap = {};
 
   // All valset codes (for chip type detection on refreshDisplay)
   const valsetCodeSet = new Set();
@@ -741,6 +742,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
         filtered.forEach(field => {
           fieldNameMap[field.field_code] = field.field_name;
+          fieldConfigMap[field.field_code] = field.field_config || {};
 
           const unit = (field.field_config && field.field_config.unit) ? field.field_config.unit : "";
           const btn = document.createElement("button");
@@ -845,8 +847,13 @@ document.addEventListener("DOMContentLoaded", function () {
         }
       }
       const result = window.FormulaRuntime.evaluate(expr, values);
+      const fieldConfig = fieldConfigMap[_returnFieldId] || {};
+      let decimals = (fieldConfig.round_off_decimals !== undefined) ? parseInt(fieldConfig.round_off_decimals, 10) : 3;
+      if (isNaN(decimals) || decimals < 1 || decimals > 9) {
+        decimals = 3;
+      }
       if (result !== null && result !== undefined && !isNaN(result)) {
-        previewResultValue.textContent = parseFloat(result.toFixed(6));
+        previewResultValue.textContent = parseFloat(result.toFixed(decimals));
         previewResultValue.className = "text-2xl font-black text-indigo-900 tabular-nums";
       } else {
         previewResultValue.textContent = "Error";

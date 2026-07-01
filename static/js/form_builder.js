@@ -1391,10 +1391,21 @@ document.addEventListener("DOMContentLoaded", function () {
     setResultFieldWorkflowControls(field.field_type === "calculated" && isSheetResultField(field));
     document.getElementById("prop-help").value = field.field_config.help_text || "";
 
+    // Close all details drawers by default
+    document.querySelectorAll("#form-field-properties details").forEach(det => {
+      det.removeAttribute("open");
+    });
+
+    // Keep identity drawer open by default
+    const identityDrawer = document.getElementById("drawer-identity");
+    if (identityDrawer) {
+      identityDrawer.setAttribute("open", "");
+    }
+
     // Toggle specific type options
-    document.getElementById("prop-section-numeric").classList.add("hidden");
+    document.getElementById("drawer-numeric").classList.add("hidden");
     document.getElementById("prop-section-dropdown").classList.add("hidden");
-    document.getElementById("prop-section-calculated").classList.add("hidden");
+    document.getElementById("drawer-calculated").classList.add("hidden");
     document.getElementById("prop-section-file").classList.add("hidden");
     const _fHint = document.getElementById("formula-publish-hint");
     const _fOk   = document.getElementById("formula-status-ok");
@@ -1404,8 +1415,32 @@ document.addEventListener("DOMContentLoaded", function () {
     const config = field.field_config || {};
 
     if (field.field_type === "number" || field.field_type === "integer") {
-      document.getElementById("prop-section-numeric").classList.remove("hidden");
-      document.getElementById("prop-unit").value = config.unit || "";
+      const numDrawer = document.getElementById("drawer-numeric");
+      if (numDrawer) {
+        numDrawer.classList.remove("hidden");
+        numDrawer.setAttribute("open", "");
+      }
+      
+      const unitVal = config.unit || "";
+      const unitSelect = document.getElementById("prop-unit");
+      if (unitSelect) {
+        // Ensure unitVal exists in options, else append it
+        let found = false;
+        for (let i = 0; i < unitSelect.options.length; i++) {
+          if (unitSelect.options[i].value === unitVal) {
+            found = true;
+            break;
+          }
+        }
+        if (!found && unitVal) {
+          const opt = document.createElement("option");
+          opt.value = unitVal;
+          opt.textContent = unitVal;
+          unitSelect.appendChild(opt);
+        }
+        unitSelect.value = unitVal;
+      }
+
       document.getElementById("prop-min").value = config.min !== undefined ? config.min : "";
       document.getElementById("prop-max").value = config.max !== undefined ? config.max : "";
       document.getElementById("prop-anomaly").value = config.anomaly_threshold !== undefined ? config.anomaly_threshold : "";
@@ -1417,12 +1452,20 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (field.field_type === "calculated") {
-      document.getElementById("prop-section-calculated").classList.remove("hidden");
+      const calcDrawer = document.getElementById("drawer-calculated");
+      if (calcDrawer) {
+        calcDrawer.classList.remove("hidden");
+        calcDrawer.setAttribute("open", "");
+      }
       const formulaSelect = document.getElementById("prop-formula");
       const formulaHint   = document.getElementById("formula-publish-hint");
       const formulaOk     = document.getElementById("formula-status-ok");
       const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
       const calcUnitInput = document.getElementById("prop-calc-unit");
+      const calcDecimalsInput = document.getElementById("prop-calc-decimals");
+      if (calcDecimalsInput) {
+        calcDecimalsInput.value = config.round_off_decimals !== undefined ? config.round_off_decimals : 3;
+      }
       if (propCalcPlacement) {
         if (!isSheetResultField(field)) {
           propCalcPlacement.value = "monthly";
@@ -1553,6 +1596,17 @@ document.addEventListener("DOMContentLoaded", function () {
         setResultFieldWorkflowControls(false);
       }
 
+      const calcDecimalsInput = document.getElementById("prop-calc-decimals");
+      if (calcDecimalsInput) {
+        let decVal = parseInt(calcDecimalsInput.value, 10);
+        if (isNaN(decVal) || decVal < 1 || decVal > 9) {
+          decVal = 3;
+        }
+        field.field_config.round_off_decimals = decVal;
+      } else {
+        field.field_config.round_off_decimals = field.field_config.round_off_decimals !== undefined ? field.field_config.round_off_decimals : 3;
+      }
+
       if (formulaSelect) {
         const formulaVal = formulaSelect.value;
         const prevFormulaId = field.field_config.formula_version_id;
@@ -1646,6 +1700,7 @@ document.addEventListener("DOMContentLoaded", function () {
         newField.field_config.field_scope = "monthly";
         newField.field_config.result_role = "monthly_calculated";
         newField.field_config.display_region = "monthly_table";
+        newField.field_config.round_off_decimals = 3;
       }
 
       currentFields.push(newField);
@@ -2102,6 +2157,32 @@ document.addEventListener("DOMContentLoaded", function () {
         "&version_id=" + selectedVersionId +
         "&field_id=" + encodeURIComponent(selectedFieldCode || "");
       window.location.href = url;
+    };
+  }
+
+  // Decimal rounding +/- buttons
+  const btnDecDecimals = document.getElementById("btn-dec-decimals");
+  const btnIncDecimals = document.getElementById("btn-inc-decimals");
+  const calcDecimalsInput = document.getElementById("prop-calc-decimals");
+
+  if (btnDecDecimals && btnIncDecimals && calcDecimalsInput) {
+    btnDecDecimals.onclick = function(e) {
+      e.preventDefault();
+      let val = parseInt(calcDecimalsInput.value, 10);
+      if (isNaN(val)) val = 3;
+      if (val > 1) {
+        calcDecimalsInput.value = val - 1;
+        saveInspectorProperties();
+      }
+    };
+    btnIncDecimals.onclick = function(e) {
+      e.preventDefault();
+      let val = parseInt(calcDecimalsInput.value, 10);
+      if (isNaN(val)) val = 3;
+      if (val < 9) {
+        calcDecimalsInput.value = val + 1;
+        saveInspectorProperties();
+      }
     };
   }
 

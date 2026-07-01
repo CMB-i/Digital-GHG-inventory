@@ -54,6 +54,13 @@
             const oldVal = values[field.field_code];
             const newVal = window.FormulaRuntime ? window.FormulaRuntime.evaluate(field.field_config.expression, values) : null;
 
+            let decimals = (field.field_config.round_off_decimals !== undefined) 
+              ? parseInt(field.field_config.round_off_decimals, 10) 
+              : 3;
+            if (isNaN(decimals) || decimals < 1 || decimals > 9) {
+              decimals = 3;
+            }
+
             const oldNumeric = oldVal !== undefined && oldVal !== null && oldVal !== "" ? parseFloat(oldVal) : null;
             const newNumeric = newVal !== null && newVal !== undefined ? parseFloat(newVal) : null;
 
@@ -68,7 +75,7 @@
               // Update input in DOM
               const inputEl = targetElement.querySelector(`[name="${field.field_code}"]`);
               if (inputEl) {
-                inputEl.value = newNumeric !== null ? parseFloat(newNumeric.toFixed(6)) : "";
+                inputEl.value = newNumeric !== null ? parseFloat(newNumeric.toFixed(decimals)) : "";
               }
             }
           }
@@ -338,6 +345,11 @@
           inputEl.className = "form-input block w-full rounded-lg border-indigo-200 bg-indigo-50/40 text-indigo-950 font-bold focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm h-10 px-3 transition-colors select-all";
           inputEl.readOnly = true;
           inputEl.disabled = true;
+          if (fieldConfig.round_off_decimals !== undefined) {
+            inputEl.setAttribute("data-decimals", fieldConfig.round_off_decimals);
+          } else {
+            inputEl.setAttribute("data-decimals", "3");
+          }
 
           // Fetch precalculated or calculate value
           let val = values[field.field_code] || "";
