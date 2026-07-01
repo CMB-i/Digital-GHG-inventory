@@ -1220,6 +1220,13 @@ def compose_package_calculation_results(package_id, user_id):
                 for fi in calculated_fields:
                     f, fv, form_obj = fi["field"], fi["version"], fi["form"]
                     code = f.field_code
+                    decimals = fv.field_config.get("round_off_decimals", 3)
+                    try:
+                        decimals = int(decimals)
+                        if not (1 <= decimals <= 9):
+                            decimals = 3
+                    except (ValueError, TypeError):
+                        decimals = 3
                     fver_id = fv.field_config.get("formula_version_id")
                     if not fver_id:
                         row_values[code] = {
@@ -1258,6 +1265,11 @@ def compose_package_calculation_results(package_id, user_id):
                     else:
                         try:
                             pv = evaluate_formula(fver.expression, preview_vals, value_set_snapshot)
+                            if pv is not None:
+                                try:
+                                    pv = round(float(pv), decimals)
+                                except (ValueError, TypeError):
+                                    pass
                             unapp = [t for t in tokens if t not in value_set_snapshot and cell_states.get(t) != "approved_locked"]
                             if unapp:
                                 ps = "preview_only"
@@ -1285,6 +1297,11 @@ def compose_package_calculation_results(package_id, user_id):
                     else:
                         try:
                             rv = evaluate_formula(fver.expression, reportable_vals, value_set_snapshot)
+                            if rv is not None:
+                                try:
+                                    rv = round(float(rv), decimals)
+                                except (ValueError, TypeError):
+                                    pass
                         except Exception as exc:
                             rs = "evaluation_error"
                             rw.append(f"Evaluation error: {str(exc)}")

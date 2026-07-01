@@ -968,6 +968,18 @@ def _compute_preview_calculated_values(submissions, fields):
                     continue
                 try:
                     computed_val = evaluate_formula(fv.expression, field_values, value_set_snapshot)
+                    decimals = f.get("field_config", {}).get("round_off_decimals", 3)
+                    try:
+                        decimals = int(decimals)
+                        if not (1 <= decimals <= 9):
+                            decimals = 3
+                    except (ValueError, TypeError):
+                        decimals = 3
+                    if computed_val is not None:
+                        try:
+                            computed_val = round(float(computed_val), decimals)
+                        except (ValueError, TypeError):
+                            pass
                     computed[code] = computed_val
                     field_values[code] = computed_val
                 except Exception:
@@ -1086,6 +1098,18 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
 
             try:
                 result = evaluate_formula(formula_version.expression, context_values, value_set_snapshot)
+                decimals = config.get("round_off_decimals", 3)
+                try:
+                    decimals = int(decimals)
+                    if not (1 <= decimals <= 9):
+                        decimals = 3
+                except (ValueError, TypeError):
+                    decimals = 3
+                if result is not None:
+                    try:
+                        result = round(float(result), decimals)
+                    except (ValueError, TypeError):
+                        pass
                 result_values[code] = result
                 results_by_code[code] = {
                     "status": "calculated",
@@ -2410,6 +2434,18 @@ def autosave_submission_values(submission_id, values_dict, user_id):
                 try:
                     # Run evaluation
                     result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
+                    decimals = info["field_config"].get("round_off_decimals", 3)
+                    try:
+                        decimals = int(decimals)
+                        if not (1 <= decimals <= 9):
+                            decimals = 3
+                    except (ValueError, TypeError):
+                        decimals = 3
+                    if result is not None:
+                        try:
+                            result = round(float(result), decimals)
+                        except (ValueError, TypeError):
+                            pass
                     
                     # Save calculation row
                     calc_row = SubmissionValue.query.filter_by(
