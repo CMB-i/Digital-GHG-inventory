@@ -1740,6 +1740,26 @@ def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
                     if reportable_val is not None:
                         reportable_field_values[code] = reportable_val
 
+            # Round final display values in row_values
+            for code, r_info in row_values.items():
+                f_info = next((fi for fi in calculated_fields if fi["field"].field_code == code), None)
+                if f_info:
+                    fv = f_info["version"]
+                    decimals = fv.field_config.get("round_off_decimals", 3)
+                    try:
+                        decimals = int(decimals)
+                        if not (1 <= decimals <= 9):
+                            decimals = 3
+                    except (ValueError, TypeError):
+                        decimals = 3
+                    for key in ["calculated_value", "preview_value", "reportable_value"]:
+                        val = r_info.get(key)
+                        if val is not None:
+                            try:
+                                r_info[key] = round(float(val), decimals)
+                            except (ValueError, TypeError):
+                                pass
+
         rows.append({
             **item,
             "period_id": period.id if period else None,
@@ -2434,18 +2454,6 @@ def autosave_submission_values(submission_id, values_dict, user_id):
                 try:
                     # Run evaluation
                     result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
-                    decimals = info["field_config"].get("round_off_decimals", 3)
-                    try:
-                        decimals = int(decimals)
-                        if not (1 <= decimals <= 9):
-                            decimals = 3
-                    except (ValueError, TypeError):
-                        decimals = 3
-                    if result is not None:
-                        try:
-                            result = round(float(result), decimals)
-                        except (ValueError, TypeError):
-                            pass
                     
                     # Save calculation row
                     calc_row = SubmissionValue.query.filter_by(

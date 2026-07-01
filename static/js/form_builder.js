@@ -1396,6 +1396,12 @@ document.addEventListener("DOMContentLoaded", function () {
       det.removeAttribute("open");
     });
 
+    // Keep identity drawer open by default
+    const identityDrawer = document.getElementById("drawer-identity");
+    if (identityDrawer) {
+      identityDrawer.setAttribute("open", "");
+    }
+
     // Toggle specific type options
     document.getElementById("drawer-numeric").classList.add("hidden");
     document.getElementById("prop-section-dropdown").classList.add("hidden");
@@ -1409,7 +1415,11 @@ document.addEventListener("DOMContentLoaded", function () {
     const config = field.field_config || {};
 
     if (field.field_type === "number" || field.field_type === "integer") {
-      document.getElementById("drawer-numeric").classList.remove("hidden");
+      const numDrawer = document.getElementById("drawer-numeric");
+      if (numDrawer) {
+        numDrawer.classList.remove("hidden");
+        numDrawer.setAttribute("open", "");
+      }
       
       const unitVal = config.unit || "";
       const unitSelect = document.getElementById("prop-unit");
@@ -1442,7 +1452,11 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (field.field_type === "calculated") {
-      document.getElementById("drawer-calculated").classList.remove("hidden");
+      const calcDrawer = document.getElementById("drawer-calculated");
+      if (calcDrawer) {
+        calcDrawer.classList.remove("hidden");
+        calcDrawer.setAttribute("open", "");
+      }
       const formulaSelect = document.getElementById("prop-formula");
       const formulaHint   = document.getElementById("formula-publish-hint");
       const formulaOk     = document.getElementById("formula-status-ok");
