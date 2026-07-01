@@ -157,26 +157,11 @@ document.addEventListener("DOMContentLoaded", function () {
     throw new Error(`${fallbackMessage} The server returned a non-JSON response (${response.status})${preview ? `: ${preview}` : "."}`);
   }
 
-  function packageSubmitErrorMessage(data) {
-    const parts = [data.error || "Could not submit workbook package."];
-    if (Array.isArray(data.errors) && data.errors.length) {
-      data.errors.forEach(item => {
-        const label = item.form_name ? `${item.form_name}: ` : "";
-        if (item.validation_errors) {
-          const fieldMessages = Object.values(item.validation_errors).filter(Boolean).join(" ");
-          if (fieldMessages) {
-            parts.push(`${label}${fieldMessages}`);
-            return;
-          }
-        }
-        if (item.error) parts.push(`${label}${item.error}`);
-      });
-    }
-    if (Array.isArray(data.warnings) && data.warnings.length) {
-      data.warnings.forEach(item => {
-        const label = item.form_name ? `${item.form_name}: ` : "";
-        if (item.reason) parts.push(`${label}${item.reason}`);
-      });
+  function sectionSubmitErrorMessage(data) {
+    const parts = [data.error || "Could not submit this section."];
+    if (data.validation_errors) {
+      const fieldMessages = Object.values(data.validation_errors).filter(Boolean).join(" ");
+      if (fieldMessages) parts.push(fieldMessages);
     }
     return parts.filter(Boolean).join(" ");
   }
@@ -976,31 +961,67 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
     if (!(row.editability && row.editability.editable)) return;
-    if (!window.confirm(`Submit the ${row.period_label} workbook package for approval?`)) {
+    const sectionName = state.workbook.selected_form ? state.workbook.selected_form.name : "this section";
+    if (!window.confirm(`Submit ${sectionName} for ${row.period_label} for approval?`)) {
       return;
     }
 
     try {
       btnSubmit.disabled = true;
       btnSubmit.textContent = "Submitting...";
-      const response = await fetch("/module/SUBMIT/api/annual-workbook/package/submit", {
+
+      let submissionId = row.submission_id;
+      if (!submissionId) {
+        if (!row.period_id) {
+          throw new Error("A reporting period must exist before this section can be submitted.");
+        }
+        const createResponse = await fetch("/module/SUBMIT/api/submissions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            site_id: state.workbook.site.id,
+            workbook_id: state.workbook.workbook.id,
+            form_id: state.workbook.selected_form.id,
+            reporting_period_id: row.period_id
+          })
+        });
+        const createData = await parseJsonResponse(createResponse, "Could not create draft.");
+        if (createResponse.status === 409 && createData.existing_id) {
+          submissionId = createData.existing_id;
+        } else if (!createResponse.ok) {
+          throw new Error(createData.error || "Could not create draft.");
+        } else {
+          submissionId = createData.data.submission_id;
+        }
+      }
+
+      const saveResponse = await fetch(`/module/SUBMIT/api/submissions/${submissionId}/autosave`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values: row.values || {} })
+      });
+      const saveData = await parseJsonResponse(saveResponse, "Could not save draft.");
+      if (!saveResponse.ok) {
+        throw new Error(saveData.error || "Could not save draft.");
+      }
+
+      const response = await fetch(`/module/SUBMIT/api/submissions/${submissionId}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          site_id: state.workbook.site.id,
-          workbook_id: state.workbook.workbook.id,
-          period_id: row.period_id,
-          year: row.year,
-          month: row.month,
-          selected_form_id: state.workbook.selected_form.id,
-          values: row.values || {}
+          workbook_id: state.workbook.workbook.id
         })
       });
-      const data = await parseJsonResponse(response, "Could not submit workbook package.");
+      const data = await parseJsonResponse(response, "Could not submit this section.");
       if (!response.ok) {
-        throw new Error(packageSubmitErrorMessage(data));
+        throw new Error(sectionSubmitErrorMessage(data));
       }
-      showAlert("Workbook submitted for approval.", "success");
+      row.submission_id = submissionId;
+      row.submission_status = "Submitted";
+      row.last_saved = new Date().toISOString();
+      row.values = saveData.data && saveData.data.values ? saveData.data.values : row.values;
+      state.dirtyRows.delete(rowKey(row));
+      showAlert(`${sectionName} submitted for approval.`, "success");
       
       // Update sheets status dots data
       const sheetsRes = await fetch("/module/SUBMIT/api/sheets");
@@ -1010,7 +1031,7 @@ document.addEventListener("DOMContentLoaded", function () {
     } catch (error) {
       showAlert(error.message, "error");
     } finally {
-      btnSubmit.textContent = "Submit Workbook";
+      btnSubmit.textContent = "Submit This Section for Approval";
       renderHeader();
     }
   }
