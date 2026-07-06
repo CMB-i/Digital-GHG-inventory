@@ -1,8 +1,17 @@
+# Standalone Workflow Builder UI disabled — current complexity needs are met by
+# WKBK's simplified chain editor, which depends on this module's service layer
+# (save_workflow_draft_levels, publish_workflow_version, etc.) internally. Every
+# route below is blocked by the before_request hook further down; the service
+# and model layers are untouched and still fully used by SUBMIT, APPROV, NOTIFY,
+# FORMBLD, and WKBK. Re-enable by removing that hook (and restoring the nav/
+# dashboard links in app/__init__.py) if multi-level/SEQUENTIAL chains are
+# needed again through this dedicated UI.
+
 import json
 
 from flask import Blueprint, render_template, jsonify, request
 from app.common.decorators import require_permission
-from app.common.auth import current_user
+from app.common.auth import current_user, is_api_request
 from app.common.responses import success_response, error_response
 from app.database import db
 
@@ -26,6 +35,13 @@ from app.modules.SITEMST.model import Site
 
 MODULE_CODE = "WFLWBLD"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
+
+
+@bp.before_request
+def _feature_disabled():
+    if is_api_request():
+        return error_response("This feature is not currently available.", 404)
+    return render_template("feature_unavailable.html"), 404
 
 
 def _parse_form_metadata(form):

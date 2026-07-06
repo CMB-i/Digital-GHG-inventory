@@ -423,12 +423,6 @@ def build_nav_items(user):
                     "href": "/module/VALSET/",
                     "visible": capabilities["can_manage_setup"] and user_can(user, "value_set", "view"),
                 },
-
-                {
-                    "label": "Workflow Paths",
-                    "href": "/module/WFLWBLD/",
-                    "visible": capabilities["can_manage_setup"] and user_can(user, "workflow", "view"),
-                },
                 {
                     "label": "Notification Config",
                     "href": "/module/NOTIFY/manager",
@@ -485,12 +479,6 @@ def build_dashboard_cards(user):
             "href": "/workbooks/",
             "description": "Build reusable workbook and sheet structures for site reporting.",
             "visible": capabilities["can_manage_setup"] and user_can(user, "form", "manage_forms"),
-        },
-        {
-            "title": "Workflow Paths",
-            "href": "/module/WFLWBLD/",
-            "description": "Configure who reviews and approves each site monthly package.",
-            "visible": capabilities["can_manage_setup"] and user_can(user, "workflow", "view"),
         },
         {
             "title": "Reports",
