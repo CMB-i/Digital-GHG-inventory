@@ -495,6 +495,7 @@ def api_save_site_chain(workbook_id, site_id):
     from app.modules.WFLWBLD.service import (
         create_workflow as wf_create_workflow,
         create_new_workflow_version_draft as wf_create_draft,
+        save_site_chain_levels,
     )
 
     wb = get_workbook(workbook_id)
@@ -504,7 +505,6 @@ def api_save_site_chain(workbook_id, site_id):
     data = request.get_json() or {}
     steps = data.get("steps", [])
     user = current_user()
-    now = datetime.now(timezone.utc)
 
     try:
         if not wb.workflow_id:
@@ -524,75 +524,7 @@ def api_save_site_chain(workbook_id, site_id):
         if not draft_version:
             draft_version = wf_create_draft(workflow_id=workflow.id, user_id=user.id)
 
-        posted_level_numbers = {s["level_number"] for s in steps}
-
-        existing_levels = WorkflowLevel.query.filter_by(
-            workflow_version_id=draft_version.id, is_deleted=False
-        ).all()
-
-        for level in existing_levels:
-            if level.level_number not in posted_level_numbers:
-                level.is_deleted = True
-                level.deleted_at = now
-                level.deleted_by = user.id
-
-        level_map = {
-            l.level_number: l
-            for l in existing_levels
-            if not l.is_deleted
-        }
-
-        for step in steps:
-            ln = step["level_number"]
-            if ln in level_map:
-                if level_map[ln].level_name != step["level_name"]:
-                    level_map[ln].level_name = step["level_name"]
-                    level_map[ln].updated_by = user.id
-            else:
-                new_level = WorkflowLevel(
-                    workflow_version_id=draft_version.id,
-                    level_number=ln,
-                    level_name=step["level_name"],
-                    approval_mode="ANY_ONE",
-                    skip_if_empty=False,
-                    created_by=user.id,
-                    updated_by=user.id,
-                )
-                db.session.add(new_level)
-                level_map[ln] = new_level
-
-        db.session.flush()
-
-        all_version_level_ids = [
-            l.id for l in WorkflowLevel.query.filter_by(
-                workflow_version_id=draft_version.id
-            ).all()
-        ]
-
-        if all_version_level_ids:
-            for approver in WorkflowLevelApprover.query.filter(
-                WorkflowLevelApprover.workflow_level_id.in_(all_version_level_ids),
-                WorkflowLevelApprover.scope_site_id == site_id,
-                WorkflowLevelApprover.is_deleted == False,
-            ).all():
-                approver.is_deleted = True
-                approver.deleted_at = now
-                approver.deleted_by = user.id
-
-        db.session.flush()
-
-        for step in steps:
-            if step.get("user_id"):
-                level = level_map.get(step["level_number"])
-                if level:
-                    db.session.add(WorkflowLevelApprover(
-                        workflow_level_id=level.id,
-                        user_id=step["user_id"],
-                        scope_site_id=site_id,
-                        sequence_number=None,
-                        created_by=user.id,
-                        updated_by=user.id,
-                    ))
+        save_site_chain_levels(draft_version.id, site_id, steps, user.id)
 
         db.session.commit()
         return success_response(data=_build_chain_payload(wb))

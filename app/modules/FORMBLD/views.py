@@ -205,7 +205,7 @@ def get_version_details(version_id):
         
     parent = get_form(version.form_id)
     fields = get_form_version_fields(version_id)
-    sections = get_form_sections(version.form_id)
+    sections = get_form_sections(version_id)
     
     # Check permissions
     user = current_user()

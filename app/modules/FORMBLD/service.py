@@ -139,9 +139,9 @@ def create_form(name, code, description, user_id):
 def get_form_version(version_id):
     return FormVersion.query.get(version_id)
 
-def get_form_sections(form_id):
+def get_form_sections(form_version_id):
     return (
-        FormSection.query.filter_by(form_id=form_id, is_deleted=False)
+        FormSection.query.filter_by(form_version_id=form_version_id, is_deleted=False)
         .order_by(FormSection.display_order.asc(), FormSection.id.asc())
         .all()
     )
@@ -195,7 +195,7 @@ def compose_preview_workbook_context(form_version_id):
         "layout_type": section.layout_type,
         "display_order": section.display_order,
         "description": section.description or "",
-    } for section in get_form_sections(form.id)]
+    } for section in get_form_sections(form_version_id)]
 
     rows = []
     for month, month_name in MOCK_FY_MONTHS:
@@ -298,14 +298,18 @@ def compose_preview_workbook_context(form_version_id):
         "rows": rows,
     }
 
-def save_form_sections(form_id, sections_list, user_id):
+def save_form_sections(form_version_id, sections_list, user_id):
     if sections_list is None:
         return {}
+
+    form_version = FormVersion.query.get(form_version_id)
+    if not form_version:
+        raise ValueError("Form version not found.")
 
     seen_codes = set()
     active_sections_by_code = {
         section.code: section
-        for section in FormSection.query.filter_by(form_id=form_id, is_deleted=False).all()
+        for section in FormSection.query.filter_by(form_version_id=form_version_id, is_deleted=False).all()
     }
     saved_sections = {}
 
@@ -331,14 +335,15 @@ def save_form_sections(form_id, sections_list, user_id):
         if section_id:
             section = FormSection.query.filter_by(
                 id=section_id,
-                form_id=form_id,
+                form_version_id=form_version_id,
                 is_deleted=False,
             ).one_or_none()
         if not section:
             section = active_sections_by_code.get(code)
         if not section:
             section = FormSection(
-                form_id=form_id,
+                form_id=form_version.form_id,
+                form_version_id=form_version_id,
                 name=name,
                 code=code,
                 layout_type=layout_type,
@@ -409,11 +414,11 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
     if form_version.status != "Draft":
         raise ValueError("Only Draft versions can be modified.")
 
-    section_map = save_form_sections(form_version.form_id, sections_list, user_id)
+    section_map = save_form_sections(form_version_id, sections_list, user_id)
     if sections_list is None:
         section_map = {
             section.code: section
-            for section in FormSection.query.filter_by(form_id=form_version.form_id, is_deleted=False).all()
+            for section in FormSection.query.filter_by(form_version_id=form_version_id, is_deleted=False).all()
         }
         
     # Check for duplicate field codes in the input list
@@ -475,7 +480,7 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
         elif section_id:
             section = FormSection.query.filter_by(
                 id=section_id,
-                form_id=form_version.form_id,
+                form_version_id=form_version_id,
                 is_deleted=False,
             ).one_or_none()
             if not section:
@@ -596,12 +601,34 @@ def create_new_form_version_draft(form_id, user_id):
     db.session.add(new_version)
     db.session.flush()
     
-    # Copy fields from previous version
+    # Copy fields (and sections) from previous version
     latest_ver = FormVersion.query.filter_by(
         form_id=form_id
     ).filter(FormVersion.id != new_version.id).order_by(FormVersion.version_number.desc()).first()
-    
+
     if latest_ver:
+        # Clone sections into version-scoped rows first, so editing them on this
+        # draft (rename, reorder, remove) never mutates the previous version's rows.
+        prev_sections = FormSection.query.filter_by(
+            form_version_id=latest_ver.id, is_deleted=False
+        ).all()
+        section_id_map = {}
+        for prev_section in prev_sections:
+            new_section = FormSection(
+                form_id=form_id,
+                form_version_id=new_version.id,
+                name=prev_section.name,
+                code=prev_section.code,
+                layout_type=prev_section.layout_type,
+                display_order=prev_section.display_order,
+                description=prev_section.description,
+                created_by=user_id,
+                updated_by=user_id,
+            )
+            db.session.add(new_section)
+            db.session.flush()
+            section_id_map[prev_section.id] = new_section.id
+
         prev_fields = get_form_version_fields(latest_ver.id)
         for prev_fv, prev_f in prev_fields:
             # Create a new FieldVersion pointing to the new FormVersion
@@ -609,7 +636,7 @@ def create_new_form_version_draft(form_id, user_id):
             max_fv_ver = db.session.query(db.func.max(FieldVersion.version_number)).filter_by(
                 field_id=prev_f.id
             ).scalar() or 0
-            
+
             new_fv = FieldVersion(
                 field_id=prev_f.id,
                 version_number=max_fv_ver + 1,
@@ -617,15 +644,15 @@ def create_new_form_version_draft(form_id, user_id):
                 field_type=prev_fv.field_type,
                 field_config=prev_fv.field_config or {},
                 form_version_id=new_version.id,
-                section_id=prev_fv.section_id,
+                section_id=section_id_map.get(prev_fv.section_id),
                 frequency=prev_fv.frequency or "monthly",
                 created_by=user_id
             )
             db.session.add(new_fv)
             db.session.flush()
-            
+
             # Update field link
             prev_f.current_version_id = new_fv.id
-            
+
     db.session.flush()
     return new_version

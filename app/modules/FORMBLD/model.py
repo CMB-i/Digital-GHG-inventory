@@ -64,6 +64,7 @@ class FormSection(FullLifecycleMixin, db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     form_id = db.Column(db.Integer, db.ForeignKey("forms.id"), nullable=False)
+    form_version_id = db.Column(db.Integer, db.ForeignKey("form_versions.id"), nullable=False)
     name = db.Column(db.String(255), nullable=False)
     code = db.Column(db.String(100), nullable=False)
     layout_type = db.Column(db.String(50), nullable=False, default="monthly_table", server_default="monthly_table")
@@ -75,9 +76,10 @@ class FormSection(FullLifecycleMixin, db.Model):
 
     __table_args__ = (
         db.Index("idx_form_sections_form", "form_id"),
+        db.Index("idx_form_sections_form_version", "form_version_id"),
         db.Index(
-            "uq_form_sections_code_per_form",
-            "form_id",
+            "uq_form_sections_code_per_version",
+            "form_version_id",
             "code",
             unique=True,
             postgresql_where=db.text("is_deleted = false"),
