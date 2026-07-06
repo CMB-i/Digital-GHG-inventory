@@ -17,7 +17,7 @@ def _form_stats(form_id):
     )
     if not latest:
         return 0, 0
-    sections = FormSection.query.filter_by(form_id=form_id, is_deleted=False).count()
+    sections = FormSection.query.filter_by(form_version_id=latest.id, is_deleted=False).count()
     fields = FieldVersion.query.filter_by(
         form_version_id=latest.id, is_deleted=False
     ).count()

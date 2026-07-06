@@ -517,11 +517,11 @@ def _field_payload(form_version_id):
     return fields
 
 
-def _sections_payload(form):
+def _sections_payload(form_version_id):
     from app.modules.FORMBLD.model import FormSection
 
     sections_query = (
-        FormSection.query.filter_by(form_id=form.id, is_deleted=False)
+        FormSection.query.filter_by(form_version_id=form_version_id, is_deleted=False)
         .order_by(FormSection.display_order.asc(), FormSection.id.asc())
         .all()
     )
@@ -1178,7 +1178,7 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
 
     fields = _field_payload(form.current_version_id)
     sheet_result_fields = [field for field in fields if is_sheet_result_field(field)]
-    sections = _sections_payload(form)
+    sections = _sections_payload(form.current_version_id)
     monthly_fields = monthly_table_fields(fields, sections)
     months = _fy_months(fy_start_year)
     can_edit_monthly = (
@@ -1307,7 +1307,7 @@ def save_annual_workbook_values(user_id, site_id, workbook_id, form_id, fy_start
         raise ValueError("At least one reporting period in this financial year must be open for annual value entry.")
 
     fields = _field_payload(form.current_version_id)
-    sections = _sections_payload(form)
+    sections = _sections_payload(form.current_version_id)
     editable_fields = {
         field["field_code"]: field
         for field in fields
@@ -1382,8 +1382,9 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
     if not form or not form.current_version_id:
         raise ValueError("Published form not found.")
 
-    fields = _field_payload(form_version_id or form.current_version_id)
-    sections = _sections_payload(form)
+    resolved_form_version_id = form_version_id or form.current_version_id
+    fields = _field_payload(resolved_form_version_id)
+    sections = _sections_payload(resolved_form_version_id)
     monthly_fields = monthly_table_fields(fields, sections)
     months = _fy_months(fy_start_year)
     month_keys = [(item["year"], item["month"]) for item in months]
@@ -1448,366 +1449,6 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
         "fields": monthly_fields,
         "sections": sections,
         "workbook_values": workbook_values_payload(site.id, form.id, fy_start_year, fields),
-        "rows": rows,
-    }
-
-
-def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
-    """
-    Computes read-only calculated field results across all forms for a site and FY.
-    Provides preview vs reportable calculation separation, handling missing values safely.
-    """
-    try:
-        site_id = int(site_id)
-        workbook_id = int(workbook_id)
-        fy_start_year = int(fy_start_year)
-    except (TypeError, ValueError):
-        raise ValueError("A valid site, workbook, and financial year are required.")
-
-    workbook, site = _require_workbook_runtime_access(user_id, workbook_id, site_id)
-    assigned = _published_forms_for_workbook(workbook.id)
-    sheet_payloads = [
-        _workbook_sheet_payload(workbook_form, sheet_form)
-        for workbook_form, sheet_form in _workbook_sheet_rows(workbook.id)
-    ]
-    if not assigned:
-        return {
-            "financial_year": {
-                "start_year": fy_start_year,
-                "label": financial_year_label(fy_start_year),
-            },
-            "site": {
-                "id": site.id,
-                "name": site.name,
-                "code": site.code,
-            },
-            "workbook": {
-                "id": workbook.id,
-                "name": workbook.name,
-                "code": workbook.code,
-                "workflow_id": workbook.workflow_id,
-            },
-            "forms": sheet_payloads,
-            "selected_form": {
-                "id": "calc_results",
-                "name": "Calculation Results",
-                "code": "calc_results",
-                "workflow_id": None,
-            },
-            "fields": [],
-            "sections": [],
-            "rows": []
-        }
-
-    from app.modules.FORMBLD.service import get_form_version_fields
-    from app.modules.FORMBLD.model import Field
-    from app.modules.FRMULA.model import FormulaVersion
-
-    calculated_fields = []
-    field_code_to_name = {}
-    form_ids = [form.id for form, _ in assigned]
-
-    # Map all fields in assigned forms to translate dependency codes to names
-    all_fields = Field.query.filter(Field.form_id.in_(form_ids or [0]), Field.is_deleted == False).all()
-    field_id_to_code = {f.id: f.field_code for f in all_fields}
-    form_map = {form.id: human_sheet_label(form) for form, _ in assigned}
-    field_code_to_form_name = {f.field_code: form_map.get(f.form_id, "Unknown Sheet") for f in all_fields}
-
-    for form, metadata in assigned:
-        fields = get_form_version_fields(form.current_version_id)
-        for fv, f in fields:
-            field_code_to_name[f.field_code] = fv.field_name
-            if fv.field_type == "calculated" and not is_sheet_result_field({
-                "field_type": fv.field_type,
-                "field_config": fv.field_config or {},
-            }):
-                calculated_fields.append({
-                    "field": f,
-                    "version": fv,
-                    "form": form
-                })
-
-    # Sort calculated fields by form name and field display order to keep order deterministic
-    calculated_fields.sort(key=lambda item: (human_sheet_label(item["form"]).lower(), item["field"].display_order))
-
-    # Serialize fields for workbook sheet columns
-    serialized_fields = []
-    for item in calculated_fields:
-        serialized_fields.append({
-            "id": item["field"].id,
-            "field_id": item["field"].id,
-            "field_version_id": item["version"].id,
-            "field_code": item["field"].field_code,
-            "field_name": item["version"].field_name,
-            "form_name": human_sheet_label(item["form"]),
-            "field_type": "calculated",
-            "field_config": item["version"].field_config or {},
-            "unit": item["version"].field_config.get("unit") or "" if item["version"].field_config else "",
-            "display_order": item["field"].display_order,
-            "form_id": item["form"].id,
-        })
-
-    value_set_snapshot = get_approved_valsets_snapshot()
-
-    months = _fy_months(fy_start_year)
-    month_keys = [(item["year"], item["month"]) for item in months]
-
-    periods = ReportingPeriod.query.filter(
-        ReportingPeriod.site_id == site_id,
-        ReportingPeriod.is_deleted == False,
-        tuple_(ReportingPeriod.year, ReportingPeriod.month).in_(month_keys),
-    ).all()
-    period_by_key = {(period.year, period.month): period for period in periods}
-
-    submissions = Submission.query.filter(
-        Submission.site_id == site_id,
-        Submission.form_id.in_(form_ids or [0]),
-        Submission.is_deleted == False,
-        Submission.reporting_period_id.in_([p.id for p in periods] or [0])
-    ).all()
-
-    submission_by_period_and_form = {}
-    for sub in submissions:
-        submission_by_period_and_form[(sub.reporting_period_id, sub.form_id)] = sub
-
-    sub_ids = [s.id for s in submissions]
-    sub_values = SubmissionValue.query.filter(
-        SubmissionValue.submission_id.in_(sub_ids or [0])
-    ).all() if sub_ids else []
-
-    values_by_sub_and_code = {}
-    for val in sub_values:
-        code = field_id_to_code.get(val.field_id)
-        if code:
-            values_by_sub_and_code.setdefault(val.submission_id, {})[code] = val
-
-    rows = []
-    for item in months:
-        period = period_by_key.get((item["year"], item["month"]))
-        row_values = {}
-
-        if not period:
-            for field_info in calculated_fields:
-                code = field_info["field"].field_code
-                row_values[code] = {
-                    "calculated_value": None,
-                    "preview_value": None,
-                    "reportable_value": None,
-                    "status": "missing_input",
-                    "warnings": ["Reporting period not created for this month."]
-                }
-        else:
-            preview_field_values = {}
-            reportable_field_values = {}
-            cell_states = {}
-
-            # Gather all available field values for preview vs reportable
-            for form, metadata in assigned:
-                sub = submission_by_period_and_form.get((period.id, form.id))
-                if sub:
-                    sub_vals = values_by_sub_and_code.get(sub.id, {})
-                    for code, val in sub_vals.items():
-                        val_str = ""
-                        if val.calculated_value is not None:
-                            val_str = val.calculated_value
-                        elif val.raw_value is not None:
-                            val_str = val.raw_value
-
-                        is_approved = (val.cell_state == "approved_locked" or sub.status == "Approved")
-                        cell_states[code] = "approved_locked" if is_approved else val.cell_state
-
-                        if val_str is not None and val_str != "":
-                            preview_field_values[code] = val_str
-                            if is_approved:
-                                reportable_field_values[code] = val_str
-
-            # Perform 3 calculation passes to resolve inter-calculated field dependencies
-            for pass_num in range(3):
-                for field_info in calculated_fields:
-                    f = field_info["field"]
-                    fv = field_info["version"]
-                    code = f.field_code
-
-                    formula_ver_id = fv.field_config.get("formula_version_id")
-                    if not formula_ver_id:
-                        row_values[code] = {
-                            "calculated_value": None,
-                            "preview_value": None,
-                            "reportable_value": None,
-                            "status": "not_configured",
-                            "warnings": ["Formula not configured."]
-                        }
-                        continue
-
-                    formula_version = FormulaVersion.query.get(formula_ver_id)
-                    if not formula_version:
-                        row_values[code] = {
-                            "calculated_value": None,
-                            "preview_value": None,
-                            "reportable_value": None,
-                            "status": "not_configured",
-                            "warnings": ["Formula version not found."]
-                        }
-                        continue
-
-                    tokens = list((formula_version.tokens or {}).keys())
-
-                    # Check missing preview inputs
-                    missing_preview_deps = []
-                    for t in tokens:
-                        if t not in value_set_snapshot and t not in preview_field_values:
-                            missing_preview_deps.append(t)
-
-                    # Check missing/unapproved reportable inputs
-                    missing_reportable_deps = []
-                    unapproved_reportable_deps = []
-                    for t in tokens:
-                        if t not in value_set_snapshot:
-                            if t not in preview_field_values:
-                                missing_reportable_deps.append(t)
-                            elif t not in reportable_field_values:
-                                unapproved_reportable_deps.append(t)
-
-                    preview_val = None
-                    preview_status = "preview_only"
-                    preview_warnings = []
-
-                    if missing_preview_deps:
-                        preview_status = "missing_input"
-                        for dep in missing_preview_deps:
-                            form_name = field_code_to_form_name.get(dep)
-                            if form_name and form_name != human_sheet_label(field_info["form"]):
-                                preview_warnings.append(f"Cannot calculate yet — [{form_name}] value is missing")
-                            else:
-                                dep_name = field_code_to_name.get(dep, dep)
-                                preview_warnings.append(f"Cannot calculate — waiting for {dep_name}.")
-                    else:
-                        try:
-                            preview_val = evaluate_formula(formula_version.expression, preview_field_values, value_set_snapshot)
-
-                            # Check if preview relies on unapproved values
-                            unapproved_inputs = [t for t in tokens if t not in value_set_snapshot and cell_states.get(t) != "approved_locked"]
-                            if unapproved_inputs:
-                                preview_status = "preview_only"
-                                for dep in unapproved_inputs:
-                                    dep_name = field_code_to_name.get(dep, dep)
-                                    preview_warnings.append(f"Input {dep_name} is submitted but not approved, preview only.")
-                            else:
-                                preview_status = "calculable"
-                        except Exception as exc:
-                            preview_status = "evaluation_error"
-                            preview_warnings.append(f"Evaluation error: {str(exc)}")
-
-                    reportable_val = None
-                    reportable_status = "calculable"
-                    reportable_warnings = []
-
-                    if missing_reportable_deps:
-                        reportable_status = "missing_input"
-                        for dep in missing_reportable_deps:
-                            form_name = field_code_to_form_name.get(dep)
-                            if form_name and form_name != human_sheet_label(field_info["form"]):
-                                reportable_warnings.append(f"Cannot calculate yet — [{form_name}] value is missing")
-                            else:
-                                dep_name = field_code_to_name.get(dep, dep)
-                                reportable_warnings.append(f"Cannot calculate — waiting for {dep_name}.")
-                    elif unapproved_reportable_deps:
-                        reportable_status = "pending_approval"
-                        for dep in unapproved_reportable_deps:
-                            dep_name = field_code_to_name.get(dep, dep)
-                            reportable_warnings.append(f"Input {dep_name} is not approved, preview only.")
-                    else:
-                        try:
-                            reportable_val = evaluate_formula(formula_version.expression, reportable_field_values, value_set_snapshot)
-                        except Exception as exc:
-                            reportable_status = "evaluation_error"
-                            reportable_warnings.append(f"Evaluation error: {str(exc)}")
-
-                    final_status = "calculable" if reportable_status == "calculable" else preview_status
-                    if final_status == "preview_only" and reportable_status == "pending_approval":
-                        final_status = "preview_only"
-                    elif final_status == "missing_input":
-                        final_status = "missing_input"
-
-                    final_warnings = list(set(preview_warnings + reportable_warnings))
-
-                    row_values[code] = {
-                        "calculated_value": reportable_val if reportable_status == "calculable" else preview_val,
-                        "preview_value": preview_val,
-                        "reportable_value": reportable_val,
-                        "status": final_status,
-                        "warnings": final_warnings
-                    }
-
-                    if preview_val is not None:
-                        preview_field_values[code] = preview_val
-                    if reportable_val is not None:
-                        reportable_field_values[code] = reportable_val
-
-            # Round final display values in row_values
-            for code, r_info in row_values.items():
-                f_info = next((fi for fi in calculated_fields if fi["field"].field_code == code), None)
-                if f_info:
-                    fv = f_info["version"]
-                    decimals = fv.field_config.get("round_off_decimals", 3)
-                    try:
-                        decimals = int(decimals)
-                        if not (1 <= decimals <= 9):
-                            decimals = 3
-                    except (ValueError, TypeError):
-                        decimals = 3
-                    for key in ["calculated_value", "preview_value", "reportable_value"]:
-                        val = r_info.get(key)
-                        if val is not None:
-                            try:
-                                r_info[key] = round(float(val), decimals)
-                            except (ValueError, TypeError):
-                                pass
-
-        rows.append({
-            **item,
-            "period_id": period.id if period else None,
-            "period_status": period.status if period else None,
-            "submission_id": None,
-            "submission_status": None,
-            "is_locked": True,
-            "last_saved": None,
-            "editability": {
-                "state": "read_only",
-                "editable": False,
-                "reason": "Calculation Results are read-only output."
-            },
-            "values": row_values,
-            "issues": {},
-            "is_active_period": bool(period and period.status in ("OPEN", "REOPENED")),
-        })
-
-    return {
-        "financial_year": {
-            "start_year": fy_start_year,
-            "label": financial_year_label(fy_start_year),
-            "months": months,
-        },
-        "site": {
-            "id": site.id,
-            "name": site.name,
-            "code": site.code,
-        },
-        "workbook": {
-            "id": workbook.id,
-            "name": workbook.name,
-            "code": workbook.code,
-            "workflow_id": workbook.workflow_id,
-        },
-        "forms": sheet_payloads,
-        "selected_form": {
-            "id": "calc_results",
-            "name": "Calculation Results",
-            "code": "calc_results",
-            "workflow_id": None,
-        },
-        "fields": serialized_fields,
-        "sections": [],
         "rows": rows,
     }
 
@@ -2646,7 +2287,7 @@ def submit_submission(submission_id, user_id):
         
     # Get form version fields
     fields = get_form_version_fields(submission.form_version_id)
-    sections = _sections_payload(form)
+    sections = _sections_payload(submission.form_version_id)
 
     # Server-side authoritative recalculation: recompute every calculated field from
     # currently persisted raw values right now, rather than trusting whatever the last

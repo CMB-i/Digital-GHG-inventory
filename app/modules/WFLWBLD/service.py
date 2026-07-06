@@ -60,9 +60,13 @@ def get_workflow_version_levels(workflow_version_id):
 
 def get_eligible_level_approvers(level, site_id):
     return (
-        WorkflowLevelApprover.query.filter(
+        WorkflowLevelApprover.query.join(
+            User, User.id == WorkflowLevelApprover.user_id
+        ).filter(
             WorkflowLevelApprover.workflow_level_id == level.id,
             WorkflowLevelApprover.is_deleted == False,
+            User.is_deleted == False,
+            User.is_active == True,
             (
                 (WorkflowLevelApprover.scope_site_id.is_(None))
                 | (WorkflowLevelApprover.scope_site_id == site_id)
@@ -125,13 +129,59 @@ def validate_workflow_path_for_site(workflow_version, site_id):
 
     return True
 
+def _validate_level_definition(level_name, approval_mode, level_number):
+    if not level_name or not level_name.strip():
+        raise ValueError(f"Level name is required for level {level_number}.")
+    if approval_mode not in ("ANY_ONE", "SEQUENTIAL"):
+        raise ValueError(f"Invalid approval mode '{approval_mode}' for level {level_number}. Must be ANY_ONE or SEQUENTIAL.")
+
+
+def _create_level_approver(level, user_id, sequence_number, scope_site_id, actor_user_id):
+    """
+    Validates and creates a single WorkflowLevelApprover row: the reviewer must be
+    an existing, active user, and any site scope must reference a real site. Shared
+    by the full workflow-level editor (save_workflow_draft_levels) and the
+    workbook's site-scoped chain editor (save_site_chain_levels) so both enforce
+    the same rules instead of each maintaining its own copy.
+    """
+    if not user_id:
+        raise ValueError(f"User ID is required for reviewer in level {level.level_number}.")
+
+    user = User.query.filter_by(id=user_id, is_deleted=False, is_active=True).first()
+    if not user:
+        raise ValueError(f"Reviewer user with ID {user_id} does not exist or is inactive.")
+
+    if scope_site_id in ("", "null"):
+        scope_site_id = None
+    if scope_site_id is not None:
+        try:
+            scope_site_id = int(scope_site_id)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid site scope for reviewer in level {level.level_number}.")
+        from app.modules.SITEMST.model import Site
+        site = Site.query.filter_by(id=scope_site_id, is_deleted=False).first()
+        if not site:
+            raise ValueError(f"Site with ID {scope_site_id} does not exist or is inactive.")
+
+    approver = WorkflowLevelApprover(
+        workflow_level_id=level.id,
+        user_id=user_id,
+        scope_site_id=scope_site_id,
+        sequence_number=sequence_number,
+        created_by=actor_user_id,
+        updated_by=actor_user_id,
+    )
+    db.session.add(approver)
+    return approver
+
+
 def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
     version = WorkflowVersion.query.get(workflow_version_id)
     if not version:
         raise ValueError("Workflow version not found.")
     if version.published_at is not None:
         raise ValueError("Only Draft versions can be modified.")
-        
+
     # Soft-delete existing levels and approvers for this draft version instead of hard-deleting
     existing_levels = WorkflowLevel.query.filter_by(workflow_version_id=workflow_version_id, is_deleted=False).all()
     for lvl in existing_levels:
@@ -146,7 +196,7 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
         lvl.deleted_at = datetime.now(timezone.utc)
         lvl.delete_reason = "Overwritten by new draft save"
     db.session.flush()
-    
+
     # Insert new levels and their approvers
     for idx, l_data in enumerate(levels_list):
         level_number = l_data.get("level_number", idx + 1)
@@ -154,14 +204,11 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
         approval_mode = l_data.get("approval_mode")
         skip_if_empty = bool(l_data.get("skip_if_empty", False))
         approvers = l_data.get("approvers", [])
-        
-        if not level_name or not level_name.strip():
-            raise ValueError(f"Level name is required for level {level_number}.")
-        if approval_mode not in ("ANY_ONE", "SEQUENTIAL"):
-            raise ValueError(f"Invalid approval mode '{approval_mode}' for level {level_number}. Must be ANY_ONE or SEQUENTIAL.")
+
+        _validate_level_definition(level_name, approval_mode, level_number)
         if not approvers:
             raise ValueError(f"At least one reviewer is required for level {level_number}.")
-            
+
         lvl = WorkflowLevel(
             workflow_version_id=workflow_version_id,
             level_number=level_number,
@@ -173,7 +220,7 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
         )
         db.session.add(lvl)
         db.session.flush()
-        
+
         for seq, app_data in enumerate(approvers):
             if isinstance(app_data, dict):
                 u_id = app_data.get("user_id")
@@ -183,43 +230,113 @@ def save_workflow_draft_levels(workflow_version_id, levels_list, user_id):
                 u_id = app_data
                 s_num = None
                 scope_site_id = None
-                
-            if not u_id:
-                raise ValueError(f"User ID is required for reviewer in level {level_number}.")
-                
-            # Verify user exists and is active
-            user = User.query.filter_by(id=u_id, is_deleted=False, is_active=True).first()
-            if not user:
-                raise ValueError(f"Reviewer user with ID {u_id} does not exist or is inactive.")
 
-            if scope_site_id in ("", "null"):
-                scope_site_id = None
-            if scope_site_id is not None:
-                try:
-                    scope_site_id = int(scope_site_id)
-                except (TypeError, ValueError):
-                    raise ValueError(f"Invalid site scope for reviewer in level {level_number}.")
-                from app.modules.SITEMST.model import Site
-                site = Site.query.filter_by(id=scope_site_id, is_deleted=False).first()
-                if not site:
-                    raise ValueError(f"Site with ID {scope_site_id} does not exist or is inactive.")
-                
             if approval_mode == "SEQUENTIAL":
                 if s_num is None:
                     s_num = seq + 1
             else:
                 s_num = None
-                
-            approver = WorkflowLevelApprover(
-                workflow_level_id=lvl.id,
-                user_id=u_id,
-                scope_site_id=scope_site_id,
-                sequence_number=s_num,
+
+            _create_level_approver(lvl, u_id, s_num, scope_site_id, user_id)
+
+    db.session.flush()
+    return True
+
+
+def save_site_chain_levels(workflow_version_id, site_id, steps, user_id):
+    """
+    Site-scoped variant of the level/approver editor, backing the workbook's
+    simplified per-site chain UI (WKBK). Levels are shared across every site
+    assigned to a workflow; only approver assignments are site-scoped
+    (WorkflowLevelApprover.scope_site_id). So unlike save_workflow_draft_levels
+    (a full wholesale replace of every level and approver), this only replaces
+    the approvers tagged to `site_id`, leaving other sites' approvers on the
+    same levels untouched. It reuses the same level/approver validation as
+    save_workflow_draft_levels (_validate_level_definition, _create_level_approver)
+    rather than re-implementing weaker checks a second time. This simplified UI
+    only supports ANY_ONE mode -- SEQUENTIAL chains require the standalone
+    Approval Path Builder.
+    """
+    version = WorkflowVersion.query.get(workflow_version_id)
+    if not version:
+        raise ValueError("Workflow version not found.")
+    if version.published_at is not None:
+        raise ValueError("Only Draft versions can be modified.")
+
+    now = datetime.now(timezone.utc)
+    posted_level_numbers = {step["level_number"] for step in steps}
+
+    existing_levels = WorkflowLevel.query.filter_by(
+        workflow_version_id=workflow_version_id, is_deleted=False
+    ).all()
+
+    for level in existing_levels:
+        if level.level_number not in posted_level_numbers:
+            level.is_deleted = True
+            level.deleted_by = user_id
+            level.deleted_at = now
+            level.delete_reason = "Removed from workbook chain editor"
+
+    level_map = {lvl.level_number: lvl for lvl in existing_levels if not lvl.is_deleted}
+
+    for step in steps:
+        level_number = step.get("level_number")
+        level_name = step.get("level_name")
+        approval_mode = "ANY_ONE"
+        _validate_level_definition(level_name, approval_mode, level_number)
+
+        level = level_map.get(level_number)
+        if level:
+            if level.level_name != level_name.strip():
+                level.level_name = level_name.strip()
+                level.updated_by = user_id
+        else:
+            level = WorkflowLevel(
+                workflow_version_id=workflow_version_id,
+                level_number=level_number,
+                level_name=level_name.strip(),
+                approval_mode=approval_mode,
+                skip_if_empty=False,
                 created_by=user_id,
-                updated_by=user_id
+                updated_by=user_id,
             )
-            db.session.add(approver)
-            
+            db.session.add(level)
+            db.session.flush()
+            level_map[level_number] = level
+
+    db.session.flush()
+
+    # At least one approver is required per posted level for this site.
+    steps_by_level = {}
+    for step in steps:
+        steps_by_level.setdefault(step["level_number"], []).append(step)
+    for level_number, level_steps in steps_by_level.items():
+        if not any(s.get("user_id") for s in level_steps):
+            level_name = level_steps[0].get("level_name") or f"level {level_number}"
+            raise ValueError(f"At least one reviewer is required for level '{level_name}'.")
+
+    all_version_level_ids = [
+        lvl.id for lvl in WorkflowLevel.query.filter_by(workflow_version_id=workflow_version_id).all()
+    ]
+    if all_version_level_ids:
+        for approver in WorkflowLevelApprover.query.filter(
+            WorkflowLevelApprover.workflow_level_id.in_(all_version_level_ids),
+            WorkflowLevelApprover.scope_site_id == site_id,
+            WorkflowLevelApprover.is_deleted == False,
+        ).all():
+            approver.is_deleted = True
+            approver.deleted_by = user_id
+            approver.deleted_at = now
+            approver.delete_reason = "Overwritten by workbook chain editor save"
+
+    db.session.flush()
+
+    for step in steps:
+        if step.get("user_id"):
+            level = level_map.get(step["level_number"])
+            if level:
+                _create_level_approver(level, step["user_id"], None, site_id, user_id)
+
     db.session.flush()
     return True
 

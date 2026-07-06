@@ -178,8 +178,7 @@ def resolve_recipients(config, entity_type, entity_id, context):
     Resolves the list of User objects who should receive the notification based on the config.
     """
     from app.modules.USRMGMT.model import User
-    from app.modules.ACCESS.model import AccessMatrix
-    
+
     recipients = []
     
     if config.recipient_type == "users":
@@ -189,29 +188,24 @@ def resolve_recipients(config, entity_type, entity_id, context):
                 recipients = User.query.filter(User.id.in_(user_ids), User.is_active == True, User.is_deleted == False).all()
                 
     elif config.recipient_type == "role":
+        from app.modules.ACCESS.service import get_user_permissions, PERMISSION_FLAGS
+
         site_id = context.get("site_id")
         perm_flag = f"can_{config.target_permission}"
-        if not hasattr(AccessMatrix, perm_flag):
+        if perm_flag not in PERMISSION_FLAGS:
             return []
-            
-        query = AccessMatrix.query.filter(
-            AccessMatrix.entity_type == config.target_entity_type,
-            AccessMatrix.is_deleted == False,
-            getattr(AccessMatrix, perm_flag) == True
-        )
-        
-        if site_id:
-            query = query.filter(
-                (AccessMatrix.scope_type == "global") | 
-                ((AccessMatrix.scope_type == "site") & (AccessMatrix.scope_site_id == site_id))
-            )
-        else:
-            query = query.filter(AccessMatrix.scope_type == "global")
-            
-        rows = query.all()
-        user_ids = {row.user_id for row in rows}
-        if user_ids:
-            recipients = User.query.filter(User.id.in_(list(user_ids)), User.is_active == True, User.is_deleted == False).all()
+
+        scope_type = "site" if site_id else "global"
+        candidate_users = User.query.filter_by(is_active=True, is_deleted=False).all()
+        recipients = [
+            u for u in candidate_users
+            if get_user_permissions(
+                user_id=u.id,
+                scope_type=scope_type,
+                scope_site_id=site_id,
+                entity_type=config.target_entity_type,
+            ).get(perm_flag, False)
+        ]
             
     elif config.recipient_type == "dynamic":
         site_id = context.get("site_id")
@@ -250,22 +244,19 @@ def resolve_recipients(config, entity_type, entity_id, context):
                             recipients = User.query.filter(User.id.in_(user_ids), User.is_active == True, User.is_deleted == False).all()
                             
         elif config.dynamic_role == "site_admins":
-            query = AccessMatrix.query.filter(
-                AccessMatrix.entity_type == "site",
-                AccessMatrix.is_deleted == False,
-                AccessMatrix.can_edit == True
-            )
-            if site_id:
-                query = query.filter(
-                    (AccessMatrix.scope_type == "global") | 
-                    ((AccessMatrix.scope_type == "site") & (AccessMatrix.scope_site_id == site_id))
-                )
-            else:
-                query = query.filter(AccessMatrix.scope_type == "global")
-            rows = query.all()
-            user_ids = {row.user_id for row in rows}
-            if user_ids:
-                recipients = User.query.filter(User.id.in_(list(user_ids)), User.is_active == True, User.is_deleted == False).all()
+            from app.modules.ACCESS.service import get_user_permissions
+
+            scope_type = "site" if site_id else "global"
+            candidate_users = User.query.filter_by(is_active=True, is_deleted=False).all()
+            recipients = [
+                u for u in candidate_users
+                if get_user_permissions(
+                    user_id=u.id,
+                    scope_type=scope_type,
+                    scope_site_id=site_id,
+                    entity_type="site",
+                ).get("can_edit", False)
+            ]
                 
     return recipients
 
