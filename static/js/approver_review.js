@@ -112,6 +112,19 @@ document.addEventListener("DOMContentLoaded", function () {
         badgeStatus.className = `inline-flex w-max items-center px-3 py-1 text-xs font-bold ${getStatusClass(data.metadata.status)}`;
         badgeStatus.textContent = data.metadata.status;
 
+        // Surface calculated-field formula errors flagged at submit time -- the raw
+        // data was allowed through, but a stored calculated value may be wrong.
+        const existingRecalcBanner = document.getElementById("recalc-review-banner");
+        if (existingRecalcBanner) existingRecalcBanner.remove();
+        if (data.metadata.needs_recalc_review && reviewSubtitle) {
+          const banner = document.createElement("div");
+          banner.id = "recalc-review-banner";
+          banner.className = "mt-2 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2";
+          banner.textContent = "Needs recalculation review: one or more calculated fields had formula errors when this was submitted."
+            + (data.metadata.recalc_review_notes ? ` (${data.metadata.recalc_review_notes})` : "");
+          reviewSubtitle.insertAdjacentElement("afterend", banner);
+        }
+
         // Hide action controls if already Approved, Rejected, or Changes Requested
         if (data.metadata.status === "Approved" || data.metadata.status === "Rejected" || data.metadata.status === "Changes Requested") {
           const actionsPanel = document.getElementById("actions-panel");

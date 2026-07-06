@@ -288,11 +288,12 @@ def get_submission_details(submission_id):
         })
         
     values_dict = {}
+    calc_status_dict = {}
     for val in db_values:
         code = id_to_code.get(val.field_id)
         if not code:
             continue
-            
+
         f_info = next((fd for fd in fields_data if fd["field_id"] == val.field_id), None)
         if f_info and f_info["field_type"] == "file":
             proof = ProofDocument.query.filter_by(
@@ -312,7 +313,13 @@ def get_submission_details(submission_id):
                 values_dict[code] = float(val.calculated_value)
             else:
                 values_dict[code] = val.raw_value or ""
-                
+
+        if f_info and f_info["field_type"] == "calculated" and val.calc_status:
+            calc_status_dict[code] = {
+                "status": val.calc_status,
+                "error_message": val.calc_error_message,
+            }
+
     # Check for anomalies
     from app.common.anomaly import check_anomalies
     anomalies = check_anomalies(submission_id)
@@ -342,10 +349,12 @@ def get_submission_details(submission_id):
             "is_locked": submission.is_locked,
             "form_version_id": submission.form_version_id,
             "workflow_version_id": submission.workflow_version_id,
-            "workflow_id": parsed_desc.get("workflow_id")
+            "workflow_id": parsed_desc.get("workflow_id"),
+            "needs_recalc_review": submission.needs_recalc_review,
         },
         "fields": fields_data,
         "values": values_dict,
+        "calc_status": calc_status_dict,
         "anomalies": anomalies
     })
 
@@ -376,6 +385,7 @@ def autosave_endpoint(submission_id):
         fields_data = [{"field_id": f.id, "field_code": f.field_code, "field_type": fv.field_type} for fv, f in fields]
         
         values_dict = {}
+        calc_status_dict = {}
         for val in db_values:
             code = id_to_code.get(val.field_id)
             if not code:
@@ -399,15 +409,22 @@ def autosave_endpoint(submission_id):
                     values_dict[code] = float(val.calculated_value)
                 else:
                     values_dict[code] = val.raw_value or ""
-                    
+
+            if f_info and f_info["field_type"] == "calculated" and val.calc_status:
+                calc_status_dict[code] = {
+                    "status": val.calc_status,
+                    "error_message": val.calc_error_message,
+                }
+
         # Check anomalies
         from app.common.anomaly import check_anomalies
         anomalies = check_anomalies(submission_id)
-        
+
         return success_response(
             data={
                 "values": values_dict,
                 "calculation_errors": calc_errors,
+                "calc_status": calc_status_dict,
                 "anomalies": anomalies
             },
             message="Autosaved successfully."
@@ -511,9 +528,18 @@ def submit_endpoint(submission_id):
         data = request.get_json(silent=True) or {}
         if data.get("workbook_id"):
             assign_submission_workflow_from_workbook(submission_id, data.get("workbook_id"), user.id)
-        submit_submission(submission_id, user.id)
+        submit_result = submit_submission(submission_id, user.id)
         db.session.commit()
-        return success_response(message="Sheet submitted successfully.")
+        message = "Sheet submitted successfully."
+        if submit_result["needs_recalc_review"]:
+            message += " Note: one or more calculated fields had formula errors and have been flagged for recalculation review."
+        return success_response(
+            message=message,
+            data={
+                "needs_recalc_review": submit_result["needs_recalc_review"],
+                "calc_review_fields": submit_result["calc_review_fields"],
+            },
+        )
     except SubmissionValidationError as e:
         db.session.rollback()
         return jsonify({

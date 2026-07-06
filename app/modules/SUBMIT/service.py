@@ -287,6 +287,10 @@ ALLOWED_CELL_STATES = {
     CELL_STATE_CHANGES_REQUESTED,
     CELL_STATE_LATE_ENTRY,
 }
+# Status of a calculated field's most recent evaluation, independent of cell_state.
+CALC_STATUS_OK = "ok"
+CALC_STATUS_ERROR = "error"
+CALC_STATUS_PENDING = "pending"
 NON_MONTHLY_LAYOUT_TYPES = {"annual_table", "reference_table"}
 EDITABLE_WORKBOOK_VALUE_FREQUENCIES = {"annual"}
 
@@ -2263,9 +2267,11 @@ def submit_monthly_workbook_package(site_id, workbook_id=None, period_id=None, y
             submission.workflow_version_id = workflow.current_version_id
         submission.updated_by = user_id
 
+        needs_recalc_review = False
         if submission.status in EDITABLE_SUBMISSION_STATUSES:
             try:
-                submit_submission(submission.id, user_id)
+                submit_result = submit_submission(submission.id, user_id)
+                needs_recalc_review = submit_result["needs_recalc_review"]
                 submitted_count += 1
             except SubmissionValidationError as exc:
                 errors.append({
@@ -2291,6 +2297,7 @@ def submit_monthly_workbook_package(site_id, workbook_id=None, period_id=None, y
             "submission_id": submission.id,
             "status": submission.status,
             "created": created_from_payload,
+            "needs_recalc_review": needs_recalc_review,
         })
 
     if errors:
@@ -2339,30 +2346,7 @@ def submit_monthly_workbook_package(site_id, workbook_id=None, period_id=None, y
         "skipped_forms": skipped,
     }
 
-def autosave_submission_values(submission_id, values_dict, user_id):
-    """
-    Saves raw values and recalculates all formula fields.
-    """
-    submission = Submission.query.get(submission_id)
-    if not submission or submission.is_deleted:
-        raise ValueError("Submission not found.")
-        
-    if submission.status not in ("Draft", "Changes Requested"):
-        raise ValueError(f"Cannot edit submission in status: {submission.status}")
-        
-    if not has_permission(user_id, "submission", "edit", scope_site_id=submission.site_id):
-        raise ValueError("Permission denied: You do not have permission to edit submissions for this site.")
-
-    submission.updated_by = user_id
-        
-    # Get form version fields
-    form = Form.query.get(submission.form_id)
-    if not form:
-        raise ValueError("Submission form not found.")
-
-    form_version_id = (form.current_version_id if form.current_version_id else None) or submission.form_version_id
-    fields = get_form_version_fields(form_version_id)
-    sections = _sections_payload(form)
+def _build_fields_map(fields):
     fields_map = {}
     for fv, f in fields:
         fields_map[f.field_code] = {
@@ -2373,49 +2357,36 @@ def autosave_submission_values(submission_id, values_dict, user_id):
             "frequency": fv.frequency or "monthly",
             "section_id": fv.section_id,
         }
-        
-    # Save input values
-    for field_code, raw_value in values_dict.items():
-        if field_code not in fields_map:
-            continue
-            
-        field_info = fields_map[field_code]
-        if field_info["field_type"] in ("calculated", "file"):
-            # Skip file fields (handled by dedicated upload endpoint) and calculated fields
-            continue
-            
-        f_id = field_info["field_id"]
-        fv_id = field_info["field_version_id"]
-        
-        val_row = SubmissionValue.query.filter_by(
-            submission_id=submission_id,
-            field_id=f_id
-        ).first()
-        
-        if not val_row:
-            val_row = SubmissionValue(
-                submission_id=submission_id,
-                field_id=f_id,
-                field_version_id=fv_id,
-                created_by=user_id
-            )
-            db.session.add(val_row)
-            
-        val_row.raw_value = str(raw_value) if raw_value is not None and raw_value != "" else None
-        val_row.calculated_value = None
-        set_submission_value_state(
-            val_row,
-            CELL_STATE_DRAFT_FILLED if val_row.raw_value is not None else CELL_STATE_BLANK_EDITABLE,
-        )
-        val_row.updated_by = user_id
-        
-    db.session.flush()
-    
-    # Backend calculations
+    return fields_map
+
+
+def recalculate_submission_formulas(submission, fields_map, user_id):
+    """
+    Recomputes every calculated field for a submission from currently persisted
+    raw values, and records an explicit calc_status ("ok" | "error" | "pending")
+    per field rather than collapsing every non-result into a bare None.
+
+    Shared by autosave (client-triggered, after raw values are saved) and
+    submit_submission (server-authoritative recheck at submit time), so the
+    persisted calculated_value is never stale relative to the raw inputs on
+    record, regardless of client/autosave timing.
+
+    Returns (calculation_errors, values_by_field_id):
+      - calculation_errors: {field_code: message} only for fields whose formula
+        actually failed to evaluate (status "error") -- fields merely waiting on
+        upstream inputs (status "pending") are not included, since that's an
+        expected, non-blocking state.
+      - values_by_field_id: {field_id: SubmissionValue} for every value row on
+        this submission (raw and calculated), so callers that need the
+        post-recalculation state don't have to re-query it.
+    """
+    submission_id = submission.id
+
     # Load all saved values to pass as inputs
     db_values = SubmissionValue.query.filter_by(submission_id=submission_id).all()
     id_to_code = {info["field_id"]: code for code, info in fields_map.items()}
-    
+    values_by_field_id = {val.field_id: val for val in db_values}
+
     field_values = {}
     for val in db_values:
         code = id_to_code.get(val.field_id)
@@ -2452,12 +2423,25 @@ def autosave_submission_values(submission_id, values_dict, user_id):
                 field_values[code] = workbook_value.value_text
             elif workbook_value.value_json is not None:
                 field_values[code] = workbook_value.value_json
-                
+
     # Prepare value set snapshot
     value_set_snapshot = get_approved_valsets_snapshot()
-    
+
     calculation_errors = {}
-    
+
+    def _get_or_create_calc_row(f_id, fv_id):
+        calc_row = values_by_field_id.get(f_id)
+        if not calc_row:
+            calc_row = SubmissionValue(
+                submission_id=submission_id,
+                field_id=f_id,
+                field_version_id=fv_id,
+                created_by=user_id,
+            )
+            db.session.add(calc_row)
+            values_by_field_id[f_id] = calc_row
+        return calc_row
+
     # Calculate each formula with 3 passes to resolve inter-calculated field dependencies
     for pass_num in range(3):
         for code, info in fields_map.items():
@@ -2465,71 +2449,168 @@ def autosave_submission_values(submission_id, values_dict, user_id):
                 f_id = info["field_id"]
                 fv_id = info["field_version_id"]
                 formula_ver_id = info["field_config"].get("formula_version_id")
-                
+
+                calc_row = _get_or_create_calc_row(f_id, fv_id)
+                calc_row.raw_value = None
+                calc_row.formula_eval_at = datetime.now(timezone.utc)
+                calc_row.updated_by = user_id
+
                 if not formula_ver_id:
-                    calculation_errors[code] = "Formula is not configured."
+                    calc_row.calculated_value = None
+                    calc_row.calc_status = CALC_STATUS_ERROR
+                    calc_row.calc_error_message = "Formula is not configured."
+                    set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
+                    calculation_errors[code] = calc_row.calc_error_message
+                    field_values[code] = None
                     continue
-                    
+
                 formula_version = FormulaVersion.query.get(formula_ver_id)
                 if not formula_version:
-                    calculation_errors[code] = "Formula version not found."
-                    continue
-                    
-                try:
-                    # Run evaluation
-                    result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
-                    
-                    # Save calculation row
-                    calc_row = SubmissionValue.query.filter_by(
-                        submission_id=submission_id,
-                        field_id=f_id
-                    ).first()
-                    
-                    if not calc_row:
-                        calc_row = SubmissionValue(
-                            submission_id=submission_id,
-                            field_id=f_id,
-                            field_version_id=fv_id,
-                            created_by=user_id
-                        )
-                        db.session.add(calc_row)
-                        
-                    calc_row.raw_value = None
-                    calc_row.calculated_value = result
+                    calc_row.calculated_value = None
+                    calc_row.calc_status = CALC_STATUS_ERROR
+                    calc_row.calc_error_message = "Formula version not found."
                     set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
-                    calc_row.formula_version_id = formula_version.id
-                    calc_row.formula_eval_at = datetime.now(timezone.utc)
-                    
+                    calculation_errors[code] = calc_row.calc_error_message
+                    field_values[code] = None
+                    continue
+
+                calc_row.formula_version_id = formula_version.id
+                token_keys = list((formula_version.tokens or {}).keys())
+
+                # A token that isn't a known field code or value-set constant is a
+                # broken formula reference (stale/renamed/deleted field), not data
+                # entry in progress -- it can never resolve, so it must surface as
+                # an error rather than being mistaken for "pending" forever.
+                unknown_tokens = [
+                    name for name in token_keys
+                    if name not in fields_map and name not in value_set_snapshot
+                ]
+                if unknown_tokens:
+                    calc_row.calculated_value = None
+                    calc_row.calc_status = CALC_STATUS_ERROR
+                    calc_row.calc_error_message = (
+                        f"Unknown formula variable: {', '.join(sorted(unknown_tokens))}."
+                    )
+                    set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
+                    calculation_errors[code] = calc_row.calc_error_message
+                    field_values[code] = None
+                    continue
+
+                missing_inputs = [
+                    name for name in token_keys
+                    if name not in value_set_snapshot
+                    and (name not in field_values or field_values.get(name) in (None, ""))
+                ]
+
+                if missing_inputs:
+                    # Referenced fields simply haven't been filled in yet -- this is
+                    # expected while data entry is in progress, not a formula error.
+                    calc_row.calculated_value = None
+                    calc_row.calc_status = CALC_STATUS_PENDING
+                    calc_row.calc_error_message = None
+                    set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
+                    calculation_errors.pop(code, None)
+                    field_values[code] = None
+                    continue
+
+                try:
+                    result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
+
+                    calc_row.calculated_value = result
+                    calc_row.calc_status = CALC_STATUS_OK
+                    calc_row.calc_error_message = None
+                    set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
+
                     # Snapshot tokens and values
                     inputs_snapshot = {}
-                    for key in (formula_version.tokens or {}).keys():
+                    for key in token_keys:
                         if key in field_values:
                             inputs_snapshot[key] = field_values[key]
                         elif key in value_set_snapshot:
                             inputs_snapshot[key] = value_set_snapshot[key]
                     calc_row.formula_inputs_snapshot = inputs_snapshot
-                    calc_row.updated_by = user_id
-                    
+
                     # Add calculated value to field_values so subsequent calculations can read it
                     field_values[code] = result
-                    
+
                     # Clear from errors on success
                     calculation_errors.pop(code, None)
-                    
+
                 except Exception as e:
                     # Log evaluation error and clear previous calculation
-                    calc_row = SubmissionValue.query.filter_by(
-                        submission_id=submission_id,
-                        field_id=f_id
-                    ).first()
-                    if calc_row:
-                        calc_row.calculated_value = None
-                        calc_row.formula_eval_at = datetime.now(timezone.utc)
-                        calc_row.updated_by = user_id
+                    calc_row.calculated_value = None
+                    calc_row.calc_status = CALC_STATUS_ERROR
+                    calc_row.calc_error_message = str(e)
                     calculation_errors[code] = str(e)
                     field_values[code] = None
-                
+
     db.session.flush()
+    return calculation_errors, values_by_field_id
+
+
+def autosave_submission_values(submission_id, values_dict, user_id):
+    """
+    Saves raw values and recalculates all formula fields.
+    """
+    submission = Submission.query.get(submission_id)
+    if not submission or submission.is_deleted:
+        raise ValueError("Submission not found.")
+
+    if submission.status not in ("Draft", "Changes Requested"):
+        raise ValueError(f"Cannot edit submission in status: {submission.status}")
+
+    if not has_permission(user_id, "submission", "edit", scope_site_id=submission.site_id):
+        raise ValueError("Permission denied: You do not have permission to edit submissions for this site.")
+
+    submission.updated_by = user_id
+
+    # Get form version fields
+    form = Form.query.get(submission.form_id)
+    if not form:
+        raise ValueError("Submission form not found.")
+
+    form_version_id = (form.current_version_id if form.current_version_id else None) or submission.form_version_id
+    fields = get_form_version_fields(form_version_id)
+    fields_map = _build_fields_map(fields)
+
+    # Save input values
+    for field_code, raw_value in values_dict.items():
+        if field_code not in fields_map:
+            continue
+
+        field_info = fields_map[field_code]
+        if field_info["field_type"] in ("calculated", "file"):
+            # Skip file fields (handled by dedicated upload endpoint) and calculated fields
+            continue
+
+        f_id = field_info["field_id"]
+        fv_id = field_info["field_version_id"]
+
+        val_row = SubmissionValue.query.filter_by(
+            submission_id=submission_id,
+            field_id=f_id
+        ).first()
+
+        if not val_row:
+            val_row = SubmissionValue(
+                submission_id=submission_id,
+                field_id=f_id,
+                field_version_id=fv_id,
+                created_by=user_id
+            )
+            db.session.add(val_row)
+
+        val_row.raw_value = str(raw_value) if raw_value is not None and raw_value != "" else None
+        val_row.calculated_value = None
+        set_submission_value_state(
+            val_row,
+            CELL_STATE_DRAFT_FILLED if val_row.raw_value is not None else CELL_STATE_BLANK_EDITABLE,
+        )
+        val_row.updated_by = user_id
+
+    db.session.flush()
+
+    calculation_errors, _ = recalculate_submission_formulas(submission, fields_map, user_id)
     return calculation_errors
 
 def submit_submission(submission_id, user_id):
@@ -2566,13 +2647,16 @@ def submit_submission(submission_id, user_id):
     # Get form version fields
     fields = get_form_version_fields(submission.form_version_id)
     sections = _sections_payload(form)
-    
-    # Load saved values
-    db_values = SubmissionValue.query.filter_by(submission_id=submission_id).all()
-    values_map = {val.field_id: val for val in db_values}
-    
+
+    # Server-side authoritative recalculation: recompute every calculated field from
+    # currently persisted raw values right now, rather than trusting whatever the last
+    # client autosave happened to persist. This is what actually gets validated/stored.
+    fields_map = _build_fields_map(fields)
+    _, values_map = recalculate_submission_formulas(submission, fields_map, user_id)
+
     validation_errors = {}
-    
+    calc_review_flags = {}
+
     for fv, f in fields:
         if is_non_monthly_field(
             {"frequency": fv.frequency, "section_id": fv.section_id},
@@ -2582,18 +2666,21 @@ def submit_submission(submission_id, user_id):
 
         config = fv.field_config or {}
         val_obj = values_map.get(f.id)
-        
-        # 1. Required field check
+        is_calculated = fv.field_type == "calculated"
+
+        # 1. Required field check -- only raw input fields block submission.
+        # Calculated fields are derived, not entered, so their completeness is
+        # tracked separately (see check 3) and never blocks the raw data submit.
         is_required = config.get("is_required") is True
         has_val = val_obj is not None and (
             (val_obj.raw_value is not None and val_obj.raw_value != "") or
             (val_obj.calculated_value is not None)
         )
-        
-        if is_required and not has_val:
+
+        if is_required and not has_val and not is_calculated:
             validation_errors[f.field_code] = f"{fv.field_name} is required."
             continue
-            
+
         # 2. Proof required check
         if config.get("proof_required") is True and fv.field_type == "file":
             proof = ProofDocument.query.filter_by(
@@ -2604,14 +2691,18 @@ def submit_submission(submission_id, user_id):
             if not proof:
                 validation_errors[f.field_code] = f"Proof document is required for {fv.field_name}."
                 continue
-                
-        # 3. Calculation errors check
-        if fv.field_type == "calculated" and not is_sheet_result_field(
+
+        # 3. Calculation completeness -- informational only, never blocks submission.
+        # A formula error or an upstream input still being blank must not hold up
+        # the raw data; instead, an "error" status is flagged for reviewer follow-up.
+        if is_calculated and not is_sheet_result_field(
             {"field_type": fv.field_type, "field_config": config}
         ):
-            if not val_obj or val_obj.calculated_value is None:
-                validation_errors[f.field_code] = f"Calculated value is missing or has formula errors."
-                continue
+            if val_obj and val_obj.calc_status == CALC_STATUS_ERROR:
+                calc_review_flags[f.field_code] = (
+                    val_obj.calc_error_message or "Formula evaluation failed."
+                )
+            continue
 
         # 4. Numeric type validation
         from app.modules.FORMBLD.service import NUMERIC_FIELD_TYPES
@@ -2678,8 +2769,18 @@ def submit_submission(submission_id, user_id):
     submission.submitted_at = datetime.now(timezone.utc)
     submission.last_status_changed_at = datetime.now(timezone.utc)
     submission.updated_by = user_id
+
+    # A calculated field with a formula error doesn't block the raw data from being
+    # submitted, but it does mean a stored number may be wrong -- flag the record so
+    # it surfaces for reviewer follow-up instead of silently passing through.
+    submission.needs_recalc_review = bool(calc_review_flags)
+    submission.recalc_review_notes = (
+        "; ".join(f"{code}: {msg}" for code, msg in calc_review_flags.items())
+        if calc_review_flags else None
+    )
+
     sync_submission_values_for_status(submission, user_id)
-    
+
     # Audit log
     from app.modules.AUDITL.service import log_audit
     log_audit(
@@ -2690,9 +2791,13 @@ def submit_submission(submission_id, user_id):
         old_values={"status": old_status},
         new_values={"status": new_status}
     )
-    
+
     # Trigger NOTIFY event
     from app.modules.NOTIFY.service import notify_level_approvers
     notify_level_approvers(submission.id)
-        
-    return submission
+
+    return {
+        "submission": submission,
+        "needs_recalc_review": submission.needs_recalc_review,
+        "calc_review_fields": calc_review_flags,
+    }

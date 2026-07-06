@@ -25,6 +25,10 @@ class Submission(FullLifecycleMixin, db.Model):
     parent_submission_id = db.Column(db.Integer, db.ForeignKey("submissions.id"), nullable=True)
     anomaly_flag = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     anomaly_notes = db.Column(db.Text, nullable=True)
+    # Set at submit time when a calculated field has calc_status == "error" but the
+    # raw data was still allowed through, so reviewers know a stored number may be wrong.
+    needs_recalc_review = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
+    recalc_review_notes = db.Column(db.Text, nullable=True)
 
     __table_args__ = (
         db.Index(
@@ -80,6 +84,11 @@ class SubmissionValue(LifecycleMixin, db.Model):
     cell_state = db.Column(db.String(30), nullable=False, default="blank_editable", server_default="blank_editable")
     is_locked = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     remark = db.Column(db.Text, nullable=True)
+    # Only meaningful for field_type == "calculated" rows: "ok" | "error" | "pending".
+    # Distinguishes "formula not runnable yet" from "formula ran and failed" so a
+    # blank calculated_value never has to be treated as a submission blocker.
+    calc_status = db.Column(db.String(20), nullable=True)
+    calc_error_message = db.Column(db.Text, nullable=True)
 
     __table_args__ = (
         db.UniqueConstraint("submission_id", "field_id", name="uq_submission_value"),

@@ -269,6 +269,7 @@ def get_package_summary(package_id):
             "current_level": sub.current_level,
             "submitted_by": submitter.full_name if submitter else "System",
             "submitted_at": sub.submitted_at,
+            "needs_recalc_review": sub.needs_recalc_review,
         })
 
     return success_response(data={
@@ -328,6 +329,8 @@ def get_submission_details(submission_id):
                 "is_locked": val.is_locked,
                 "remark": val.remark,
                 "issues": issue_map.get(val.id, []),
+                "calc_status": val.calc_status,
+                "calc_error_message": val.calc_error_message,
             }
 
         # Load proofs
@@ -404,7 +407,9 @@ def get_submission_details(submission_id):
             "current_level": submission.current_level,
             "submitted_by": User.query.get(submission.submitted_by).full_name if submission.submitted_by else "",
             "submitted_at": submission.submitted_at,
-            "can_resubmit": can_resubmit
+            "can_resubmit": can_resubmit,
+            "needs_recalc_review": submission.needs_recalc_review,
+            "recalc_review_notes": submission.recalc_review_notes,
         }
 
         return success_response(data={
