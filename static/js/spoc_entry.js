@@ -26,6 +26,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   let formConfig = [];
   let formValues = {};
+  let calcStatuses = {};
   let currentStatus = "Draft";
   let isSaving = false;
   let autosaveTimeout = null;
@@ -62,6 +63,7 @@ document.addEventListener("DOMContentLoaded", function () {
       .then((data) => {
         formConfig = data.fields;
         formValues = data.values;
+        calcStatuses = data.calc_status || {};
         currentStatus = data.submission.status;
 
         // Set top meta details
@@ -131,6 +133,7 @@ document.addEventListener("DOMContentLoaded", function () {
       formValues,
       {
         validationErrors: validationErrors,
+        calcStatuses: calcStatuses,
         onValueChange: function (fieldCode, val) {
           formValues[fieldCode] = val;
           triggerAutosave();
@@ -192,11 +195,11 @@ document.addEventListener("DOMContentLoaded", function () {
       .then((data) => {
         isSaving = false;
         setSaveStatus("success", `Last saved: ${formatTime(new Date())}`);
-        
+
         // Update calculations values returned from Flask backend
         Object.keys(data.data.values).forEach(code => {
           formValues[code] = data.data.values[code];
-          
+
           // Dynamically update calculations input fields in DOM
           const inputEl = document.getElementById("field_" + code);
           if (inputEl && inputEl.readOnly) {
@@ -208,6 +211,10 @@ document.addEventListener("DOMContentLoaded", function () {
           }
         });
 
+        // Update calculated-field status (ok/error/pending) shown under each field
+        calcStatuses = data.data.calc_status || {};
+        updateCalcStatusIndicators();
+
         // Display anomalies
         displayAnomalies(data.data.anomalies || {});
       })
@@ -215,6 +222,30 @@ document.addEventListener("DOMContentLoaded", function () {
         isSaving = false;
         setSaveStatus("error", `Failed to save: ${err.message}`);
       });
+  }
+
+  // Update the "why is this calculated field blank" message under each calc field,
+  // without a full re-render (which would steal focus from whatever the user is
+  // currently typing into elsewhere on the form).
+  function updateCalcStatusIndicators() {
+    Object.keys(calcStatuses).forEach(code => {
+      const errorEl = document.getElementById("error_" + code);
+      if (!errorEl) return;
+      const info = calcStatuses[code];
+
+      if (info.status === "error") {
+        errorEl.textContent = "Formula error: " + (info.error_message || "This value could not be calculated.");
+        errorEl.classList.remove("hidden", "text-slate-500");
+        errorEl.classList.add("text-rose-600");
+      } else if (info.status === "pending") {
+        errorEl.textContent = "Waiting on other fields before this can be calculated.";
+        errorEl.classList.remove("hidden", "text-rose-600");
+        errorEl.classList.add("text-slate-500");
+      } else {
+        errorEl.textContent = "";
+        errorEl.classList.add("hidden");
+      }
+    });
   }
 
   // Display Anomaly Warnings under corresponding fields
@@ -301,10 +332,17 @@ document.addEventListener("DOMContentLoaded", function () {
           return;
         }
         if (!res.ok) throw new Error(data.error || "Failed to submit sheet.");
-        
+
         // Success
         modalSubmitConfirm.classList.add("hidden");
-        alert("Sheet submitted successfully!");
+        if (data.data && data.data.needs_recalc_review) {
+          alert(
+            "Sheet submitted successfully. Note: one or more calculated fields had " +
+            "formula errors, so this submission has been flagged for recalculation review."
+          );
+        } else {
+          alert("Sheet submitted successfully!");
+        }
         window.location.href = "/module/SUBMIT/";
       })
       .catch((err) => {

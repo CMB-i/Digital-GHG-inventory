@@ -443,13 +443,25 @@
       const errorMsg = document.createElement("p");
       errorMsg.className = "mt-1.5 text-xs font-medium text-rose-600 hidden";
       errorMsg.id = "error_" + field.field_code;
-      
+
       // Inject validation errors if present
       if (options.validationErrors && options.validationErrors[field.field_code]) {
         errorMsg.textContent = options.validationErrors[field.field_code];
         errorMsg.classList.remove("hidden");
+      } else if (field.field_type === "calculated" && options.calcStatuses && options.calcStatuses[field.field_code]) {
+        // Explain why a calculated field is blank, instead of leaving it a silent blank.
+        // "pending" is expected mid-entry and shown as informational, not an error.
+        const calcInfo = options.calcStatuses[field.field_code];
+        if (calcInfo.status === "error") {
+          errorMsg.textContent = "Formula error: " + (calcInfo.error_message || "This value could not be calculated.");
+          errorMsg.classList.remove("hidden");
+        } else if (calcInfo.status === "pending") {
+          errorMsg.textContent = "Waiting on other fields before this can be calculated.";
+          errorMsg.classList.remove("hidden", "text-rose-600");
+          errorMsg.classList.add("text-slate-500");
+        }
       }
-      
+
       inputCol.appendChild(errorMsg);
 
       // Append columns to row
