@@ -56,6 +56,11 @@
     return { valid: true, error: "" };
   }
 
+  function usesAggregateHelper(expression) {
+    if (!expression) return false;
+    return tokenize(expression).some((token) => token === 'SUM_MONTHS');
+  }
+
   const precedence = {
     '+': 1,
     '-': 1,
@@ -196,6 +201,7 @@
 
   window.FormulaRuntime = {
     evaluate: evaluateFormulaJS,
-    validate: validateAggregateSyntax
+    validate: validateAggregateSyntax,
+    usesAggregate: usesAggregateHelper
   };
 })();
