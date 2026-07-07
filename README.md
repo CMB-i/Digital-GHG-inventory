@@ -213,7 +213,7 @@ Permission checks on every WKBK endpoint — including publish and site/submitte
 
 Fields (`Field`/`FieldVersion`) are properly versioned — publishing a new draft doesn't retroactively change what a live submission sees, because submissions pin to a specific `form_version_id`.
 
-**`FormSection` is not versioned** — it has only a `form_id`, no `form_version_id`, so every version of a form shares the same section rows. Editing sections while drafting a new version (rename, reorder, remove) mutates what's currently live for the *published* version too, immediately. This is a confirmed bug, not a design choice; the fix (versioning sections the same way fields are versioned, so draft edits are isolated until publish) is planned but not yet in this codebase — see [Known Gaps](#known-gaps).
+**`FormSection` is now versioned**, the same way fields are — it carries a `form_version_id` (unique per `code` within a version), so editing sections while drafting a new version (rename, reorder, remove) is isolated to the draft and no longer retroactively mutates what's currently live for the *published* version.
 
 Publish readiness for a sheet requires non-empty fields, dropdown fields to have options, and calculated fields to reference a *published* formula version. There is no check, at field-deletion time, for whether a formula still references the field being deleted — a formula can be published against a field, and that field can later be soft-deleted with no warning, breaking the formula silently at evaluation time.
 
@@ -223,7 +223,7 @@ Publish readiness for a sheet requires non-empty fields, dropdown fields to have
 
 The real, validated writer for workflow levels/approvers (`save_workflow_draft_levels`): requires a valid `approval_mode`, ≥1 approver per level, active/existing users, real sites for site-scoped approvers, and unique sequence numbers for `SEQUENTIAL` mode. Publishing requires ≥1 level, ≥1 approver per level, all active, unique sequence numbers where relevant.
 
-**`get_eligible_level_approvers` currently filters only `is_deleted`, not `is_active`**, even though `publish_workflow_version` explicitly checks approvers are active at publish time. If every approver at a level is later deactivated, a submission can get stuck there with no error and no admin-facing signal. This is a confirmed inconsistency, not a deliberate design choice; the fix (filtering `is_active` here too, matching the publish-time check) is planned but not yet in this codebase — see [Known Gaps](#known-gaps).
+**`get_eligible_level_approvers` now filters on `is_active` as well as `is_deleted`**, matching the check `publish_workflow_version` already applies at publish time — if every approver at a level is later deactivated, that level is correctly treated as having no eligible approver instead of silently matching deactivated users.
 
 There is a live but functionally dead-end write path here worth knowing about precisely: `update_details` (the workflow-detail edit endpoint) still reads and writes `form.description["workflow_id"]` / `["sites"]` — fields that must never be used for runtime routing (see [Key Design Rules](#key-design-rules)). This isn't hidden dead code: the Workflow Builder page has a fully functional "Covered Sites" checkbox list that an admin can check/uncheck and save, which PUTs directly into this legacy field. Since actual site-eligibility routing runs exclusively through `WorkbookSite`, **this UI has zero effect on real routing today** — an admin editing "Covered Sites" reasonably believes they're controlling something, and they aren't. This is a live UI actively misleading its own editors.
 
@@ -259,7 +259,7 @@ Records status changes and resolves human-readable entity descriptions for the a
 
 ### NOTIFY — notifications (in-app, desktop, email, WhatsApp)
 
-Multi-channel routing with per-user preferences. **`resolve_recipients`'s role-based/dynamic recipient resolution currently hand-rolls its own `AccessMatrix` query** instead of calling the shared `has_permission()` / `get_user_permissions()` — the same bug pattern as RPTBLD above (missing the `entity_type == "all"` wildcard), meaning a user with a blanket "all entities" grant can be silently skipped as a notification recipient. This is a confirmed, unintentional duplication of ACCESS's logic, not a deliberate choice; the fix (calling into ACCESS's shared functions directly) is planned but not yet in this codebase — see [Consistency Guidelines](#consistency-guidelines) and [Known Gaps](#known-gaps).
+Multi-channel routing with per-user preferences. **`resolve_recipients`'s role-based and dynamic (`site_admins`) recipient resolution now calls the shared `get_user_permissions()` / `has_permission()`** instead of hand-rolling its own `AccessMatrix` query — the same bug pattern RPTBLD still has (see [Consistency Guidelines](#consistency-guidelines)) — so a user with a blanket "all entities" grant is no longer silently skipped as a notification recipient.
 
 Email/WhatsApp delivery failures are caught and only printed to console — no persisted record exists for a failed email/WhatsApp send, so a failure is invisible to everyone, including the intended recipient and any admin.
 
