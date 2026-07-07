@@ -129,6 +129,14 @@ def approve_value_set_version(version_id, user_id):
     if version.status not in ("Draft", "Submitted"):
         raise ValueError("Only Draft or Submitted versions can be published.")
 
+    # Self-approval prevention, mirroring reject_value_set_version's check.
+    # submitted_by is unset for a version approved directly from Draft (via
+    # /publish, bypassing /submit), so fall back to created_by in that case --
+    # otherwise a draft's own author could self-approve through that route.
+    author_id = version.submitted_by if version.submitted_by is not None else version.created_by
+    if author_id == user_id:
+        raise ValueError("Reviewer cannot be the same user who created or submitted the value set version.")
+
     # Set status
     version.status = "Approved"
     version.approved_by = user_id

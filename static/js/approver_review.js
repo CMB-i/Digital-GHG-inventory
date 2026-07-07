@@ -243,9 +243,9 @@ document.addEventListener("DOMContentLoaded", function () {
         <div class="space-y-1">
           <div class="flex items-center flex-wrap gap-1">
             ${statusBadge}
-            <span class="font-bold text-slate-900 ml-1.5">${issue.title}</span>
+            <span class="font-bold text-slate-900 ml-1.5">${escapeHtml(issue.title)}</span>
           </div>
-          <p class="text-xs text-slate-500 pl-1">${issue.description}</p>
+          <p class="text-xs text-slate-500 pl-1">${escapeHtml(issue.description)}</p>
           <div class="text-[10px] text-slate-400 pl-1 pt-1">
             ${fieldBadge}
           </div>

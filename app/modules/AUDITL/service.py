@@ -141,7 +141,7 @@ def resolve_entity_details(entity_type, entity_id):
             matrix = db.session.get(AccessMatrix, int(entity_id)) if entity_id.isdigit() else None
             if matrix:
                 user = db.session.get(User, matrix.user_id)
-                site = db.session.get(Site, matrix.site_id) if matrix.site_id else None
+                site = db.session.get(Site, matrix.scope_site_id) if matrix.scope_site_id else None
                 user_str = f"User: {user.full_name}" if user else f"User ID: {matrix.user_id}"
                 site_str = f", Site: {site.name}" if site else ", Scope: Global"
                 return f"Access Matrix Record #{entity_id} ({user_str}{site_str})"
