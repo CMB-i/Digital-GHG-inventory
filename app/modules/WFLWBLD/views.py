@@ -61,17 +61,6 @@ def _parse_form_metadata(form):
     return metadata
 
 
-def _write_form_metadata(form, metadata):
-    form.description = json.dumps({
-        "display_name": metadata.get("display_name") or form.name,
-        "gri_code": metadata.get("gri_code", ""),
-        "sites": metadata.get("sites") or [],
-        "frequency": metadata.get("frequency", "Monthly"),
-        "workflow_id": metadata.get("workflow_id"),
-        "description_text": metadata.get("description_text", ""),
-    })
-
-
 @bp.route("/")
 @require_permission("workflow", "view")
 def index():
@@ -126,64 +115,15 @@ def create():
 def update_details(workflow_id):
     data = request.get_json() or {}
     name = data.get("name")
-    form_id = data.get("form_id")
-    site_ids = data.get("site_ids")
-    
+
     wf = get_workflow(workflow_id)
     if not wf:
         return error_response("Workflow not found.", 404)
-        
+
     try:
         if name:
             wf.name = name.strip()
-        user_id = current_user().id
-        wf.updated_by = user_id
-
-        if "form_id" in data:
-            selected_form = None
-            if form_id not in (None, "", "null"):
-                try:
-                    form_id = int(form_id)
-                except (TypeError, ValueError):
-                    return error_response("Invalid form selection.", 400)
-                selected_form = Form.query.filter_by(id=form_id, is_deleted=False).first()
-                if not selected_form:
-                    return error_response("Selected form was not found.", 404)
-
-            selected_site_ids = []
-            if site_ids is not None:
-                if not isinstance(site_ids, list):
-                    return error_response("Covered sites must be a list.", 400)
-                valid_site_ids = {
-                    site.id for site in Site.query.filter_by(is_deleted=False).all()
-                }
-                for raw_site_id in site_ids:
-                    try:
-                        parsed_site_id = int(raw_site_id)
-                    except (TypeError, ValueError):
-                        return error_response("Invalid covered site selection.", 400)
-                    if parsed_site_id not in valid_site_ids:
-                        return error_response("Selected covered site was not found.", 404)
-                    selected_site_ids.append(parsed_site_id)
-
-            forms = Form.query.filter_by(is_deleted=False).all()
-            for form in forms:
-                metadata = _parse_form_metadata(form)
-                try:
-                    linked_workflow_id = int(metadata.get("workflow_id"))
-                except (TypeError, ValueError):
-                    linked_workflow_id = None
-                if linked_workflow_id == workflow_id and (not selected_form or form.id != selected_form.id):
-                    metadata["workflow_id"] = None
-                    _write_form_metadata(form, metadata)
-                    form.updated_by = user_id
-
-            if selected_form:
-                metadata = _parse_form_metadata(selected_form)
-                metadata["workflow_id"] = workflow_id
-                metadata["sites"] = selected_site_ids
-                _write_form_metadata(selected_form, metadata)
-                selected_form.updated_by = user_id
+        wf.updated_by = current_user().id
 
         db.session.commit()
         return success_response(message="Workflow details updated successfully.")
