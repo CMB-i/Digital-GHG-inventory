@@ -731,7 +731,14 @@ document.addEventListener("DOMContentLoaded", function () {
     const hasRequestedContext = Boolean(state.requestedSiteId && state.requestedWorkbookId);
     const hasAnyWorkbook = Object.values(state.options.workbooks_by_site || {}).some(items => Array.isArray(items) && items.length);
     if (!state.options.sites.length || !hasAnyWorkbook) {
-      if (hasRequestedContext) {
+      if (state.options.needs_submitter_assignment) {
+        // The user has AccessMatrix access at this site but no WorkbookSiteSubmitter
+        // assignment -- distinct from having no access at all, so say so plainly.
+        setEmpty(
+          "You're not assigned as a submitter yet.",
+          state.options.message || "You have access to this site but haven't been assigned as a submitter for any workbook here yet — contact your admin."
+        );
+      } else if (hasRequestedContext) {
         setEmpty(
           "You are not assigned to this workbook for this site.",
           "You are not assigned as a submitter for this workbook/site."
