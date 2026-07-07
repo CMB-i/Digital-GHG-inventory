@@ -237,7 +237,7 @@ The client-side formula evaluator (`static/js/formula_runtime.js`) is a material
 
 ### VALSET — value sets (reference data for dropdowns/lookups)
 
-Draft → Submitted → Approved lifecycle. `reject_value_set_version` explicitly blocks self-rejection (`submitted_by == user_id`); `approve_value_set_version` has no equivalent self-approval check, and is reachable via both `/publish` (gated by `manage_forms`, the same permission that lets you create the draft) and `/approve` (gated by a distinct `approve` permission). A user with only draft-creation rights can currently self-approve through `/publish`, bypassing the review step the separate `approve` permission exists to enforce.
+Draft → Submitted → Approved lifecycle. `reject_value_set_version` blocks self-rejection (`submitted_by == user_id`); `approve_value_set_version` now has an equivalent self-approval check, covering both routes that can reach it — `/publish` (gated by `manage_forms`, the same permission that lets you create the draft) and `/approve` (gated by a distinct `approve` permission). Since `/publish` can approve a version straight from `Draft` (before it's ever been through `/submit`, when `submitted_by` is still unset), the check falls back to `created_by` in that case so a draft's own author can't self-approve through either route.
 
 ### PERIOD — reporting period lifecycle
 
@@ -245,7 +245,7 @@ See [Reporting Period Statuses](#reporting-period-statuses) above. Four states, 
 
 ### SITEMST — site master
 
-Straightforward CRUD for sites. **Site editing is currently broken**: the edit view calls the update service function without a required `actor_id` argument, raising a `TypeError` on every attempt. This is silently caught by a blanket exception handler that just flashes "Could not update site." This is a live bug at present, not a historical artifact.
+Straightforward CRUD for sites.
 
 ### RPTBLD — cross-site/period reporting
 
@@ -255,7 +255,7 @@ Filters submissions to `Approved` + `is_locked=True` before reporting, correctly
 
 ### AUDITL — audit log
 
-Records status changes and resolves human-readable entity descriptions for the audit trail. The `access_matrix` entity-description branch reads a `site_id` attribute that doesn't exist on `AccessMatrix` (the real field is `scope_site_id`) — this raises `AttributeError` on every AccessMatrix-related audit entry, silently caught, falling back to a generic "Access Matrix Record #123" label. A live bug, not a historical one.
+Records status changes and resolves human-readable entity descriptions for the audit trail. The `access_matrix` entity-description branch now correctly reads `scope_site_id` (the real field on `AccessMatrix`), producing a proper "User: ..., Site: ..." (or "Scope: Global") description instead of falling back to a generic "Access Matrix Record #123" label.
 
 ### NOTIFY — notifications (in-app, desktop, email, WhatsApp)
 
@@ -323,12 +323,9 @@ Honest, short list of things known to be wrong or unfinished today. If you fix o
 - **Deleting a `Workflow`, or deactivating a `Workbook`, has no dependency check.** Either can silently strand a workbook or submission in a "published but broken" state with no warning.
 - **No row locking anywhere in SUBMIT, APPROV, or PERIOD.** Concurrent submits, concurrent `ANY_ONE`-level approvals, and period-lock-during-in-flight-submission races are all possible.
 - **`SubmissionValueIssue` (cell-level) is created and listed but never resolved anywhere in the codebase**, and has no effect on approval — a parallel, incomplete model of "flag a problem" alongside the submission-level `Issue` model that does have a real lifecycle.
-- **Site editing is currently broken** (`SITEMST`): the edit view is missing a required `actor_id` argument, raising a `TypeError` on every attempt, silently swallowed into a generic "Could not update site" flash message.
-- **The audit log's AccessMatrix entity-description branch reads a nonexistent `site_id` attribute** (the real field is `scope_site_id`), raising `AttributeError` on every AccessMatrix-related audit entry, silently caught and falling back to a generic label.
 - **`ACCESS/views.py` and `USRMGMT/views.py` independently implement the same user CRUD endpoints.** Both call the same service functions, but a fix to one is easy to forget in the other.
 - **The client-side formula preview's `SUM_MONTHS` is a no-op** — it returns the current row's single value instead of a cross-month sum, with no indication to the user. Since every FY aggregate field in this app uses `SUM_MONTHS`, the live formula-builder preview routinely shows a wrong number for the most common formula shape in the app.
 - **`Field.current_version_id` means something different from every sibling `current_version_id`** in the app (see [Consistency Guidelines](#consistency-guidelines)). Harmless today since nothing reads it, but a landmine for anyone who assumes it follows the app-wide convention.
-- **`VALSET`'s `/publish` route allows self-approval**, since it's gated by the same `manage_forms` permission used to create the draft, bypassing the separate `approve` permission that exists specifically to prevent self-approval via `/approve`.
 
 ---
 
