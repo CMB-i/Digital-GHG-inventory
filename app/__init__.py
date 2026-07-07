@@ -22,7 +22,7 @@ from app.modules.SITEMST import bp as sitemst_bp
 from app.modules.SITEMST.model import Site
 from app.modules.SUBMIT import bp as submit_bp
 from app.modules.SUBMIT.model import Submission
-from app.modules.USRMGMT import auth_bp, bp as usrmgmt_bp
+from app.modules.USRMGMT import auth_bp
 from app.modules.USRMGMT.model import User
 from app.modules.VALSET import bp as valset_bp
 from app.modules.WFLWBLD import bp as wflwbld_bp
@@ -32,7 +32,6 @@ from app.modules.WFLWBLD.model import WorkflowLevelApprover
 
 MODULE_BLUEPRINTS = [
     access_bp,
-    usrmgmt_bp,
     sitemst_bp,
     formbld_bp,
     frmula_bp,
