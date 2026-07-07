@@ -846,6 +846,14 @@ document.addEventListener("DOMContentLoaded", function () {
           return;
         }
       }
+      if (typeof window.FormulaRuntime.usesAggregate === "function" && window.FormulaRuntime.usesAggregate(expr)) {
+        // The live preview only ever has one row's values in memory client-side,
+        // so it cannot compute a real cross-month sum -- showing a number here
+        // would look plausible but be silently wrong.
+        previewResultValue.textContent = "Preview unavailable for cross-month aggregates — validate via Save/Publish.";
+        previewResultValue.className = "max-w-xs text-right text-xs font-bold leading-tight text-slate-500";
+        return;
+      }
       const result = window.FormulaRuntime.evaluate(expr, values);
       const fieldConfig = fieldConfigMap[_returnFieldId] || {};
       let decimals = (fieldConfig.round_off_decimals !== undefined) ? parseInt(fieldConfig.round_off_decimals, 10) : 3;

@@ -51,6 +51,22 @@
         passes++;
         fields.forEach(field => {
           if (field.field_type === "calculated" && field.field_config && field.field_config.expression) {
+            const expression = field.field_config.expression;
+
+            if (window.FormulaRuntime && typeof window.FormulaRuntime.usesAggregate === "function" && window.FormulaRuntime.usesAggregate(expression)) {
+              // Client-side recalculation only ever has this row's values in memory,
+              // so it cannot compute a real cross-month sum -- leave the field's
+              // displayed value alone (from the server) instead of overwriting it
+              // with a plausible-looking wrong number as other fields change.
+              const aggErrorMsg = targetElement.querySelector("#error_" + field.field_code);
+              if (aggErrorMsg && aggErrorMsg.classList.contains("hidden")) {
+                aggErrorMsg.textContent = "Live preview unavailable for cross-month totals -- the saved value is calculated on the server.";
+                aggErrorMsg.classList.remove("hidden", "text-rose-600");
+                aggErrorMsg.classList.add("text-slate-500");
+              }
+              return;
+            }
+
             const oldVal = values[field.field_code];
             const newVal = window.FormulaRuntime ? window.FormulaRuntime.evaluate(field.field_config.expression, values) : null;
 

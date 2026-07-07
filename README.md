@@ -144,7 +144,7 @@ alembic revision --autogenerate -m "describe_the_change"
 alembic upgrade head
 ```
 
-Always inspect the generated migration before running it. The migration chain must remain linear, with a single Alembic head — this has held true so far, but is checked manually; see [Known Gaps](#known-gaps).
+Always inspect the generated migration before running it. The migration chain must remain linear, with a single Alembic head. Run `python scripts/check_alembic_heads.py` before pushing a new migration — it exits non-zero if the chain has forked (there's no CI wired up yet to run this automatically; see [Known Gaps](#known-gaps)).
 
 ### Development Scripts
 
@@ -205,7 +205,7 @@ A workbook groups published sheets (`WorkbookForm`), is assigned to sites (`Work
 
 **WKBK's simplified chain editor (`api_save_site_chain` in `WKBK/views.py`) is currently the only accessible way to configure approval chains.** The standalone Approval Path Builder (WFLWBLD, below) still exists in code, and its service layer (`save_workflow_draft_levels`, `publish_workflow_version`, etc.) is still used internally — WKBK's chain editor calls into it directly rather than duplicating its validation. But WFLWBLD's own UI has been disabled, since multi-level/`SEQUENTIAL` chains aren't needed at the current complexity level. It can be re-enabled by removing the `before_request` block at the top of `WFLWBLD/views.py` (and restoring its nav/dashboard links) if that need arises — see [Consistency Guidelines](#consistency-guidelines).
 
-Deactivating a workbook, or deleting the `Workflow` it points to, has no dependency check — both can silently strand submissions or workbooks in a "published but broken" state with no repair path or warning.
+Deactivating a workbook, or deleting the `Workflow` it points to, now both have dependency checks — `deactivate_workbook` refuses if any in-progress submission (`Draft`/`Submitted`/`Resubmitted`/`Under Review`/`Changes Requested`) still depends on it via the workbook's assigned sheets/sites, and `delete_workflow` (see WFLWBLD below) refuses if an active `Workbook` still points to it. Both raise a clear error instead of silently stranding a submission or workbook.
 
 Permission checks on every WKBK endpoint — including publish and site/submitter assignment — use `@require_permission("form", "manage_forms")`, the same resource type as the Sheet Builder. There is no distinct `"workbook"` permission; anyone with Sheet Builder access has full Workbook admin rights.
 
@@ -225,15 +225,15 @@ The real, validated writer for workflow levels/approvers (`save_workflow_draft_l
 
 **`get_eligible_level_approvers` now filters on `is_active` as well as `is_deleted`**, matching the check `publish_workflow_version` already applies at publish time — if every approver at a level is later deactivated, that level is correctly treated as having no eligible approver instead of silently matching deactivated users.
 
-There is a live but functionally dead-end write path here worth knowing about precisely: `update_details` (the workflow-detail edit endpoint) still reads and writes `form.description["workflow_id"]` / `["sites"]` — fields that must never be used for runtime routing (see [Key Design Rules](#key-design-rules)). This isn't hidden dead code: the Workflow Builder page has a fully functional "Covered Sites" checkbox list that an admin can check/uncheck and save, which PUTs directly into this legacy field. Since actual site-eligibility routing runs exclusively through `WorkbookSite`, **this UI has zero effect on real routing today** — an admin editing "Covered Sites" reasonably believes they're controlling something, and they aren't. This is a live UI actively misleading its own editors.
+`update_details` (the workflow-detail edit endpoint) no longer reads or writes `form.description["workflow_id"]` / `["sites"]` — the legacy write path that fed the standalone builder's "Covered Sites" checkbox has been removed (it only ever updates `Workflow.name` now). Site-eligibility routing runs exclusively through `WorkbookSite`, which this never affected either way; the checkbox UI itself still exists in `workflow_builder.js`, but since the module's UI is fully disabled (see above), it's unreachable and its data no longer goes anywhere.
 
-Deleting a `Workflow` has no check for whether a `Workbook` still points at it via `workflow_id` — deletion silently breaks any workbook depending on it, with no warning at delete time.
+`delete_workflow` now refuses to delete a `Workflow` that an active `Workbook` still points to via `workflow_id`, raising a clear error instead of silently stranding that workbook.
 
 ### FRMULA — formula definitions and evaluation
 
 Formulas are versioned and validated against currently-active field/value-set codes at publish time, using `simpleeval`. There is no re-validation when a field a published formula references is later renamed or soft-deleted, and FORMBLD's own "delete fields not present in a re-saved sheet" logic (this is literally what a field rename looks like under the hood) does not check formula references before deleting. How this manifests, once it happens, is inconsistent — SUBMIT alone has four different behaviors ranging from fully silent to a specific error message, depending on which of its five calculated-field code paths hits it first (see [Consistency Guidelines](#consistency-guidelines)).
 
-The client-side formula evaluator (`static/js/formula_runtime.js`) is a materially narrower grammar than the backend's (no unary minus, no exponent), and its `SUM_MONTHS` implementation is a literal no-op — it returns the single current-row value as if it were the cross-month sum, with no indication to the user that the preview number is wrong. Since every FY aggregate field in this app's own domain uses `SUM_MONTHS`, the formula builder's live preview routinely shows an incorrect number for exactly the formula shape the app relies on most.
+The client-side formula evaluator (`static/js/formula_runtime.js`) is a materially narrower grammar than the backend's (no unary minus, no exponent), and its `SUM_MONTHS` implementation is still a literal no-op internally — it can only ever see one row's values client-side, so it can't compute a real cross-month sum. Rather than trying to fake that computation in the browser, every call site now checks `FormulaRuntime.usesAggregate(expression)` first and shows an explicit "preview unavailable" message instead of a number: the Formula Builder's live preview (`formula_builder.js`) and the inline recalculation run during data entry (`form_renderer.js`, used by `spoc_entry`) both do this consistently. The real value is still computed correctly server-side at save/submit time.
 
 ### VALSET — value sets (reference data for dropdowns/lookups)
 
@@ -316,15 +316,11 @@ Honest, short list of things known to be wrong or unfinished today. If you fix o
 
 - **No shared submission-status enum.** `SUBMIT` and `APPROV` each define their own status string tuples independently; `PERIOD` and `VALSET` use yet other casing conventions for their own separate lifecycles.
 - **Calculated-field status logic is duplicated five times** across `SUBMIT/service.py` and `APPROV/service.py`, with four different status vocabularies between them. A correctness fix to one path (e.g. unknown-formula-reference detection) doesn't propagate to the other four.
-- **No CI check for a single Alembic head.** The migration chain has forked into two heads once before in this project's history and had to be reconciled by hand with a merge migration. Nothing currently prevents it from happening again.
 - **"SPOC" and "Submitter" (and "Approver" and "Reviewer") coexist in the codebase.** See [Terminology](#terminology) below — user-facing copy mostly says Submitter/Reviewer, but module names, JS filenames, CSS classes, and some newer admin-facing strings still say SPOC/Approver.
 - **Three separately-maintained cell-state color maps in `static/js/workbook_sheet.js` disagree with each other.** A past UI-redesign commit updated two of the three maps to a new palette and missed the third — the legend a reviewer sees today uses different colors than the grid cells for the same underlying state.
-- **The Workflow Builder's "Covered Sites" checkbox UI is fully functional but has zero effect on real routing.** It writes to the legacy `form.description["sites"]` field, which is never read for routing. The control should be removed; until then, it actively misleads whoever uses it.
-- **Deleting a `Workflow`, or deactivating a `Workbook`, has no dependency check.** Either can silently strand a workbook or submission in a "published but broken" state with no warning.
 - **No row locking anywhere in SUBMIT, APPROV, or PERIOD.** Concurrent submits, concurrent `ANY_ONE`-level approvals, and period-lock-during-in-flight-submission races are all possible.
 - **`SubmissionValueIssue` (cell-level) is created and listed but never resolved anywhere in the codebase**, and has no effect on approval — a parallel, incomplete model of "flag a problem" alongside the submission-level `Issue` model that does have a real lifecycle.
 - **`ACCESS/views.py` and `USRMGMT/views.py` independently implement the same user CRUD endpoints.** Both call the same service functions, but a fix to one is easy to forget in the other.
-- **The client-side formula preview's `SUM_MONTHS` is a no-op** — it returns the current row's single value instead of a cross-month sum, with no indication to the user. Since every FY aggregate field in this app uses `SUM_MONTHS`, the live formula-builder preview routinely shows a wrong number for the most common formula shape in the app.
 - **`Field.current_version_id` means something different from every sibling `current_version_id`** in the app (see [Consistency Guidelines](#consistency-guidelines)). Harmless today since nothing reads it, but a landmine for anyone who assumes it follows the app-wide convention.
 
 ---

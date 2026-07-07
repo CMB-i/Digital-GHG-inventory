@@ -443,6 +443,14 @@ def delete_workflow(workflow_id, user_id):
     workflow = get_workflow(workflow_id)
     if not workflow:
         raise ValueError("Workflow not found.")
+
+    from app.modules.WKBK.model import Workbook
+    active_workbook = Workbook.query.filter_by(workflow_id=workflow_id, is_active=True).first()
+    if active_workbook:
+        raise ValueError(
+            f"Cannot delete workflow: workbook '{active_workbook.name}' is still using it."
+        )
+
     workflow.is_deleted = True
     workflow.deleted_by = user_id
     workflow.deleted_at = datetime.now(timezone.utc)
