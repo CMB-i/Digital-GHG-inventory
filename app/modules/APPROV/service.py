@@ -806,6 +806,11 @@ def approve_submission(submission_id, user_id, comment=None):
             if open_issues_count > 0:
                 raise ValueError("Cannot final approve: There are open issues blocking approval.")
 
+            if submission.needs_recalc_review:
+                raise ValueError(
+                    "This submission has a calculated field that needs recalculation review before it can be given final approval."
+                )
+
             old_status = submission.status
             submission.status = "Approved"
             submission.approved_by = user_id
@@ -1072,3 +1077,39 @@ def resolve_issue(issue_id, user_id):
     )
 
     return issue
+
+def clear_recalc_review(submission_id, user_id, comment=None):
+    """
+    Clears a submission's needs_recalc_review flag once a reviewer has confirmed
+    the flagged calculated value is acceptable. Resubmission after a fix already
+    clears this flag automatically (it's recomputed from scratch on every submit);
+    this is for the case where a reviewer accepts the existing value as-is,
+    without the submitter having to resubmit anything.
+    """
+    submission = Submission.query.get(submission_id)
+    if not submission or submission.is_deleted:
+        raise ValueError("Submission not found.")
+
+    if not submission.needs_recalc_review:
+        raise ValueError("This submission is not flagged for recalculation review.")
+
+    # Permission check
+    if not has_permission(user_id, "submission", "approve", scope_site_id=submission.site_id):
+        raise ValueError("Permission denied: You do not have permission to clear review flags.")
+
+    submission.needs_recalc_review = False
+    submission.updated_by = user_id
+
+    # Audit log
+    from app.modules.AUDITL.service import log_audit
+    log_audit(
+        actor_user_id=user_id,
+        entity_type="submission",
+        entity_id=submission.id,
+        action="CLEAR_RECALC_REVIEW",
+        old_values={"needs_recalc_review": True},
+        new_values={"needs_recalc_review": False},
+        metadata={"comment": comment}
+    )
+
+    return submission

@@ -119,9 +119,36 @@ document.addEventListener("DOMContentLoaded", function () {
         if (data.metadata.needs_recalc_review && reviewSubtitle) {
           const banner = document.createElement("div");
           banner.id = "recalc-review-banner";
-          banner.className = "mt-2 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2";
-          banner.textContent = "Needs recalculation review: one or more calculated fields had formula errors when this was submitted."
-            + (data.metadata.recalc_review_notes ? ` (${data.metadata.recalc_review_notes})` : "");
+          banner.className = "mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2";
+          const text = document.createElement("span");
+          text.textContent = "Needs recalculation review: one or more calculated fields had formula errors when this was submitted."
+            + (data.metadata.recalc_review_notes ? ` (${data.metadata.recalc_review_notes})` : "")
+            + " This must be cleared before final approval.";
+          banner.appendChild(text);
+
+          if (reviewableStatuses.has(data.metadata.status)) {
+            const clearBtn = document.createElement("button");
+            clearBtn.className = "clear-recalc-review-btn inline-flex items-center px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-lg transition-all";
+            clearBtn.textContent = "Confirm value is acceptable";
+            clearBtn.onclick = () => {
+              if (!confirm("Confirm the calculated value is acceptable and clear the recalculation review flag?")) return;
+
+              fetch(`/module/APPROV/api/submissions/${submissionId}/clear-recalc-review`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" }
+              })
+                .then((res) => {
+                  if (!res.ok) return res.json().then(d => { throw new Error(d.error); });
+                  return res.json();
+                })
+                .then(() => {
+                  loadSubmissionDetails();
+                })
+                .catch(err => alert(err.message));
+            };
+            banner.appendChild(clearBtn);
+          }
+
           reviewSubtitle.insertAdjacentElement("afterend", banner);
         }
 
