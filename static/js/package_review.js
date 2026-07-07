@@ -309,12 +309,59 @@ document.addEventListener("DOMContentLoaded", function () {
       cellIssueList.innerHTML = '<div class="rounded-lg bg-slate-50 px-3 py-2 text-slate-400">No comments for this cell yet.</div>';
       return;
     }
-    cellIssueList.innerHTML = issues.map((issue) => `
-      <div class="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
-        <div class="text-xs font-bold text-amber-900">${escapeHtml(issue.raised_by_name || "Reviewer")}</div>
-        <div class="mt-1 text-sm text-amber-800">${escapeHtml(issue.issue_text || "")}</div>
-      </div>
-    `).join("");
+    const canResolve = Boolean(selectedIssueCell && selectedIssueCell.canAddIssues);
+    cellIssueList.innerHTML = issues.map((issue) => {
+      const isResolved = issue.status === "Resolved";
+      const statusBadge = isResolved
+        ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 ml-1.5">Resolved</span>`
+        : "";
+      const resolveBtn = (!isResolved && canResolve)
+        ? `<button class="resolve-cell-issue-btn mt-2 inline-flex items-center px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-lg transition-all" data-id="${issue.id}">Resolve</button>`
+        : "";
+      return `
+        <div class="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+          <div class="text-xs font-bold text-amber-900">${escapeHtml(issue.raised_by_name || "Reviewer")}${statusBadge}</div>
+          <div class="mt-1 text-sm text-amber-800">${escapeHtml(issue.issue_text || "")}</div>
+          ${resolveBtn}
+        </div>
+      `;
+    }).join("");
+
+    cellIssueList.querySelectorAll(".resolve-cell-issue-btn").forEach((btn) => {
+      btn.onclick = function () {
+        resolveCellIssue(parseInt(this.dataset.id, 10));
+      };
+    });
+  }
+
+  function resolveCellIssue(issueId) {
+    if (!selectedIssueCell || !selectedIssueCell.canAddIssues) return;
+    if (!confirm("Mark this cell issue as resolved?")) return;
+
+    fetch(`/module/APPROV/api/packages/${packageId}/values/${selectedIssueCell.submissionValueId}/issues/${issueId}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    })
+      .then((res) => res.json().then((data) => {
+        if (!res.ok) throw new Error(data.error || "Could not resolve cell issue.");
+        return data;
+      }))
+      .then((data) => {
+        const resolved = data.data && data.data.issue;
+        const sheet = activeSheet();
+        const field = activeField(selectedIssueCell.fieldCode);
+        if (resolved && sheet && field) {
+          const row = (sheet.rows || []).find((item) => item.row_key === selectedIssueCell.rowKey);
+          const source = row || sheet;
+          const cell = source.values ? source.values[field.field_code] : null;
+          if (cell && typeof cell === "object" && Array.isArray(cell.issues)) {
+            const idx = cell.issues.findIndex((i) => i.id === resolved.id);
+            if (idx !== -1) cell.issues[idx] = resolved;
+          }
+        }
+        renderCellIssueList(activeCellIssues(selectedIssueCell.fieldCode));
+      })
+      .catch((err) => showCellIssueError(err.message));
   }
 
   function openCellIssueModal(cellInfo) {

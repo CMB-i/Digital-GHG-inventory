@@ -1,1 +1,1 @@
-from app.modules.USRMGMT.views import auth_bp, bp
+from app.modules.USRMGMT.views import auth_bp

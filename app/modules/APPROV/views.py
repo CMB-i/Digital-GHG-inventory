@@ -20,6 +20,7 @@ from app.modules.APPROV.service import (
     compose_package_review_data,
     list_package_value_issues,
     add_package_value_issue,
+    resolve_package_value_issue,
     approve_package,
     request_changes_package,
     reject_package,
@@ -210,6 +211,24 @@ def create_package_value_issue(package_id, value_id):
         db.session.commit()
         return success_response(
             message="Cell issue added successfully.",
+            data={"issue": serialize_submission_value_issue(issue)},
+        )
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 403 if str(e) == "Permission denied." else 400)
+    except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 500)
+
+@bp.route("/api/packages/<int:package_id>/values/<int:value_id>/issues/<int:issue_id>/resolve", methods=["POST"])
+@require_login
+def resolve_package_value_issue_endpoint(package_id, value_id, issue_id):
+    user = current_user()
+    try:
+        issue = resolve_package_value_issue(package_id, value_id, issue_id, user.id)
+        db.session.commit()
+        return success_response(
+            message="Cell issue resolved successfully.",
             data={"issue": serialize_submission_value_issue(issue)},
         )
     except ValueError as e:

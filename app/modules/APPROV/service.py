@@ -382,6 +382,7 @@ def add_package_value_issue(package_id, value_id, user_id, issue_text):
         raised_by=user_id,
         issue_text=issue_text.strip(),
         status="Open",
+        blocks_approval=True,
         created_by=user_id,
         updated_by=user_id,
     )
@@ -400,6 +401,37 @@ def add_package_value_issue(package_id, value_id, user_id, issue_text):
             "submission_value_id": value.id,
             "status": issue.status,
         },
+    )
+    return issue
+
+
+def resolve_package_value_issue(package_id, value_id, issue_id, user_id):
+    package, _submission, value = _package_submission_value(package_id, value_id)
+
+    issue = SubmissionValueIssue.query.filter_by(
+        id=issue_id, submission_value_id=value.id, is_deleted=False
+    ).first()
+    if not issue:
+        raise ValueError("Cell issue not found.")
+    if issue.status == "Resolved":
+        raise ValueError("Cell issue is already resolved.")
+
+    if not get_package_summary_for_reviewer(package.id, user_id):
+        raise ValueError("Permission denied.")
+
+    issue.status = "Resolved"
+    issue.resolved_by = user_id
+    issue.resolved_at = _utc_now()
+    issue.updated_by = user_id
+
+    from app.modules.AUDITL.service import log_audit
+    log_audit(
+        actor_user_id=user_id,
+        entity_type="submission_value_issue",
+        entity_id=issue.id,
+        action="RESOLVE_CELL_ISSUE",
+        old_values={"status": "Open"},
+        new_values={"status": "Resolved"},
     )
     return issue
 
@@ -805,6 +837,21 @@ def approve_submission(submission_id, user_id, comment=None):
             ).count()
             if open_issues_count > 0:
                 raise ValueError("Cannot final approve: There are open issues blocking approval.")
+
+            open_cell_issues_count = (
+                SubmissionValueIssue.query.join(
+                    SubmissionValue, SubmissionValue.id == SubmissionValueIssue.submission_value_id
+                )
+                .filter(
+                    SubmissionValue.submission_id == submission_id,
+                    SubmissionValueIssue.status == "Open",
+                    SubmissionValueIssue.blocks_approval == True,
+                    SubmissionValueIssue.is_deleted == False,
+                )
+                .count()
+            )
+            if open_cell_issues_count > 0:
+                raise ValueError("Cannot final approve: There are open cell-level issues blocking approval.")
 
             if submission.needs_recalc_review:
                 raise ValueError(

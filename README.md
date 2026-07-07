@@ -195,7 +195,7 @@ Handles the reviewer-side workflow: queue, package review, approve/reject/reques
 
 Package-level actions (approve/reject a whole package at once) are a thin loop over submission-level actions with no first-class package state — `package.current_level` is derived after the fact as the minimum of member submission levels. If a package's member submissions have heterogeneous eligibility (different levels, or one submitted by the acting user), `approve_package` can abort partway through with no partial-success handling.
 
-There are two independent, diverging models of "flag a problem with this submission": submission-level `Issue` (has a real open→resolved lifecycle and blocks approval) and cell-level `SubmissionValueIssue` (created and listed, but never resolved anywhere in the codebase, and has no effect on approval). These read as the same original idea forked into two granularities that were never reconciled.
+Submission-level `Issue` and cell-level `SubmissionValueIssue` now share the same real enforcement: both have an open→resolved lifecycle (`resolved_by`/`resolved_at`, set via `resolve_issue` / `resolve_package_value_issue`), both carry a `blocks_approval` flag (always set `True` at creation for both — there's no UI path that ever creates or flips it otherwise, on either model), and the final-approval gate checks all three conditions together in one place: no open `Issue` rows, no open `SubmissionValueIssue` rows, and `needs_recalc_review` cleared. Cell issues are raised/resolved from the package review screen (`package_review.js`); the submitter's own read-only view (`annual_workbook.js`) only displays them.
 
 No row locking here either — concurrent approvals at an `ANY_ONE` level can double-advance a level or double-notify.
 
@@ -265,11 +265,11 @@ Email/WhatsApp delivery failures are caught and only printed to console — no p
 
 ### ACCESS — AccessMatrix, the permission source of truth
 
-`get_user_permissions()` / `has_permission()` correctly OR in `entity_type == "all"` alongside a specific entity type — this is the correct, complete implementation and the one every module should call (see [Key Design Rules](#key-design-rules)). `ACCESS/views.py` also independently re-implements the same user CRUD endpoints (create/edit/password/toggle-active) that already exist in `USRMGMT/views.py` — both call the same underlying service functions, but having two blueprints do the same job means a bug fix to one is easy to forget in the other.
+`get_user_permissions()` / `has_permission()` correctly OR in `entity_type == "all"` alongside a specific entity type — this is the correct, complete implementation and the one every module should call (see [Key Design Rules](#key-design-rules)). `ACCESS/views.py` is now the sole, canonical user CRUD UI (create/edit/password/toggle-active) — the duplicate that used to live in `USRMGMT/views.py` was confirmed unreachable from any nav link, dashboard card, or cross-reference, and has been removed. Both call the same `USRMGMT/service.py` functions underneath; ACCESS's blueprint additionally handles permission assignment (`/assign`, `/assign-matrix`), which USRMGMT never had.
 
 ### USRMGMT — user management and auth
 
-Password hashing uses bcrypt. Session handling correctly clears the session before setting a new user on login. See ACCESS above for the duplicate-CRUD-blueprint note that also applies here.
+Password hashing uses bcrypt. Session handling correctly clears the session before setting a new user on login. `USRMGMT/views.py` now holds only `auth_bp` (`/login`, `/logout`) — its own user CRUD blueprint (`bp`: index/create/edit/password/toggle-active, plus `users.html`) was removed as the unreachable duplicate of ACCESS's (see ACCESS above); `USRMGMT/service.py` is untouched and still the shared implementation both ACCESS and the login flow call into.
 
 ---
 
@@ -319,8 +319,6 @@ Honest, short list of things known to be wrong or unfinished today. If you fix o
 - **"SPOC" and "Submitter" (and "Approver" and "Reviewer") coexist in the codebase.** See [Terminology](#terminology) below — user-facing copy mostly says Submitter/Reviewer, but module names, JS filenames, CSS classes, and some newer admin-facing strings still say SPOC/Approver.
 - **Three separately-maintained cell-state color maps in `static/js/workbook_sheet.js` disagree with each other.** A past UI-redesign commit updated two of the three maps to a new palette and missed the third — the legend a reviewer sees today uses different colors than the grid cells for the same underlying state.
 - **No row locking anywhere in SUBMIT, APPROV, or PERIOD.** Concurrent submits, concurrent `ANY_ONE`-level approvals, and period-lock-during-in-flight-submission races are all possible.
-- **`SubmissionValueIssue` (cell-level) is created and listed but never resolved anywhere in the codebase**, and has no effect on approval — a parallel, incomplete model of "flag a problem" alongside the submission-level `Issue` model that does have a real lifecycle.
-- **`ACCESS/views.py` and `USRMGMT/views.py` independently implement the same user CRUD endpoints.** Both call the same service functions, but a fix to one is easy to forget in the other.
 - **`Field.current_version_id` means something different from every sibling `current_version_id`** in the app (see [Consistency Guidelines](#consistency-guidelines)). Harmless today since nothing reads it, but a landmine for anyone who assumes it follows the app-wide convention.
 
 ---
