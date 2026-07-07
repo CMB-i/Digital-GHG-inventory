@@ -150,10 +150,31 @@ def reorder_sheets(workbook_id, ordered_form_ids):
     db.session.flush()
 
 
+IN_PROGRESS_SUBMISSION_STATUSES = ("Draft", "Submitted", "Resubmitted", "Under Review", "Changes Requested")
+
+
 def deactivate_workbook(workbook_id):
     wb = get_workbook(workbook_id)
     if not wb:
         raise ValueError("Workbook not found.")
+
+    from app.modules.SUBMIT.model import Submission
+
+    form_ids = [row.form_id for row in WorkbookForm.query.filter_by(workbook_id=workbook_id).all()]
+    site_ids = [row.site_id for row in WorkbookSite.query.filter_by(workbook_id=workbook_id).all()]
+    if form_ids and site_ids:
+        in_progress_count = Submission.query.filter(
+            Submission.form_id.in_(form_ids),
+            Submission.site_id.in_(site_ids),
+            Submission.status.in_(IN_PROGRESS_SUBMISSION_STATUSES),
+            Submission.is_deleted == False,
+        ).count()
+        if in_progress_count > 0:
+            raise ValueError(
+                f"Cannot deactivate workbook: {in_progress_count} in-progress submission(s) "
+                "still depend on it."
+            )
+
     wb.is_active = False
     wb.updated_at = datetime.now(timezone.utc)
     db.session.flush()
