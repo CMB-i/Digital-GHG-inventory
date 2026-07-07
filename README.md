@@ -249,7 +249,7 @@ Straightforward CRUD for sites. **Site editing is currently broken**: the edit v
 
 ### RPTBLD — cross-site/period reporting
 
-Filters submissions to `Approved` + `is_locked=True` before reporting, correctly matching the "reports use only approved and locked values" rule (see [Key Design Rules](#key-design-rules)). But its own site/permission-scoping logic hand-rolls an `AccessMatrix` query instead of calling the shared `has_permission()` / `get_user_permissions()`, and that hand-rolled query omits the `entity_type == "all"` wildcard the shared function includes — a user with a blanket "all entities" permission grant is silently excluded from reports they should be able to see. This is the same class of bug NOTIFY used to have (see NOTIFY below and [Known Gaps](#known-gaps) — RPTBLD's has not been fixed yet).
+Filters submissions to `Approved` + `is_locked=True` before reporting, correctly matching the "reports use only approved and locked values" rule (see [Key Design Rules](#key-design-rules)). Its site/permission-scoping logic (`list_report_templates`, `_get_user_allowed_sites`) now calls the shared `get_user_permissions()` instead of hand-rolling its own `AccessMatrix` query — the same fix NOTIFY's `resolve_recipients` got (see NOTIFY below) — so a user with a blanket "all entities" permission grant is no longer silently excluded from reports they should be able to see.
 
 `get_missing_submissions` runs two queries inside a doubly-nested loop over periods × forms — a real O(n×m) query explosion that will get slower as sites/forms grow. Not yet a problem at current scale.
 
@@ -314,7 +314,6 @@ Added to prevent the kind of drift documented in [Known Gaps](#known-gaps) from 
 
 Honest, short list of things known to be wrong or unfinished today. If you fix one of these, delete it from this list in the same change.
 
-- **RPTBLD's report-scoping permission check hand-rolls its own `AccessMatrix` query** and is missing the `entity_type == "all"` wildcard, silently under-serving admins with blanket permissions. (NOTIFY had the identical bug; NOTIFY has since been fixed to call `has_permission()` / `get_user_permissions()` directly, but RPTBLD's is not yet addressed.)
 - **No shared submission-status enum.** `SUBMIT` and `APPROV` each define their own status string tuples independently; `PERIOD` and `VALSET` use yet other casing conventions for their own separate lifecycles.
 - **Calculated-field status logic is duplicated five times** across `SUBMIT/service.py` and `APPROV/service.py`, with four different status vocabularies between them. A correctness fix to one path (e.g. unknown-formula-reference detection) doesn't propagate to the other four.
 - **No CI check for a single Alembic head.** The migration chain has forked into two heads once before in this project's history and had to be reconciled by hand with a merge migration. Nothing currently prevents it from happening again.

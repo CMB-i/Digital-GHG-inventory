@@ -9,7 +9,7 @@ from app.database import db
 from app.modules.RPTBLD.model import ReportTemplate
 from app.modules.WKBK.model import Workbook, WorkbookForm, WorkbookSite
 from app.common.permissions import has_permission
-from app.modules.ACCESS.model import AccessMatrix
+from app.modules.ACCESS.service import get_user_permissions
 from app.modules.SITEMST.model import Site
 from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.FORMBLD.model import Form, Field, FieldVersion
@@ -21,21 +21,20 @@ def list_report_templates(user_id):
     """
     List report templates. Scoped by user access.
     """
-    # Verify user has access to view reports
-    matrix_rows = AccessMatrix.query.filter_by(user_id=user_id, entity_type="report", is_deleted=False).all()
-
-    is_global = False
-    allowed_site_ids = set()
-    for row in matrix_rows:
-        if row.can_view or row.can_export:
-            if row.scope_type == "global":
-                is_global = True
-                break
-            elif row.scope_type == "site" and row.scope_site_id is not None:
-                allowed_site_ids.add(row.scope_site_id)
+    # Verify user has access to view reports. Uses get_user_permissions() (rather
+    # than a hand-rolled AccessMatrix scan) so a blanket entity_type == "all" grant
+    # is correctly honored, same as any other entity type.
+    global_perms = get_user_permissions(user_id=user_id, scope_type="global", entity_type="report")
+    is_global = bool(global_perms["can_view"] or global_perms["can_export"])
 
     if is_global:
         return ReportTemplate.query.filter_by(is_deleted=False).order_by(ReportTemplate.id.desc()).all()
+
+    allowed_site_ids = set()
+    for site in Site.query.filter_by(is_deleted=False).all():
+        perms = get_user_permissions(user_id=user_id, scope_type="site", scope_site_id=site.id, entity_type="report")
+        if perms["can_view"] or perms["can_export"]:
+            allowed_site_ids.add(site.id)
 
     # Filter templates that match the user's allowed sites
     all_templates = ReportTemplate.query.filter_by(is_deleted=False).all()
@@ -104,20 +103,19 @@ def delete_report_template(template_id, user_id):
     return True
 
 def _get_user_allowed_sites(user_id, entity_type="report"):
-    matrix_rows = AccessMatrix.query.filter_by(user_id=user_id, entity_type=entity_type, is_deleted=False).all()
-    is_global = False
-    allowed_site_ids = set()
-    for row in matrix_rows:
-        if row.can_view or row.can_export or row.can_submit or row.can_create:
-            if row.scope_type == "global":
-                is_global = True
-                break
-            elif row.scope_type == "site" and row.scope_site_id is not None:
-                allowed_site_ids.add(row.scope_site_id)
-
-    if is_global:
+    # Uses get_user_permissions() (rather than a hand-rolled AccessMatrix scan) so
+    # a blanket entity_type == "all" grant is correctly honored, same as any other
+    # entity type.
+    global_perms = get_user_permissions(user_id=user_id, scope_type="global", entity_type=entity_type)
+    if global_perms["can_view"] or global_perms["can_export"] or global_perms["can_submit"] or global_perms["can_create"]:
         active_sites = Site.query.filter_by(is_deleted=False).all()
         return {s.id for s in active_sites}, True
+
+    allowed_site_ids = set()
+    for site in Site.query.filter_by(is_deleted=False).all():
+        perms = get_user_permissions(user_id=user_id, scope_type="site", scope_site_id=site.id, entity_type=entity_type)
+        if perms["can_view"] or perms["can_export"] or perms["can_submit"] or perms["can_create"]:
+            allowed_site_ids.add(site.id)
     return allowed_site_ids, False
 
 def generate_report_data(template_id, user_id):
