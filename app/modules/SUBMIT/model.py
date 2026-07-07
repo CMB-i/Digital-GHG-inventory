@@ -105,6 +105,9 @@ class SubmissionValueIssue(FullLifecycleMixin, db.Model):
     raised_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     issue_text = db.Column(db.Text, nullable=False)
     status = db.Column(db.String(30), nullable=False, default="Open", server_default="Open")
+    resolved_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    resolved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    blocks_approval = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
 
     __table_args__ = (
         db.Index("idx_submission_value_issues_value", "submission_value_id"),

@@ -707,6 +707,7 @@ def serialize_submission_value_issue(issue):
     from app.modules.USRMGMT.model import User
 
     raiser = User.query.get(issue.raised_by) if issue.raised_by else None
+    resolver = User.query.get(issue.resolved_by) if issue.resolved_by else None
     return {
         "id": issue.id,
         "submission_value_id": issue.submission_value_id,
@@ -715,6 +716,9 @@ def serialize_submission_value_issue(issue):
         "raised_by": issue.raised_by,
         "raised_by_name": raiser.full_name if raiser else "System",
         "created_at": issue.created_at,
+        "resolved_by": issue.resolved_by,
+        "resolved_by_name": resolver.full_name if resolver else None,
+        "resolved_at": issue.resolved_at,
     }
 
 
