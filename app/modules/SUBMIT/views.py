@@ -1,8 +1,8 @@
 import json
 
 from flask import Blueprint, current_app, redirect, render_template, request, jsonify, send_file
-from app.common.decorators import require_permission
 from app.common.auth import current_user, require_login
+from app.common.permissions import has_permission
 from app.common.responses import success_response, error_response
 from app.database import db
 from app.common.file_storage import save_file, get_file_path
@@ -22,6 +22,7 @@ from app.modules.SUBMIT.service import (
     submit_monthly_workbook_package,
     human_sheet_label,
     set_submission_value_state,
+    user_has_any_submission_access,
     CELL_STATE_DRAFT_FILLED,
     DuplicateSubmissionError,
     SubmissionValidationError,
@@ -32,12 +33,19 @@ MODULE_CODE = "SUBMIT"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
 
 
+def _page_no_access():
+    return render_template("no_access.html"), 403
+
+
 @bp.route("/")
-@require_permission("submission", ("submit", "view"))
+@require_login
 def index():
     """
     My Workbooks dashboard page.
     """
+    user = current_user()
+    if not user_has_any_submission_access(user.id):
+        return _page_no_access()
     return render_template("modules/SUBMIT/my_sheets.html", module_code=MODULE_CODE)
 
 
@@ -51,12 +59,15 @@ def annual_workbook():
 
 
 @bp.route("/submissions/<int:submission_id>")
-@require_permission("submission", "view")
+@require_login
 def edit_submission(submission_id):
     """
     Form Data Entry page.
     """
     sub = Submission.query.get_or_404(submission_id)
+    user = current_user()
+    if not has_permission(user.id, "submission", "view", scope_site_id=sub.site_id):
+        return _page_no_access()
     if sub.status not in ("Draft", "Changes Requested"):
         if sub.package_id:
             return redirect(f"/module/APPROV/packages/{sub.package_id}")
@@ -75,11 +86,22 @@ def edit_submission(submission_id):
 
 
 @bp.route("/submissions/download/<path:storage_key>")
-@require_permission("submission", "view")
+@require_login
 def download_proof(storage_key):
     """
     Serves uploaded proof documents.
     """
+    proof = ProofDocument.query.filter_by(storage_key=storage_key, is_deleted=False).first()
+    if not proof:
+        return error_response("Proof document not found.", 404)
+    submission = Submission.query.get(proof.submission_id)
+    if not submission:
+        return error_response("Proof document not found.", 404)
+
+    user = current_user()
+    if not has_permission(user.id, "submission", "view", scope_site_id=submission.site_id):
+        return error_response("Permission denied.", 403)
+
     try:
         file_path = get_file_path(storage_key)
         original_name = storage_key.split('/')[-1]
@@ -91,12 +113,14 @@ def download_proof(storage_key):
 # --- REST API Endpoints ---
 
 @bp.route("/api/sheets", methods=["GET"])
-@require_permission("submission", ("submit", "view"))
+@require_login
 def get_sheets():
     """
     Get SPOC submission sheets grouped into buckets.
     """
     user = current_user()
+    if not user_has_any_submission_access(user.id):
+        return error_response("Permission denied.", 403)
     buckets = get_spoc_sheets_buckets(user.id)
     return jsonify(buckets)
 
@@ -238,7 +262,7 @@ def create_submission_endpoint():
 
 
 @bp.route("/api/submissions/<int:submission_id>", methods=["GET"])
-@require_permission("submission", "view")
+@require_login
 def get_submission_details(submission_id):
     """
     Load form fields and values for a submission.
@@ -246,7 +270,11 @@ def get_submission_details(submission_id):
     submission = Submission.query.get(submission_id)
     if not submission or submission.is_deleted:
         return error_response("Submission not found.", 404)
-        
+
+    user = current_user()
+    if not has_permission(user.id, "submission", "view", scope_site_id=submission.site_id):
+        return error_response("Permission denied.", 403)
+
     # Get form fields
     fields = get_form_version_fields(submission.form_version_id)
     
@@ -419,7 +447,7 @@ def autosave_endpoint(submission_id):
 
 
 @bp.route("/api/submissions/<int:submission_id>/proof/<string:field_code>", methods=["POST"])
-@require_permission("submission", "edit")
+@require_login
 def upload_proof_endpoint(submission_id, field_code):
     """
     Handles proof file uploads for a specific field code.
@@ -427,27 +455,30 @@ def upload_proof_endpoint(submission_id, field_code):
     submission = Submission.query.get(submission_id)
     if not submission or submission.is_deleted:
         return error_response("Submission not found.", 404)
-        
+
+    user = current_user()
+    if not has_permission(user.id, "submission", "edit", scope_site_id=submission.site_id):
+        return error_response("Permission denied.", 403)
+
     if submission.status not in ("Draft", "Changes Requested"):
         return error_response(f"Cannot edit submission in status: {submission.status}", 400)
-        
+
     if "file" not in request.files:
         return error_response("No file uploaded.", 400)
-        
+
     file = request.files["file"]
     if file.filename == "":
         return error_response("No file selected.", 400)
-        
+
     field = Field.query.filter_by(form_id=submission.form_id, field_code=field_code, is_deleted=False).first()
     if not field:
         return error_response("Field not found.", 404)
-        
+
     field_version = FieldVersion.query.filter_by(field_id=field.id, form_version_id=submission.form_version_id).first()
     if not field_version:
         return error_response("Field version not found.", 404)
-        
+
     try:
-        user = current_user()
         saved_info = save_file(file)
         
         # Save ProofDocument metadata

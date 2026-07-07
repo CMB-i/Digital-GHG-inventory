@@ -242,18 +242,6 @@ def _get_user_workbook_site_ids(user_id):
     return {row.site_id for row in rows}
 
 
-def _user_has_workbook_submitter_assignments(user_id):
-    return (
-        db.session.query(WorkbookSiteSubmitter.id)
-        .join(Workbook, Workbook.id == WorkbookSiteSubmitter.workbook_id)
-        .filter(
-            WorkbookSiteSubmitter.user_id == user_id,
-            Workbook.is_active == True,
-        )
-        .first()
-    ) is not None
-
-
 class DuplicateSubmissionError(Exception):
     def __init__(self, existing_id):
         self.existing_id = existing_id
@@ -455,6 +443,17 @@ def _user_submission_site_ids(user_id):
             for site in Site.query.filter_by(is_deleted=False).all()
         }
     return allowed_site_ids
+
+
+def user_has_any_submission_access(user_id):
+    """
+    True if the user has qualifying AccessMatrix submission access at any site
+    (global or site-scoped). Used to gate dashboard/list views that aren't scoped
+    to a single site up front -- the actual per-site filtering (and the
+    WorkbookSiteSubmitter intersection) happens inside get_spoc_sheets_buckets /
+    get_annual_workbook_options.
+    """
+    return bool(_user_submission_site_ids(user_id))
 
 
 def _published_forms_for_site(site_id):
@@ -842,16 +841,30 @@ def _row_editability(period, submission, can_edit_monthly):
     }
 
 
+NEEDS_SUBMITTER_ASSIGNMENT_MESSAGE = (
+    "You have access to this site but haven't been assigned as a submitter for "
+    "any workbook here yet — contact your admin."
+)
+
+
 def get_annual_workbook_options(user_id):
-    site_ids = _user_submission_site_ids(user_id)
-    if not site_ids:
-        return {"sites": [], "forms_by_site": {}, "workbooks_by_site": {}}
+    matrix_site_ids = _user_submission_site_ids(user_id)
+    if not matrix_site_ids:
+        return {"sites": [], "forms_by_site": {}, "workbooks_by_site": {}, "needs_submitter_assignment": False}
 
     workbook_site_ids = _get_user_workbook_site_ids(user_id)
-    site_ids = site_ids & workbook_site_ids
+    site_ids = matrix_site_ids & workbook_site_ids
 
     if not site_ids:
-        return {"sites": [], "forms_by_site": {}, "workbooks_by_site": {}}
+        # AccessMatrix grants this user submission access at these sites, but they
+        # have no WorkbookSiteSubmitter row for any workbook there -- distinct from
+        # having no access at all, so the caller can surface a clearer message
+        # instead of an empty state that looks identical to "no access."
+        return {
+            "sites": [], "forms_by_site": {}, "workbooks_by_site": {},
+            "needs_submitter_assignment": True,
+            "message": NEEDS_SUBMITTER_ASSIGNMENT_MESSAGE,
+        }
 
     sites = Site.query.filter(
         Site.id.in_(site_ids),
@@ -911,6 +924,7 @@ def get_annual_workbook_options(user_id):
         ],
         "forms_by_site": forms_by_site,
         "workbooks_by_site": workbooks_by_site,
+        "needs_submitter_assignment": False,
     }
 
 
@@ -1500,9 +1514,14 @@ def get_spoc_sheets_buckets(user_id):
     else:
         active_sites = Site.query.filter(Site.id.in_(allowed_site_ids), Site.is_deleted == False).all()
 
+    matrix_site_ids = set(allowed_site_ids)
     workbook_site_ids = _get_user_workbook_site_ids(user_id)
     allowed_site_ids = allowed_site_ids & workbook_site_ids
     active_sites = [s for s in active_sites if s.id in allowed_site_ids]
+
+    # AccessMatrix grants access at these sites, but there's no WorkbookSiteSubmitter
+    # row for any workbook there -- distinct from having no access at all.
+    needs_submitter_assignment = bool(matrix_site_ids) and not allowed_site_ids
 
     sites_map = {site.id: site for site in active_sites}
 
@@ -1653,7 +1672,9 @@ def get_spoc_sheets_buckets(user_id):
     return {
         "action_needed": action_needed,
         "not_started": not_started,
-        "submitted": submitted
+        "submitted": submitted,
+        "needs_submitter_assignment": needs_submitter_assignment,
+        "message": NEEDS_SUBMITTER_ASSIGNMENT_MESSAGE if needs_submitter_assignment else None,
     }
 
 def create_draft_submission(site_id, form_id, reporting_period_id, user_id, workbook_id=None):
