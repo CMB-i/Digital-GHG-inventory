@@ -15,6 +15,7 @@ from app.modules.APPROV.service import (
     reject_submission,
     raise_issue,
     resolve_issue,
+    clear_recalc_review,
     get_package_summary_for_reviewer,
     compose_package_review_data,
     list_package_value_issues,
@@ -495,6 +496,21 @@ def resolve_review_issue(issue_id):
         db.session.rollback()
         return error_response(str(e), 500)
 
+@bp.route("/api/submissions/<int:submission_id>/clear-recalc-review", methods=["POST"])
+@require_login
+def clear_submission_recalc_review(submission_id):
+    user = current_user()
+    comment = (request.json or {}).get("comment") if request.is_json else None
+    try:
+        clear_recalc_review(submission_id, user.id, comment)
+        db.session.commit()
+        return success_response(message="Recalculation review flag cleared.")
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+    except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 500)
 
 @bp.route("/api/submissions/<int:submission_id>/audit-logs")
 @require_login
