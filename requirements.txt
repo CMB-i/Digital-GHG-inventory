@@ -7,3 +7,7 @@ bcrypt
 simpleeval
 waitress
 openpyxl
+
+# Testing (see "Running Tests" in README.md)
+pytest
+pytest-flask
