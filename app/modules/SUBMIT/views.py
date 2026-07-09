@@ -23,6 +23,7 @@ from app.modules.SUBMIT.service import (
     human_sheet_label,
     set_submission_value_state,
     user_has_any_submission_access,
+    fy_start_year_for,
     CELL_STATE_DRAFT_FILLED,
     DuplicateSubmissionError,
     SubmissionValidationError,
@@ -73,7 +74,7 @@ def edit_submission(submission_id):
             return redirect(f"/module/APPROV/packages/{sub.package_id}")
         period = ReportingPeriod.query.get(sub.reporting_period_id)
         if period:
-            fy_start = period.year if period.month >= 4 else period.year - 1
+            fy_start = fy_start_year_for(period.year, period.month)
             return redirect(
                 f"/module/SUBMIT/annual?site_id={sub.site_id}"
                 f"&form_id={sub.form_id}&fy={fy_start}&month={period.month}"

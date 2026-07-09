@@ -1,6 +1,16 @@
 from datetime import datetime, timezone
 from app.database import db
 from app.common.permissions import has_permission
+from app.common.submission_status import (
+    STATUS_SUBMITTED,
+    STATUS_RESUBMITTED,
+    STATUS_UNDER_REVIEW,
+    STATUS_CHANGES_REQUESTED,
+    STATUS_APPROVED,
+    STATUS_REJECTED,
+    REVIEWABLE_STATUSES,
+    SUBMISSION_STATUS_LABELS,
+)
 from app.modules.SUBMIT.model import (
     Submission,
     ProofDocument,
@@ -22,9 +32,9 @@ from app.modules.SUBMIT.service import (
     human_sheet_label,
     sync_submission_values_for_status,
     serialize_submission_value_issue,
+    fy_start_year_for,
 )
 
-REVIEWABLE_STATUSES = ("Submitted", "Resubmitted", "Under Review")
 SUPPORTED_APPROVAL_MODES = ("ANY_ONE", "SEQUENTIAL")
 
 
@@ -170,7 +180,7 @@ def _package_queue_item(package_id, grouped_items):
         if item["submission"].current_level is not None
     ]
     statuses = {item["submission"].status for item in grouped_items}
-    status = package.status if package else (", ".join(sorted(statuses)) if statuses else "Submitted")
+    status = package.status if package else (", ".join(sorted(statuses)) if statuses else STATUS_SUBMITTED)
 
     return {
         "item_type": "package",
@@ -243,7 +253,7 @@ def compose_package_review_data(package_id, user_id):
     site = Site.query.get(package.site_id)
     period = ReportingPeriod.query.get(package.period_id)
     submitter = User.query.get(package.submitted_by) if package.submitted_by else None
-    fy_start_year = period.year if period and period.month >= 4 else (period.year - 1 if period else None)
+    fy_start_year = fy_start_year_for(period.year, period.month) if period else None
 
     submissions = Submission.query.filter_by(package_id=package.id, is_deleted=False).all()
     can_view_package = any(
@@ -462,16 +472,16 @@ def _sync_package_status_from_submissions(package, user_id):
         return package
 
     statuses = {submission.status for submission in submissions}
-    if statuses == {"Approved"}:
-        package.status = "Approved"
+    if statuses == {STATUS_APPROVED}:
+        package.status = STATUS_APPROVED
         package.final_approved_at = _utc_now()
         package.final_approved_by = user_id
-    elif "Rejected" in statuses:
-        package.status = "Rejected"
-    elif "Changes Requested" in statuses:
-        package.status = "Changes Requested"
+    elif STATUS_REJECTED in statuses:
+        package.status = STATUS_REJECTED
+    elif STATUS_CHANGES_REQUESTED in statuses:
+        package.status = STATUS_CHANGES_REQUESTED
     elif statuses & set(REVIEWABLE_STATUSES):
-        package.status = "Under Review" if "Under Review" in statuses else "Submitted"
+        package.status = STATUS_UNDER_REVIEW if STATUS_UNDER_REVIEW in statuses else STATUS_SUBMITTED
         levels = [
             submission.current_level
             for submission in submissions
@@ -536,7 +546,7 @@ def request_changes_package(package_id, user_id, comment):
             "status": submission.status,
         })
 
-    package.status = "Changes Requested"
+    package.status = STATUS_CHANGES_REQUESTED
     package.updated_by = user_id
 
     from app.modules.AUDITL.service import log_audit
@@ -576,7 +586,7 @@ def reject_package(package_id, user_id, comment):
             "status": submission.status,
         })
 
-    package.status = "Rejected"
+    package.status = STATUS_REJECTED
     package.updated_by = user_id
 
     from app.modules.AUDITL.service import log_audit
@@ -652,15 +662,7 @@ def get_actioned_history(user_id):
         }.get(action, action or "Reviewed")
 
     def status_label(status):
-        return {
-            "Approved": "Approved and locked",
-            "Draft": "Draft saved",
-            "Changes Requested": "Needs correction",
-            "Rejected": "Sent back",
-            "Resubmitted": "Sent again for review",
-            "Under Review": "Under review",
-            "Submitted": "Submitted",
-        }.get(status, status or "Unknown")
+        return SUBMISSION_STATUS_LABELS.get(status, status or "Unknown")
 
     history = []
     seen_submissions = set()
@@ -761,8 +763,8 @@ def approve_submission(submission_id, user_id, comment=None):
     db.session.add(action)
     db.session.flush()
 
-    if submission.status in ("Submitted", "Resubmitted"):
-        submission.status = "Under Review"
+    if submission.status in (STATUS_SUBMITTED, STATUS_RESUBMITTED):
+        submission.status = STATUS_UNDER_REVIEW
         submission.last_status_changed_at = _utc_now()
         submission.updated_by = user_id
 
@@ -859,7 +861,7 @@ def approve_submission(submission_id, user_id, comment=None):
                 )
 
             old_status = submission.status
-            submission.status = "Approved"
+            submission.status = STATUS_APPROVED
             submission.approved_by = user_id
             submission.approved_at = _utc_now()
             submission.is_locked = True
@@ -874,7 +876,7 @@ def approve_submission(submission_id, user_id, comment=None):
                 entity_id=submission_id,
                 action="FINAL_APPROVE",
                 old_values={"status": old_status},
-                new_values={"status": "Approved"}
+                new_values={"status": STATUS_APPROVED}
             )
 
             # Notify SPOC
@@ -938,7 +940,7 @@ def request_changes_submission(submission_id, user_id, comment):
         app_act.deleted_at = _utc_now()
 
     old_status = submission.status
-    submission.status = "Changes Requested"
+    submission.status = STATUS_CHANGES_REQUESTED
     submission.last_status_changed_at = _utc_now()
     submission.updated_by = user_id
     sync_submission_values_for_status(submission, user_id)
@@ -951,7 +953,7 @@ def request_changes_submission(submission_id, user_id, comment):
         entity_id=submission_id,
         action="REQUEST_CHANGES",
         old_values={"status": old_status},
-        new_values={"status": "Changes Requested"},
+        new_values={"status": STATUS_CHANGES_REQUESTED},
         metadata={"comment": comment}
     )
 
@@ -1001,7 +1003,7 @@ def reject_submission(submission_id, user_id, comment):
     db.session.add(action)
 
     old_status = submission.status
-    submission.status = "Rejected"
+    submission.status = STATUS_REJECTED
     submission.is_locked = True
     submission.last_status_changed_at = _utc_now()
     submission.updated_by = user_id
@@ -1014,7 +1016,7 @@ def reject_submission(submission_id, user_id, comment):
         entity_id=submission_id,
         action="REJECT",
         old_values={"status": old_status},
-        new_values={"status": "Rejected"},
+        new_values={"status": STATUS_REJECTED},
         metadata={"comment": comment}
     )
 

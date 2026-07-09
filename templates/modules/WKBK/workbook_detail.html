@@ -310,6 +310,7 @@
   const WORKBOOK_ID = {{ workbook.id }};
   const WORKBOOK_NAME = {{ workbook.name | tojson }};
 </script>
+<script src="{{ url_for('static', filename='js/ui_helpers.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workbook_sheet.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workbooks.js') }}"></script>
 {% endblock %}

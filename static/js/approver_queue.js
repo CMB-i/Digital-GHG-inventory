@@ -8,19 +8,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const tablePending = document.getElementById("table-pending");
   const tableHistory = document.getElementById("table-history");
 
-  function formatDate(dateStr) {
-    if (!dateStr) return "—";
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return dateStr;
-    return date.toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true
-    });
-  }
+  const formatDate = window.UIHelpers.formatDate;
 
   function humanStatus(status) {
     return {

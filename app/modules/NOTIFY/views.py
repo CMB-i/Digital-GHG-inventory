@@ -11,6 +11,7 @@ from app.modules.NOTIFY.service import (
     mark_as_read,
     mark_all_as_read
 )
+from app.modules.SUBMIT.service import fy_start_year_for
 
 MODULE_CODE = "NOTIFY"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
@@ -31,7 +32,7 @@ def _resolve_notification_link(notification, user):
         )
         if not can_enter:
             return link_url
-        fy_start = period.year if period.month >= 4 else period.year - 1
+        fy_start = fy_start_year_for(period.year, period.month)
         return f"/module/SUBMIT/annual?site_id={period.site_id}&fy={fy_start}&month={period.month}"
 
     if notification.entity_type != "submission":
@@ -51,7 +52,7 @@ def _resolve_notification_link(notification, user):
             if period:
                 return (
                     f"/module/SUBMIT/annual?site_id={submission.site_id}"
-                    f"&form_id={submission.form_id}&fy={period.year if period.month >= 4 else period.year - 1}"
+                    f"&form_id={submission.form_id}&fy={fy_start_year_for(period.year, period.month)}"
                     f"&month={period.month}"
                 )
         return f"/module/SUBMIT/submissions/{notification.entity_id}"
