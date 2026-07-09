@@ -152,6 +152,18 @@ Always inspect the generated migration before running it. The migration chain mu
 |---|---|
 | `scripts/seed.py` | Seeds a development admin account and global AccessMatrix permissions |
 
+### Running Tests
+
+```bash
+pytest
+```
+
+Tests run against a real, dedicated Postgres database — never the dev database. SQLite isn't an option here since the models use Postgres-specific features (JSONB, partial unique indexes). The test database is created automatically (name derived from `DATABASE_URL` with `_test` appended, or set `TEST_DATABASE_URL` explicitly) and its schema is built via `db.create_all()`, not Alembic — for a fresh test database the current models *are* the schema.
+
+Isolation between tests is **not** savepoint/rollback-based. Service functions throughout this codebase call `db.session.commit()` themselves (not just at the top level), which a rollback harness would have to intercept every one of. Instead, `tests/conftest.py` provides factory fixtures (`make_user`, `make_site`, `make_access_grant`, `make_form`, `make_workflow`, `make_workbook`, `make_submission`, etc.) that create real rows with real commits and delete them again in teardown — the same throwaway-fixture-plus-cleanup pattern used for every manual verification in this project's history, just reusable now instead of hand-rolled per script. If you add a new fixture that creates rows, make sure whatever creates them also gets cleaned up (the existing fixtures are the reference for how).
+
+New features should come with tests going forward — this is a lightweight expectation, not a formal policy. `tests/` is organized by risk area, roughly in the priority order the suite was built in: calc_status/formula recalculation, permission scoping, then regression coverage for specific past bugs. Add to whichever file matches, or start a new one for a new area.
+
 ### Module Prefix Reference
 
 | URL prefix | Module |
