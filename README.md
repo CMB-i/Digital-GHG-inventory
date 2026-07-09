@@ -151,6 +151,15 @@ Always inspect the generated migration before running it. The migration chain mu
 | Script | Purpose |
 |---|---|
 | `scripts/seed.py` | Seeds a development admin account and global AccessMatrix permissions |
+| `scripts/seed_jaigarh_workbook.py` | Seeds the Jaigarh FY25-26 scenario workbook (Cargo, Electricity, Fuel, GRI Summary). Run after `seed.py`. Use `--verify-only` to re-check totals. |
+
+After the base seed, load the Jaigarh workbook:
+
+```bash
+python scripts/seed_jaigarh_workbook.py
+```
+
+Requires `Final Data_Jaigarh.xlsx` (default path in `scripts/jaigarh_workbook_config.py`, or pass `--excel-path /path/to/file.xlsx`).
 
 ### Running Tests
 
