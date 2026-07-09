@@ -1,6 +1,7 @@
 import json
 import calendar
 import re
+from collections import deque
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -932,38 +933,258 @@ def get_annual_workbook_options(user_id):
     }
 
 
+def _topological_order_with_cycles(codes, get_dependencies):
+    """
+    Kahn's-algorithm topological sort restricted to `codes`. get_dependencies(code)
+    returns the other codes (a subset of `codes`) that must be resolved before
+    `code`. Returns (ordered, cyclic): `ordered` lists every code that could be
+    placed after all of its dependencies; `cyclic` lists the codes left over
+    because they participate in a dependency cycle (never reach in-degree 0).
+    """
+    code_set = set(codes)
+    dependencies = {code: [d for d in get_dependencies(code) if d in code_set] for code in codes}
+    dependents = {code: [] for code in codes}
+    for code, deps in dependencies.items():
+        for dep in deps:
+            dependents[dep].append(code)
+
+    in_degree = {code: len(dependencies[code]) for code in codes}
+    queue = deque(code for code in codes if in_degree[code] == 0)
+    ordered = []
+    while queue:
+        code = queue.popleft()
+        ordered.append(code)
+        for dependent in dependents[code]:
+            in_degree[dependent] -= 1
+            if in_degree[dependent] == 0:
+                queue.append(dependent)
+
+    ordered_set = set(ordered)
+    cyclic = [code for code in codes if code not in ordered_set]
+    return ordered, cyclic
+
+
+def _calculated_field_codes(fields_map):
+    return [
+        code for code, info in fields_map.items()
+        if info.get("field_type") == "calculated" and not is_sheet_result_field(info)
+    ]
+
+
+def resolve_calculated_fields(
+    fields_map,
+    field_values,
+    value_set_snapshot,
+    *,
+    persist=False,
+    get_or_create_row=None,
+    user_id=None,
+    apply_rounding=False,
+):
+    """
+    Single shared implementation for resolving every non-sheet-result calculated
+    field in fields_map against field_values (raw + already-known values; mutated
+    in place as each field resolves) and value_set_snapshot.
+
+    Fields are evaluated in topological order derived from each formula's
+    formula_version.tokens, so a dependency chain of any depth resolves in one
+    pass -- no hardcoded pass count to silently run out of. Fields left over
+    after topological ordering sit in a genuine circular dependency; each is
+    still evaluated (so a field that's ALSO blocked on real missing input stays
+    "pending", matching today's behavior), but if its only unresolved
+    dependency is another field from that same leftover set, it is reclassified
+    "error" ("circular formula dependency...") instead of being left stuck at
+    "pending" forever with no visible explanation.
+
+    persist=True (the recalculate_submission_formulas path) requires
+    get_or_create_row(field_id, field_version_id) -> SubmissionValue-like row;
+    each resolved field's row is updated in place (calculated_value, calc_status,
+    calc_error_message, cell_state, formula_inputs_snapshot), mirroring what
+    recalculate_submission_formulas did directly before this consolidation.
+    persist=False (the preview path) computes the same statuses read-only.
+
+    apply_rounding controls whether a resolved value is rounded to the field's
+    configured round_off_decimals -- the persisted/authoritative path has never
+    rounded stored calculated_value, while the preview path always has, and
+    that's a real, preserved difference between the two, not an oversight.
+
+    Returns {field_code: {"status": "ok"|"error"|"pending", "value": float|None,
+    "error_message": str|None}} for every calculated field in fields_map.
+    """
+    if persist and get_or_create_row is None:
+        raise ValueError("get_or_create_row is required when persist=True")
+
+    calc_codes = _calculated_field_codes(fields_map)
+    if not calc_codes:
+        return {}
+
+    formula_version_ids = list({
+        fields_map[code]["field_config"].get("formula_version_id")
+        for code in calc_codes
+        if fields_map[code]["field_config"].get("formula_version_id")
+    })
+    formula_versions = {
+        fv.id: fv
+        for fv in FormulaVersion.query.filter(FormulaVersion.id.in_(formula_version_ids or [0])).all()
+    }
+
+    token_keys_by_code = {}
+    for code in calc_codes:
+        formula_version_id = fields_map[code]["field_config"].get("formula_version_id")
+        formula_version = formula_versions.get(formula_version_id)
+        token_keys_by_code[code] = list((formula_version.tokens or {}).keys()) if formula_version else []
+
+    order, cyclic = _topological_order_with_cycles(
+        calc_codes, lambda code: token_keys_by_code[code]
+    )
+    cyclic_set = set(cyclic)
+
+    results = {}
+    missing_by_code = {}
+
+    def _finish(code, row, status, value, error_message):
+        results[code] = {"status": status, "value": value, "error_message": error_message}
+        field_values[code] = value
+        if persist:
+            row.calculated_value = value
+            row.calc_status = status
+            row.calc_error_message = error_message
+            set_submission_value_state(row, CELL_STATE_DRAFT_FILLED)
+
+    def _evaluate(code):
+        info = fields_map[code]
+        row = get_or_create_row(info["field_id"], info["field_version_id"]) if persist else None
+        if persist:
+            row.raw_value = None
+            row.formula_eval_at = datetime.now(timezone.utc)
+            row.updated_by = user_id
+
+        formula_version_id = info["field_config"].get("formula_version_id")
+        if not formula_version_id:
+            _finish(code, row, CALC_STATUS_ERROR, None, "Formula is not configured.")
+            return
+
+        formula_version = formula_versions.get(formula_version_id)
+        if not formula_version:
+            _finish(code, row, CALC_STATUS_ERROR, None, "Formula version not found.")
+            return
+
+        if persist:
+            row.formula_version_id = formula_version.id
+
+        token_keys = token_keys_by_code[code]
+
+        # A token that isn't a known field code or value-set constant is a
+        # broken formula reference (stale/renamed/deleted field), not data
+        # entry in progress -- it can never resolve, so it must surface as
+        # an error rather than being mistaken for "pending" forever.
+        unknown_tokens = [
+            name for name in token_keys
+            if name not in fields_map and name not in value_set_snapshot
+        ]
+        if unknown_tokens:
+            _finish(
+                code, row, CALC_STATUS_ERROR, None,
+                f"Unknown formula variable: {', '.join(sorted(unknown_tokens))}.",
+            )
+            return
+
+        missing_inputs = [
+            name for name in token_keys
+            if name not in value_set_snapshot
+            and (name not in field_values or field_values.get(name) in (None, ""))
+        ]
+        missing_by_code[code] = missing_inputs
+        if missing_inputs:
+            # Referenced fields simply haven't been filled in yet -- this is
+            # expected while data entry is in progress, not a formula error.
+            _finish(code, row, CALC_STATUS_PENDING, None, None)
+            return
+
+        try:
+            result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
+            if apply_rounding and result is not None:
+                decimals = info["field_config"].get("round_off_decimals", 3)
+                try:
+                    decimals = int(decimals)
+                    if not (1 <= decimals <= 9):
+                        decimals = 3
+                except (ValueError, TypeError):
+                    decimals = 3
+                try:
+                    result = round(float(result), decimals)
+                except (ValueError, TypeError):
+                    pass
+
+            _finish(code, row, CALC_STATUS_OK, result, None)
+
+            if persist:
+                inputs_snapshot = {}
+                for key in token_keys:
+                    if key in field_values:
+                        inputs_snapshot[key] = field_values[key]
+                    elif key in value_set_snapshot:
+                        inputs_snapshot[key] = value_set_snapshot[key]
+                row.formula_inputs_snapshot = inputs_snapshot
+        except Exception as exc:
+            _finish(code, row, CALC_STATUS_ERROR, None, str(exc))
+
+    for code in order:
+        _evaluate(code)
+    for code in cyclic:
+        _evaluate(code)
+
+    for code in cyclic:
+        result = results.get(code)
+        if not result or result["status"] != CALC_STATUS_PENDING:
+            continue
+        missing_inputs = missing_by_code.get(code) or []
+        if any(name not in cyclic_set for name in missing_inputs):
+            # Also genuinely blocked on real missing input outside the cycle;
+            # that's still an expected, non-blocking "pending" state.
+            continue
+        info = fields_map[code]
+        row = get_or_create_row(info["field_id"], info["field_version_id"]) if persist else None
+        message = f"Circular formula dependency involving field {', '.join(sorted(missing_inputs))}."
+        _finish(code, row, CALC_STATUS_ERROR, None, message)
+
+    return results
+
+
 def _compute_preview_calculated_values(submissions, fields):
     """
     For a list of submissions (all for the same form), compute preview values
-    for calculated fields using currently saved raw input values. Runs the same
-    3-pass formula evaluation as autosave but read-only — does not persist anything.
-    Returns {submission_id: {field_code: float_value}} only for fields that could
-    be evaluated; fields with missing inputs are absent from the inner dict.
+    for calculated fields using currently saved raw input values. Runs the
+    same topologically-ordered resolution as autosave/submit, but read-only --
+    never persists a SubmissionValue row. Returns {submission_id: {field_code:
+    {"status", "value", "error_message"}}} for every calculated field, so a
+    genuine calculation error or unresolved dependency is distinguishable from
+    a field that's simply still blank, instead of both being silently dropped.
     """
-    calc_fields = [
-        f for f in fields
-        if f.get("field_type") == "calculated"
-        and (f.get("field_config") or {}).get("formula_version_id")
-    ]
-    if not calc_fields:
+    fields_map = {
+        f["field_code"]: {
+            "field_id": f["field_id"],
+            "field_version_id": f["field_version_id"],
+            "field_type": f["field_type"],
+            "field_config": f.get("field_config") or {},
+            "frequency": f.get("frequency") or "monthly",
+            "section_id": f.get("section_id"),
+        }
+        for f in fields
+    }
+    if not _calculated_field_codes(fields_map):
         return {}
 
     sub_ids = [s.id for s in submissions if s]
     if not sub_ids:
         return {}
 
-    fv_ids = list({f["field_config"]["formula_version_id"] for f in calc_fields})
-    formula_versions = {
-        fv.id: fv
-        for fv in FormulaVersion.query.filter(FormulaVersion.id.in_(fv_ids)).all()
-    }
-
     value_set_snapshot = get_approved_valsets_snapshot()
 
     all_svs = SubmissionValue.query.filter(
         SubmissionValue.submission_id.in_(sub_ids)
     ).all()
-    id_to_code = {f["field_id"]: f["field_code"] for f in fields}
+    id_to_code = {info["field_id"]: code for code, info in fields_map.items()}
     svs_by_sub = {}
     for sv in all_svs:
         svs_by_sub.setdefault(sv.submission_id, []).append(sv)
@@ -981,33 +1202,9 @@ def _compute_preview_calculated_values(submissions, fields):
                 elif sv.raw_value is not None:
                     field_values[code] = sv.raw_value
 
-        computed = {}
-        for _pass in range(3):
-            for f in calc_fields:
-                code = f["field_code"]
-                fv = formula_versions.get(f["field_config"]["formula_version_id"])
-                if not fv:
-                    continue
-                try:
-                    computed_val = evaluate_formula(fv.expression, field_values, value_set_snapshot)
-                    decimals = f.get("field_config", {}).get("round_off_decimals", 3)
-                    try:
-                        decimals = int(decimals)
-                        if not (1 <= decimals <= 9):
-                            decimals = 3
-                    except (ValueError, TypeError):
-                        decimals = 3
-                    if computed_val is not None:
-                        try:
-                            computed_val = round(float(computed_val), decimals)
-                        except (ValueError, TypeError):
-                            pass
-                    computed[code] = computed_val
-                    field_values[code] = computed_val
-                except Exception:
-                    pass
-
-        result[sub.id] = computed
+        result[sub.id] = resolve_calculated_fields(
+            fields_map, field_values, value_set_snapshot, apply_rounding=True
+        )
 
     return result
 
@@ -1059,6 +1256,9 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
     result_values = {}
     results_by_code = {}
 
+    result_codes = [field["field_code"] for field in result_fields]
+    fields_by_code = {field["field_code"]: field for field in result_fields}
+
     formula_version_ids = [
         (field.get("field_config") or {}).get("formula_version_id")
         for field in result_fields
@@ -1069,82 +1269,124 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
         for fv in FormulaVersion.query.filter(FormulaVersion.id.in_(formula_version_ids or [0])).all()
     }
 
-    for _pass in range(3):
-        for field in result_fields:
-            code = field["field_code"]
-            config = field.get("field_config") or {}
-            formula_version_id = config.get("formula_version_id")
-            previous = results_by_code.get(code)
-            if previous and previous.get("status") == "calculated":
+    # A result field's formula can reference another result field directly
+    # (not just monthly aggregates), so token-based dependencies -- not just
+    # aggregate_operand_names -- determine evaluation order between them.
+    token_keys_by_code = {}
+    for code, field in fields_by_code.items():
+        formula_version_id = (field.get("field_config") or {}).get("formula_version_id")
+        formula_version = formula_versions.get(formula_version_id)
+        token_keys_by_code[code] = list((formula_version.tokens or {}).keys()) if formula_version else []
+
+    order, cyclic = _topological_order_with_cycles(
+        result_codes, lambda code: [name for name in token_keys_by_code[code] if name in fields_by_code]
+    )
+    cyclic_set = set(cyclic)
+    unresolved_deps_by_code = {}
+
+    def _evaluate(code):
+        field = fields_by_code[code]
+        config = field.get("field_config") or {}
+        formula_version_id = config.get("formula_version_id")
+
+        if not formula_version_id:
+            results_by_code[code] = {
+                "status": "not_configured",
+                "message": "Formula is not configured.",
+                "source_field_codes": [],
+            }
+            return
+
+        formula_version = formula_versions.get(formula_version_id)
+        if not formula_version:
+            results_by_code[code] = {
+                "status": "not_configured",
+                "message": "Formula version not found.",
+                "source_field_codes": [],
+            }
+            return
+
+        aggregate_names = aggregate_operand_names(formula_version.expression)
+        missing_messages = []
+        context_values = dict(result_values)
+
+        for name in aggregate_names:
+            if name not in monthly_series:
+                missing_messages.append(f"Monthly field '{name}' is not available in this sheet.")
                 continue
+            missing_months = missing_by_code.get(name) or []
+            if config.get("blank_policy", "strict") == "strict" and missing_months:
+                preview = ", ".join(missing_months[:3])
+                suffix = "..." if len(missing_months) > 3 else ""
+                missing_messages.append(f"{name} is missing for {preview}{suffix}.")
+            context_values[name] = monthly_series[name]
 
-            if not formula_version_id:
-                results_by_code[code] = {
-                    "status": "not_configured",
-                    "message": "Formula is not configured.",
-                    "source_field_codes": [],
-                }
-                continue
+        # Informational only -- with a topological pass order, this is only
+        # ever non-empty for fields left over in a dependency cycle.
+        unresolved_deps_by_code[code] = [
+            name for name in token_keys_by_code[code]
+            if name in fields_by_code and name not in result_values
+        ]
 
-            formula_version = formula_versions.get(formula_version_id)
-            if not formula_version:
-                results_by_code[code] = {
-                    "status": "not_configured",
-                    "message": "Formula version not found.",
-                    "source_field_codes": [],
-                }
-                continue
+        if missing_messages:
+            results_by_code[code] = {
+                "status": "needs_input",
+                "message": "Cannot calculate: " + " ".join(missing_messages),
+                "source_field_codes": sorted(aggregate_names),
+            }
+            return
 
-            aggregate_names = aggregate_operand_names(formula_version.expression)
-            missing_messages = []
-            context_values = dict(result_values)
-
-            for name in aggregate_names:
-                if name not in monthly_series:
-                    missing_messages.append(f"Monthly field '{name}' is not available in this sheet.")
-                    continue
-                missing_months = missing_by_code.get(name) or []
-                if config.get("blank_policy", "strict") == "strict" and missing_months:
-                    preview = ", ".join(missing_months[:3])
-                    suffix = "..." if len(missing_months) > 3 else ""
-                    missing_messages.append(f"{name} is missing for {preview}{suffix}.")
-                context_values[name] = monthly_series[name]
-
-            if missing_messages:
-                results_by_code[code] = {
-                    "status": "needs_input",
-                    "message": "Cannot calculate: " + " ".join(missing_messages),
-                    "source_field_codes": sorted(aggregate_names),
-                }
-                continue
-
+        try:
+            result = evaluate_formula(formula_version.expression, context_values, value_set_snapshot)
+            decimals = config.get("round_off_decimals", 3)
             try:
-                result = evaluate_formula(formula_version.expression, context_values, value_set_snapshot)
-                decimals = config.get("round_off_decimals", 3)
-                try:
-                    decimals = int(decimals)
-                    if not (1 <= decimals <= 9):
-                        decimals = 3
-                except (ValueError, TypeError):
+                decimals = int(decimals)
+                if not (1 <= decimals <= 9):
                     decimals = 3
-                if result is not None:
-                    try:
-                        result = round(float(result), decimals)
-                    except (ValueError, TypeError):
-                        pass
-                result_values[code] = result
-                results_by_code[code] = {
-                    "status": "calculated",
-                    "value": result,
-                    "message": "",
-                    "source_field_codes": sorted(aggregate_names),
-                }
-            except Exception as exc:
-                results_by_code[code] = {
-                    "status": "error",
-                    "message": str(exc),
-                    "source_field_codes": sorted(aggregate_names),
-                }
+            except (ValueError, TypeError):
+                decimals = 3
+            if result is not None:
+                try:
+                    result = round(float(result), decimals)
+                except (ValueError, TypeError):
+                    pass
+            result_values[code] = result
+            results_by_code[code] = {
+                "status": "calculated",
+                "value": result,
+                "message": "",
+                "source_field_codes": sorted(aggregate_names),
+            }
+        except Exception as exc:
+            results_by_code[code] = {
+                "status": "error",
+                "message": str(exc),
+                "source_field_codes": sorted(aggregate_names),
+            }
+
+    for code in order:
+        _evaluate(code)
+    for code in cyclic:
+        _evaluate(code)
+
+    # A field left over after topological ordering only stays ambiguous if its
+    # sole blocker was another result field from the same cycle (evaluate_formula
+    # raised NameNotDefined for it, wrapped as a generic "error"). Replace that
+    # generic message with a clear circular-dependency one; if it's also
+    # genuinely missing monthly input, "needs_input" already explains that and
+    # is left untouched.
+    for code in cyclic:
+        result = results_by_code.get(code)
+        if not result or result["status"] != "error":
+            continue
+        cyclic_deps = sorted(name for name in (unresolved_deps_by_code.get(code) or []) if name in cyclic_set)
+        if not cyclic_deps:
+            continue
+        results_by_code[code] = {
+            "status": "error",
+            "message": f"Circular formula dependency involving field {', '.join(cyclic_deps)}.",
+            "source_field_codes": result.get("source_field_codes", []),
+        }
 
     sheet_results = []
     for field in result_fields:
@@ -1234,7 +1476,8 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
         editability = _row_editability(period, submission, can_edit_monthly)
         values = _submission_values_payload(submission, monthly_fields)
         if submission and submission.id in calc_preview:
-            for code, preview_val in calc_preview[submission.id].items():
+            for code, preview in calc_preview[submission.id].items():
+                preview_val = preview.get("value") if preview.get("status") == CALC_STATUS_OK else None
                 if preview_val is not None and values.get(code) in (None, ""):
                     values[code] = preview_val
         rows.append({
@@ -2093,8 +2336,6 @@ def recalculate_submission_formulas(submission, fields_map, user_id):
     # Prepare value set snapshot
     value_set_snapshot = get_approved_valsets_snapshot()
 
-    calculation_errors = {}
-
     def _get_or_create_calc_row(f_id, fv_id):
         calc_row = values_by_field_id.get(f_id)
         if not calc_row:
@@ -2108,107 +2349,20 @@ def recalculate_submission_formulas(submission, fields_map, user_id):
             values_by_field_id[f_id] = calc_row
         return calc_row
 
-    # Calculate each formula with 3 passes to resolve inter-calculated field dependencies
-    for pass_num in range(3):
-        for code, info in fields_map.items():
-            if info["field_type"] == "calculated" and not is_sheet_result_field(info):
-                f_id = info["field_id"]
-                fv_id = info["field_version_id"]
-                formula_ver_id = info["field_config"].get("formula_version_id")
+    results = resolve_calculated_fields(
+        fields_map,
+        field_values,
+        value_set_snapshot,
+        persist=True,
+        get_or_create_row=_get_or_create_calc_row,
+        user_id=user_id,
+    )
 
-                calc_row = _get_or_create_calc_row(f_id, fv_id)
-                calc_row.raw_value = None
-                calc_row.formula_eval_at = datetime.now(timezone.utc)
-                calc_row.updated_by = user_id
-
-                if not formula_ver_id:
-                    calc_row.calculated_value = None
-                    calc_row.calc_status = CALC_STATUS_ERROR
-                    calc_row.calc_error_message = "Formula is not configured."
-                    set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
-                    calculation_errors[code] = calc_row.calc_error_message
-                    field_values[code] = None
-                    continue
-
-                formula_version = FormulaVersion.query.get(formula_ver_id)
-                if not formula_version:
-                    calc_row.calculated_value = None
-                    calc_row.calc_status = CALC_STATUS_ERROR
-                    calc_row.calc_error_message = "Formula version not found."
-                    set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
-                    calculation_errors[code] = calc_row.calc_error_message
-                    field_values[code] = None
-                    continue
-
-                calc_row.formula_version_id = formula_version.id
-                token_keys = list((formula_version.tokens or {}).keys())
-
-                # A token that isn't a known field code or value-set constant is a
-                # broken formula reference (stale/renamed/deleted field), not data
-                # entry in progress -- it can never resolve, so it must surface as
-                # an error rather than being mistaken for "pending" forever.
-                unknown_tokens = [
-                    name for name in token_keys
-                    if name not in fields_map and name not in value_set_snapshot
-                ]
-                if unknown_tokens:
-                    calc_row.calculated_value = None
-                    calc_row.calc_status = CALC_STATUS_ERROR
-                    calc_row.calc_error_message = (
-                        f"Unknown formula variable: {', '.join(sorted(unknown_tokens))}."
-                    )
-                    set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
-                    calculation_errors[code] = calc_row.calc_error_message
-                    field_values[code] = None
-                    continue
-
-                missing_inputs = [
-                    name for name in token_keys
-                    if name not in value_set_snapshot
-                    and (name not in field_values or field_values.get(name) in (None, ""))
-                ]
-
-                if missing_inputs:
-                    # Referenced fields simply haven't been filled in yet -- this is
-                    # expected while data entry is in progress, not a formula error.
-                    calc_row.calculated_value = None
-                    calc_row.calc_status = CALC_STATUS_PENDING
-                    calc_row.calc_error_message = None
-                    set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
-                    calculation_errors.pop(code, None)
-                    field_values[code] = None
-                    continue
-
-                try:
-                    result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
-
-                    calc_row.calculated_value = result
-                    calc_row.calc_status = CALC_STATUS_OK
-                    calc_row.calc_error_message = None
-                    set_submission_value_state(calc_row, CELL_STATE_DRAFT_FILLED)
-
-                    # Snapshot tokens and values
-                    inputs_snapshot = {}
-                    for key in token_keys:
-                        if key in field_values:
-                            inputs_snapshot[key] = field_values[key]
-                        elif key in value_set_snapshot:
-                            inputs_snapshot[key] = value_set_snapshot[key]
-                    calc_row.formula_inputs_snapshot = inputs_snapshot
-
-                    # Add calculated value to field_values so subsequent calculations can read it
-                    field_values[code] = result
-
-                    # Clear from errors on success
-                    calculation_errors.pop(code, None)
-
-                except Exception as e:
-                    # Log evaluation error and clear previous calculation
-                    calc_row.calculated_value = None
-                    calc_row.calc_status = CALC_STATUS_ERROR
-                    calc_row.calc_error_message = str(e)
-                    calculation_errors[code] = str(e)
-                    field_values[code] = None
+    calculation_errors = {
+        code: result["error_message"]
+        for code, result in results.items()
+        if result["status"] == CALC_STATUS_ERROR
+    }
 
     db.session.flush()
     return calculation_errors, values_by_field_id
