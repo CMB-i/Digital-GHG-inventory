@@ -31,6 +31,7 @@ from app.modules.SUBMIT.service import (
     human_sheet_label,
     serialize_submission_value_issue,
     submission_value_issues_map,
+    fy_start_year_for,
 )
 
 MODULE_CODE = "APPROV"
@@ -386,7 +387,7 @@ def get_submission_details(submission_id):
         form = Form.query.get(submission.form_id)
         site = Site.query.get(submission.site_id)
         period = ReportingPeriod.query.get(submission.reporting_period_id)
-        fy_start_year = period.year if period and period.month >= 4 else (period.year - 1 if period else None)
+        fy_start_year = fy_start_year_for(period.year, period.month) if period else None
         workbook_context = compose_readonly_workbook_context(
             submission.site_id,
             submission.form_id,
