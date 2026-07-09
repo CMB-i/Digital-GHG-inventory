@@ -193,6 +193,22 @@ FORMULA_DEFINITIONS = {
         "name": "Jaigarh 305-2 GHG Intensity",
         "expression": "jai_3052_scope2_total / 1000 / (jai_cargo_fy_total_mt / 1000000)",
     },
+    "formula_jai_gri_ref_cargo_fy_mt": {
+        "name": "Jaigarh GRI Dashboard FY Cargo MT",
+        "expression": "jai_cargo_fy_total_mt",
+    },
+    "formula_jai_gri_ref_elec_fy_mwh": {
+        "name": "Jaigarh GRI Dashboard FY Electricity MWH",
+        "expression": "SUM_MONTHS(jai_elec_total_mwh)",
+    },
+    "formula_jai_gri_ref_elec_grid_tco2": {
+        "name": "Jaigarh GRI Dashboard Grid Scope 2",
+        "expression": "jai_ghg_elec_grid_tco2e",
+    },
+    "formula_jai_gri_ref_elec_group_tco2": {
+        "name": "Jaigarh GRI Dashboard Group Scope 2",
+        "expression": "jai_ghg_elec_group_tco2e",
+    },
 }
 
 ANNUAL_RESULT_CONFIG = {
@@ -209,6 +225,74 @@ ANNUAL_RESULT_CONFIG = {
 READONLY_SUMMARY_CONFIG = {
     **ANNUAL_RESULT_CONFIG,
     "readonly": True,
+}
+
+VIZ_KPI_THIRD = {
+    "visualization": {
+        "widget": "kpi",
+        "span": "third",
+        "source_mode": "self",
+        "show_unit": True,
+        "show_formula_status": True,
+    },
+}
+
+VIZ_KPI_HALF = {
+    "visualization": {
+        "widget": "kpi",
+        "span": "half",
+        "source_mode": "self",
+        "show_unit": True,
+        "show_formula_status": True,
+    },
+}
+
+VIZ_KPI_FULL = {
+    "visualization": {
+        "widget": "kpi",
+        "span": "full",
+        "source_mode": "self",
+        "show_unit": True,
+        "show_formula_status": True,
+    },
+}
+
+VIZ_LINE_ENERGY_TREND = {
+    "visualization": {
+        "widget": "line",
+        "span": "full",
+        "source_mode": "fields",
+        "source_field_codes": [
+            "jai_elec_grid_mwh",
+            "jai_elec_group_mwh",
+            "jai_diesel_total_kl",
+            "jai_petrol_kl",
+        ],
+    },
+}
+
+VIZ_LINE_CARGO_TREND = {
+    "visualization": {
+        "widget": "line",
+        "span": "full",
+        "source_mode": "fields",
+        "source_field_codes": [
+            "jai_cargo_non_coastal_mt",
+            "jai_cargo_coastal_mt",
+            "jai_cargo_total_mt",
+        ],
+    },
+}
+
+VIZ_DONUT_SCOPE_SPLIT = {
+    "visualization": {
+        "widget": "donut",
+        "span": "half",
+        "donut_segments": [
+            {"field_code": "jai_3051_scope1_total", "label": "Scope 1"},
+            {"field_code": "jai_3052_scope2_total", "label": "Scope 2"},
+        ],
+    },
 }
 
 ELECTRICITY_MONTHLY_FIELDS = {
@@ -320,22 +404,31 @@ FORM_DEFINITIONS = [
         "sheet_label": "GRI Summary",
         "display_order": 4,
         "sections": [
-            {"code": "sec_302_results", "name": "GRI 302-1 Energy", "layout_type": "annual_table", "display_order": 1},
-            {"code": "sec_3051_results", "name": "GRI 305-1 Direct Emissions", "layout_type": "annual_table", "display_order": 2},
-            {"code": "sec_3052_results", "name": "GRI 305-2 Indirect Emissions", "layout_type": "annual_table", "display_order": 3},
+            {"code": "sec_gri_operations", "name": "Electricity & Cargo", "layout_type": "summary_dashboard", "display_order": 1},
+            {"code": "sec_302_results", "name": "GRI 302-1 Energy", "layout_type": "summary_dashboard", "display_order": 2},
+            {"code": "sec_3051_results", "name": "GRI 305-1 Direct Emissions", "layout_type": "summary_dashboard", "display_order": 3},
+            {"code": "sec_3052_results", "name": "GRI 305-2 Indirect Emissions", "layout_type": "summary_dashboard", "display_order": 4},
+            {"code": "sec_gri_overview", "name": "Emissions Overview", "layout_type": "summary_dashboard", "display_order": 5},
         ],
         "fields": [
-            {"field_code": "jai_302_elec_gj", "field_name": "Electricity Energy (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "GJ"}, "formula_code": "formula_jai_302_elec_gj"},
-            {"field_code": "jai_302_diesel_gj", "field_name": "Diesel Energy (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "GJ"}, "formula_code": "formula_jai_302_diesel_gj"},
-            {"field_code": "jai_302_petrol_gj", "field_name": "Petrol Energy (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "GJ"}, "formula_code": "formula_jai_302_petrol_gj"},
-            {"field_code": "jai_302_hfhsd_gj", "field_name": "HFHSD/IFO Energy (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "GJ"}, "formula_code": "formula_jai_302_hfhsd_gj"},
-            {"field_code": "jai_302_other_gj", "field_name": "Other Fuels Energy (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "GJ"}, "formula_code": "formula_jai_302_other_gj"},
-            {"field_code": "jai_302_total_energy_gj", "field_name": "Total Energy Consumption (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "GJ"}, "formula_code": "formula_jai_302_total_energy_gj"},
-            {"field_code": "jai_302_energy_intensity", "field_name": "Energy Intensity (000 GJ/Million MT)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "GJ/MMT"}, "formula_code": "formula_jai_302_energy_intensity"},
-            {"field_code": "jai_3051_scope1_total", "field_name": "Scope 1 Total (tCO2)", "field_type": "calculated", "section_code": "sec_3051_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "tCO2"}, "formula_code": "formula_jai_3051_scope1_total"},
-            {"field_code": "jai_3051_intensity", "field_name": "Scope 1 GHG Intensity", "field_type": "calculated", "section_code": "sec_3051_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "tCO2/MMT"}, "formula_code": "formula_jai_3051_intensity"},
-            {"field_code": "jai_3052_scope2_total", "field_name": "Scope 2 Total (tCO2)", "field_type": "calculated", "section_code": "sec_3052_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "tCO2"}, "formula_code": "formula_jai_3052_scope2_total"},
-            {"field_code": "jai_3052_intensity", "field_name": "Scope 2 GHG Intensity", "field_type": "calculated", "section_code": "sec_3052_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, "unit": "tCO2/MMT"}, "formula_code": "formula_jai_3052_intensity"},
+            {"field_code": "jai_viz_elec_fy_mwh", "field_name": "FY Electricity (MWH)", "field_type": "calculated", "section_code": "sec_gri_operations", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_HALF, "unit": "MWH"}, "formula_code": "formula_jai_gri_ref_elec_fy_mwh"},
+            {"field_code": "jai_viz_cargo_fy_mt", "field_name": "FY Cargo Handled (MT)", "field_type": "calculated", "section_code": "sec_gri_operations", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_HALF, "unit": "MT"}, "formula_code": "formula_jai_gri_ref_cargo_fy_mt"},
+            {"field_code": "jai_viz_cargo_trend", "field_name": "Monthly Cargo Trend", "field_type": "calculated", "section_code": "sec_gri_operations", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_LINE_CARGO_TREND}, "formula_code": "formula_jai_gri_ref_cargo_fy_mt"},
+            {"field_code": "jai_302_elec_gj", "field_name": "Electricity Energy (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_THIRD, "unit": "GJ"}, "formula_code": "formula_jai_302_elec_gj"},
+            {"field_code": "jai_302_diesel_gj", "field_name": "Diesel Energy (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_THIRD, "unit": "GJ"}, "formula_code": "formula_jai_302_diesel_gj"},
+            {"field_code": "jai_302_petrol_gj", "field_name": "Petrol Energy (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_THIRD, "unit": "GJ"}, "formula_code": "formula_jai_302_petrol_gj"},
+            {"field_code": "jai_302_hfhsd_gj", "field_name": "HFHSD/IFO Energy (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_THIRD, "unit": "GJ"}, "formula_code": "formula_jai_302_hfhsd_gj"},
+            {"field_code": "jai_302_other_gj", "field_name": "Other Fuels Energy (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_THIRD, "unit": "GJ"}, "formula_code": "formula_jai_302_other_gj"},
+            {"field_code": "jai_302_total_energy_gj", "field_name": "Total Energy Consumption (GJ)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_FULL, "unit": "GJ"}, "formula_code": "formula_jai_302_total_energy_gj"},
+            {"field_code": "jai_302_energy_intensity", "field_name": "Energy Intensity (000 GJ/Million MT)", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_HALF, "unit": "GJ/MMT"}, "formula_code": "formula_jai_302_energy_intensity"},
+            {"field_code": "jai_viz_energy_trend", "field_name": "Monthly Energy Inputs Trend", "field_type": "calculated", "section_code": "sec_302_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_LINE_ENERGY_TREND}, "formula_code": "formula_jai_302_elec_gj"},
+            {"field_code": "jai_3051_scope1_total", "field_name": "Scope 1 Total (tCO2)", "field_type": "calculated", "section_code": "sec_3051_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_HALF, "unit": "tCO2"}, "formula_code": "formula_jai_3051_scope1_total"},
+            {"field_code": "jai_3051_intensity", "field_name": "Scope 1 GHG Intensity", "field_type": "calculated", "section_code": "sec_3051_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_HALF, "unit": "tCO2/MMT"}, "formula_code": "formula_jai_3051_intensity"},
+            {"field_code": "jai_viz_scope2_grid", "field_name": "Grid Electricity Scope 2 (tCO2)", "field_type": "calculated", "section_code": "sec_3052_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_THIRD, "unit": "tCO2e"}, "formula_code": "formula_jai_gri_ref_elec_grid_tco2"},
+            {"field_code": "jai_viz_scope2_group", "field_name": "Group Electricity Scope 2 (tCO2)", "field_type": "calculated", "section_code": "sec_3052_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_THIRD, "unit": "tCO2e"}, "formula_code": "formula_jai_gri_ref_elec_group_tco2"},
+            {"field_code": "jai_3052_scope2_total", "field_name": "Scope 2 Total (tCO2)", "field_type": "calculated", "section_code": "sec_3052_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_HALF, "unit": "tCO2"}, "formula_code": "formula_jai_3052_scope2_total"},
+            {"field_code": "jai_3052_intensity", "field_name": "Scope 2 GHG Intensity", "field_type": "calculated", "section_code": "sec_3052_results", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_KPI_HALF, "unit": "tCO2/MMT"}, "formula_code": "formula_jai_3052_intensity"},
+            {"field_code": "jai_viz_scope_split", "field_name": "Scope 1 vs Scope 2 Emissions", "field_type": "calculated", "section_code": "sec_gri_overview", "frequency": "annual", "field_config": {**READONLY_SUMMARY_CONFIG, **VIZ_DONUT_SCOPE_SPLIT}, "formula_code": "formula_jai_3051_scope1_total"},
         ],
     },
 ]

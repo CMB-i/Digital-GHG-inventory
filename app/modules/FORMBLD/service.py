@@ -70,7 +70,7 @@ MOCK_FY_MONTHS = (
     (3, "March"),
 )
 
-ALLOWED_SECTION_LAYOUT_TYPES = {"monthly_table", "annual_table", "reference_table"}
+ALLOWED_SECTION_LAYOUT_TYPES = {"monthly_table", "annual_table", "reference_table", "summary_dashboard"}
 ALLOWED_FIELD_FREQUENCIES = {"monthly", "annual", "static"}
 
 
@@ -241,7 +241,7 @@ def compose_preview_workbook_context(form_version_id):
         layout_type = (section.get("layout_type") if section else "monthly_table") or "monthly_table"
         is_non_monthly = (
             (field.get("frequency") or "monthly").strip().lower() in ("annual", "static")
-            or layout_type.strip().lower() in ("annual_table", "reference_table")
+            or layout_type.strip().lower() in ("annual_table", "reference_table", "summary_dashboard")
         )
         if is_non_monthly:
             workbook_values[field["field_code"]] = {
@@ -253,11 +253,62 @@ def compose_preview_workbook_context(form_version_id):
                 "remark": None,
             }
 
-    from app.modules.SUBMIT.service import is_sheet_result_field, _compose_sheet_results, monthly_table_fields
+    from app.modules.SUBMIT.service import (
+        is_sheet_result_field,
+        _compose_sheet_results,
+        monthly_table_fields,
+        _compose_visualization_payload,
+        _has_summary_dashboard_sections,
+        _collect_chart_source_codes,
+    )
 
     sheet_result_fields = [field for field in fields if is_sheet_result_field(field)]
     table_fields = monthly_table_fields(fields, sections)
     sheet_results = _compose_sheet_results(sheet_result_fields, table_fields, rows)
+
+    months = [
+        {
+            "year": MOCK_FY_START_YEAR if month >= 4 else MOCK_FY_START_YEAR + 1,
+            "month": month,
+            "label": month_name,
+        }
+        for month, month_name in MOCK_FY_MONTHS
+    ]
+    visualization = _compose_visualization_payload(
+        sections,
+        fields,
+        sheet_results,
+        site_id=None,
+        workbook_id=None,
+        fy_start_year=MOCK_FY_START_YEAR,
+        months=months,
+    )
+    if _has_summary_dashboard_sections(sections) and visualization.get("mode") == "dashboard":
+        mock_series = {
+            code: [round(80 + (index * 17) % 120, 2) for index in range(12)]
+            for code in _collect_chart_source_codes(fields)
+        }
+        visualization["monthly_series"] = {**visualization.get("monthly_series", {}), **mock_series}
+        for widget in visualization.get("widgets", []):
+            if widget.get("widget") == "kpi" and widget.get("value") in (None, ""):
+                widget["value"] = 1234.567
+                widget["status"] = "calculated"
+            if widget.get("widget") in ("bar", "line"):
+                widget["series"] = [
+                    {
+                        **series_item,
+                        "values": mock_series.get(series_item.get("field_code"), [0] * 12),
+                    }
+                    for series_item in (widget.get("series") or [])
+                ]
+            if widget.get("widget") == "donut":
+                widget["segments"] = [
+                    {
+                        **segment,
+                        "value": segment.get("value") if segment.get("value") not in (None, "") else (500 + idx * 250),
+                    }
+                    for idx, segment in enumerate(widget.get("segments") or [])
+                ]
 
     return {
         "financial_year": {
@@ -292,6 +343,7 @@ def compose_preview_workbook_context(form_version_id):
         "sections": sections,
         "workbook_values": workbook_values,
         "sheet_results": sheet_results,
+        "visualization": visualization,
         "preview_meta": {
             "sheet_result_field_count": len(sheet_results),
         },
@@ -407,6 +459,26 @@ def normalize_calculated_field_config(field_type, field_config, frequency):
 
     return config, normalized_frequency
 
+
+def _validate_field_visualization_config(field_code, field_config):
+    viz = (field_config or {}).get("visualization")
+    if not viz or not isinstance(viz, dict):
+        return
+    widget = (viz.get("widget") or "").strip().lower()
+    if widget in ("bar", "line"):
+        source_codes = viz.get("source_field_codes") or []
+        if not source_codes:
+            raise ValueError(
+                f"Field '{field_code}' {widget} chart requires at least one source_field_code."
+            )
+    if widget == "donut":
+        segments = viz.get("donut_segments") or []
+        if len(segments) < 2:
+            raise ValueError(
+                f"Field '{field_code}' donut visualization requires at least 2 segments."
+            )
+
+
 def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=None):
     form_version = FormVersion.query.get(form_version_id)
     if not form_version:
@@ -469,6 +541,7 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
         if not field_type or not field_type.strip():
             raise ValueError("Field type is required.")
         field_config, frequency = normalize_calculated_field_config(field_type, field_config, frequency)
+        _validate_field_visualization_config(field_code, field_config)
         if frequency not in ALLOWED_FIELD_FREQUENCIES:
             raise ValueError(f"Unsupported field frequency '{frequency}'.")
 

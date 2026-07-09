@@ -279,7 +279,7 @@ ALLOWED_CELL_STATES = {
 CALC_STATUS_OK = "ok"
 CALC_STATUS_ERROR = "error"
 CALC_STATUS_PENDING = "pending"
-NON_MONTHLY_LAYOUT_TYPES = {"annual_table", "reference_table"}
+NON_MONTHLY_LAYOUT_TYPES = {"annual_table", "reference_table", "summary_dashboard"}
 EDITABLE_WORKBOOK_VALUE_FREQUENCIES = {"annual"}
 
 
@@ -625,30 +625,49 @@ def _workbook_value_payload(value):
     }
 
 
-def workbook_values_payload(site_id, form_id, fy_start_year, fields):
-    field_version_ids = [
-        field["field_version_id"]
-        for field in fields
-        if field.get("field_version_id")
-    ]
-    if not field_version_ids:
-        return {}
-
-    values = (
+def _workbook_value_rows_for_fields(site_id, form_id, fy_start_year, fields):
+    field_ids = [field["field_id"] for field in fields if field.get("field_id")]
+    if not field_ids:
+        return []
+    return (
         WorkbookFieldValue.query.filter(
             WorkbookFieldValue.site_id == site_id,
             WorkbookFieldValue.form_id == form_id,
             WorkbookFieldValue.fy_start_year == fy_start_year,
-            WorkbookFieldValue.field_version_id.in_(field_version_ids),
+            WorkbookFieldValue.field_id.in_(field_ids),
             WorkbookFieldValue.is_deleted == False,
         )
         .all()
     )
-    values_by_version = {value.field_version_id: value for value in values}
-    return {
-        field["field_code"]: _workbook_value_payload(values_by_version.get(field["field_version_id"]))
+
+
+def _workbook_values_by_field_code(site_id, form_id, fy_start_year, fields):
+    """Resolve FY workbook values by stable field_id (survives sheet republish)."""
+    rows = _workbook_value_rows_for_fields(site_id, form_id, fy_start_year, fields)
+    values_by_field_id = {row.field_id: row for row in rows}
+    current_version_by_field_id = {
+        field["field_id"]: field["field_version_id"]
         for field in fields
-        if field.get("field_version_id")
+        if field.get("field_id") and field.get("field_version_id")
+    }
+    for field_id, row in values_by_field_id.items():
+        current_version_id = current_version_by_field_id.get(field_id)
+        if current_version_id and row.field_version_id != current_version_id:
+            row.field_version_id = current_version_id
+    return {
+        field["field_code"]: values_by_field_id.get(field["field_id"])
+        for field in fields
+        if field.get("field_id")
+    }
+
+
+def workbook_values_payload(site_id, form_id, fy_start_year, fields):
+    values_by_code = _workbook_values_by_field_code(site_id, form_id, fy_start_year, fields)
+    if not values_by_code:
+        return {}
+    return {
+        field_code: _workbook_value_payload(value_row)
+        for field_code, value_row in values_by_code.items()
     }
 
 
@@ -1152,22 +1171,11 @@ def _build_workbook_formula_context(site_id, workbook_id, fy_start_year):
         fields = _field_payload(form.current_version_id)
         sections = _sections_payload(form.current_version_id)
         monthly_fields = monthly_table_fields(fields, sections)
-        field_version_to_code = {
-            field["field_version_id"]: field["field_code"]
-            for field in fields
-            if field.get("field_version_id")
-        }
-
-        workbook_values = WorkbookFieldValue.query.filter(
-            WorkbookFieldValue.site_id == site_id,
-            WorkbookFieldValue.form_id == form.id,
-            WorkbookFieldValue.fy_start_year == fy_start_year,
-            WorkbookFieldValue.field_version_id.in_(list(field_version_to_code.keys()) or [0]),
-            WorkbookFieldValue.is_deleted == False,
-        ).all()
-        for workbook_value in workbook_values:
-            code = field_version_to_code.get(workbook_value.field_version_id)
-            if not code:
+        workbook_values_by_code = _workbook_values_by_field_code(
+            site_id, form.id, fy_start_year, fields
+        )
+        for code, workbook_value in workbook_values_by_code.items():
+            if not workbook_value:
                 continue
             if workbook_value.numeric_value is not None:
                 scalar_values[code] = float(workbook_value.numeric_value)
@@ -1363,6 +1371,143 @@ def _compose_sheet_results(
     return sheet_results
 
 
+def _has_summary_dashboard_sections(sections):
+    return any(
+        _normalized_layout_type(section.get("layout_type")) == "summary_dashboard"
+        for section in (sections or [])
+    )
+
+
+def _field_visualization_config(field):
+    config = field.get("field_config") or {}
+    viz = config.get("visualization")
+    return viz if isinstance(viz, dict) else None
+
+
+def _sheet_results_by_code(sheet_results):
+    return {item.get("field_code"): item for item in (sheet_results or []) if item.get("field_code")}
+
+
+def _humanize_field_code(code):
+    return str(code or "").replace("_", " ").strip().title()
+
+
+def _collect_chart_source_codes(fields):
+    codes = set()
+    for field in fields or []:
+        viz = _field_visualization_config(field) or {}
+        widget = (viz.get("widget") or "").strip().lower()
+        if widget in ("bar", "line"):
+            for code in viz.get("source_field_codes") or []:
+                if code:
+                    codes.add(code)
+    return codes
+
+
+def _compose_visualization_payload(sections, fields, sheet_results, site_id, workbook_id, fy_start_year, months):
+    if not _has_summary_dashboard_sections(sections):
+        return {"mode": "default"}
+
+    month_labels = [item.get("label") or "" for item in (months or [])]
+    monthly_series = {}
+    if site_id and workbook_id and fy_start_year:
+        _, monthly_series, _ = _build_workbook_formula_context(site_id, workbook_id, fy_start_year)
+    results_by_code = _sheet_results_by_code(sheet_results)
+    referenced_series_codes = _collect_chart_source_codes(fields)
+
+    dashboard_sections = sorted(
+        [
+            section for section in sections
+            if _normalized_layout_type(section.get("layout_type")) == "summary_dashboard"
+        ],
+        key=lambda section: section.get("display_order") or 0,
+    )
+
+    widgets = []
+    panels = []
+    for section in dashboard_sections:
+        section_fields = sorted(
+            [field for field in fields if field.get("section_id") == section["id"]],
+            key=lambda field: field.get("display_order") or 0,
+        )
+        section_widgets = []
+        for field in section_fields:
+            viz = _field_visualization_config(field) or {}
+            widget_type = (viz.get("widget") or "kpi").strip().lower()
+            if widget_type not in ("kpi", "bar", "line", "donut"):
+                widget_type = "kpi"
+            span = viz.get("span") or "third"
+            if span not in ("third", "half", "full"):
+                span = "third"
+            code = field.get("field_code")
+            field_config = field.get("field_config") or {}
+            widget = {
+                "field_code": code,
+                "label": field.get("field_name") or code,
+                "widget": widget_type,
+                "span": span,
+                "section_id": section["id"],
+                "section_name": section.get("name"),
+            }
+
+            if widget_type == "kpi":
+                result = results_by_code.get(code, {})
+                widget.update({
+                    "value": result.get("value"),
+                    "unit": result.get("unit") or field_config.get("unit") or "",
+                    "status": result.get("status") or "needs_input",
+                    "message": result.get("message") or "",
+                    "show_unit": viz.get("show_unit", True),
+                    "show_formula_status": viz.get("show_formula_status", True),
+                })
+            elif widget_type in ("bar", "line"):
+                source_codes = viz.get("source_field_codes") or []
+                series = []
+                for src_code in source_codes:
+                    series.append({
+                        "field_code": src_code,
+                        "label": _humanize_field_code(src_code),
+                        "values": monthly_series.get(src_code, []),
+                    })
+                widget["series"] = series
+                widget["month_labels"] = month_labels
+            elif widget_type == "donut":
+                segments = []
+                for segment in viz.get("donut_segments") or []:
+                    seg_code = segment.get("field_code")
+                    if not seg_code:
+                        continue
+                    result = results_by_code.get(seg_code, {})
+                    segments.append({
+                        "field_code": seg_code,
+                        "label": segment.get("label") or _humanize_field_code(seg_code),
+                        "value": result.get("value"),
+                    })
+                widget["segments"] = segments
+
+            section_widgets.append(widget)
+            widgets.append(widget)
+
+        panels.append({
+            "section_id": section["id"],
+            "name": section.get("name"),
+            "widgets": section_widgets,
+        })
+
+    filtered_series = {
+        code: monthly_series.get(code, [])
+        for code in referenced_series_codes
+    }
+
+    return {
+        "mode": "dashboard",
+        "month_labels": month_labels,
+        "monthly_series": filtered_series,
+        "panels": panels,
+        "widgets": widgets,
+    }
+
+
 def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, selected_form_id=None):
     try:
         site_id = int(site_id)
@@ -1456,6 +1601,16 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
         fy_start_year=fy_start_year,
     )
 
+    visualization = _compose_visualization_payload(
+        sections,
+        fields,
+        sheet_results,
+        site.id,
+        workbook.id,
+        fy_start_year,
+        months,
+    )
+
     return {
         "financial_year": {
             "start_year": fy_start_year,
@@ -1485,6 +1640,7 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
         "sections": sections,
         "workbook_values": workbook_values_payload(site.id, form.id, fy_start_year, fields),
         "sheet_results": sheet_results,
+        "visualization": visualization,
         "rows": rows,
     }
 
@@ -1540,7 +1696,7 @@ def save_annual_workbook_values(user_id, site_id, workbook_id, form_id, fy_start
         value_row = WorkbookFieldValue.query.filter_by(
             site_id=site_id,
             form_id=form_id,
-            field_version_id=field["field_version_id"],
+            field_id=field["field_id"],
             fy_start_year=fy_start_year,
             is_deleted=False,
         ).first()
@@ -1554,6 +1710,8 @@ def save_annual_workbook_values(user_id, site_id, workbook_id, form_id, fy_start
                 created_by=user_id,
             )
             db.session.add(value_row)
+        elif value_row.field_version_id != field["field_version_id"]:
+            value_row.field_version_id = field["field_version_id"]
 
         value_row.value_text = None
         value_row.numeric_value = None
@@ -2267,22 +2425,30 @@ def recalculate_submission_formulas(submission, fields_map, user_id):
     period = ReportingPeriod.query.get(submission.reporting_period_id)
     if period:
         fy_start_year = period.year if period.month >= 4 else period.year - 1
-        version_to_code = {
-            info["field_version_id"]: code
+        field_id_to_code = {
+            info["field_id"]: code
             for code, info in fields_map.items()
-            if info.get("field_version_id")
+            if info.get("field_id")
+        }
+        current_version_by_field_id = {
+            info["field_id"]: info["field_version_id"]
+            for code, info in fields_map.items()
+            if info.get("field_id") and info.get("field_version_id")
         }
         workbook_values = WorkbookFieldValue.query.filter(
             WorkbookFieldValue.site_id == submission.site_id,
             WorkbookFieldValue.form_id == submission.form_id,
             WorkbookFieldValue.fy_start_year == fy_start_year,
-            WorkbookFieldValue.field_version_id.in_(list(version_to_code.keys()) or [0]),
+            WorkbookFieldValue.field_id.in_(list(field_id_to_code.keys()) or [0]),
             WorkbookFieldValue.is_deleted == False,
         ).all()
         for workbook_value in workbook_values:
-            code = version_to_code.get(workbook_value.field_version_id)
+            code = field_id_to_code.get(workbook_value.field_id)
             if not code or code in field_values:
                 continue
+            current_version_id = current_version_by_field_id.get(workbook_value.field_id)
+            if current_version_id and workbook_value.field_version_id != current_version_id:
+                workbook_value.field_version_id = current_version_id
             if workbook_value.numeric_value is not None:
                 field_values[code] = float(workbook_value.numeric_value)
             elif workbook_value.value_text not in (None, ""):

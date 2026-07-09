@@ -220,7 +220,7 @@
     if (options && Array.isArray(options.sections) && field.section_id) {
       const section = options.sections.find(s => s.id === field.section_id);
       const layoutType = normalizedLayoutType(section);
-      if (section && (layoutType === "annual_table" || layoutType === "reference_table")) {
+      if (section && (layoutType === "annual_table" || layoutType === "reference_table" || layoutType === "summary_dashboard")) {
         return true;
       }
     }
@@ -545,7 +545,9 @@
   }
 
   function renderWorkbookValueSection(group, options) {
-    const label = group.layout_type === "annual_table"
+    const label = group.layout_type === "summary_dashboard"
+      ? "Summary dashboard"
+      : group.layout_type === "annual_table"
       ? "FY-level values"
       : group.layout_type === "reference_table"
         ? "Reference/context values"

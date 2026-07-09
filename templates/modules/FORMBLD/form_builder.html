@@ -2,6 +2,53 @@
 {% block title %}Sheet Builder - Digital GHG Inventory{% endblock %}
 
 {% block content %}
+<style>
+  .help-drawer {
+    position: fixed;
+    top: 0; right: -420px; width: 420px; height: 100vh;
+    background-color: #ffffff;
+    border-left: 3px solid #c8102e;
+    box-shadow: -4px 0 15px rgba(0, 0, 0, 0.05);
+    z-index: 100;
+    transition: right 0.25s ease-out;
+    display: flex;
+    flex-direction: column;
+  }
+  .help-drawer.open { right: 0; }
+  .help-icon-btn {
+    width: 5mm;
+    height: 5mm;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0;
+    background-color: #fee2e2;
+    border: 1px solid #fca5a5;
+    cursor: pointer;
+    padding: 0;
+    font-size: 11px;
+    font-weight: 900;
+    color: #b91c1c;
+    flex-shrink: 0;
+  }
+  .help-catalog-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    padding: 0.625rem;
+    background: #f8fafc;
+  }
+  .sheet-help-accordion > summary {
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 12px;
+    color: #1e293b;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #f1f5f9;
+    list-style: none;
+  }
+  .sheet-help-accordion > summary::-webkit-details-marker { display: none; }
+  .sheet-help-accordion[open] > summary { color: #1a3a6b; }
+</style>
 <div class="space-y-4">
   <!-- Toast notification container -->
   <div id="toast-container" class="fixed top-5 right-5 z-50 space-y-2 pointer-events-none"></div>
@@ -95,6 +142,7 @@
         <span id="builder-version-badge" class="px-2 py-0.5 rounded-full font-semibold uppercase text-[9px] bg-amber-100 text-amber-800">Draft</span>
       </div>
       <div class="flex items-center space-x-2">
+        <button type="button" id="btn-open-sheet-help" class="help-icon-btn" title="Sheet Builder Help">?</button>
         <button id="btn-edit-as-draft" class="btn btn-outline btn-sm hidden">
           Edit as Draft
         </button>
@@ -175,6 +223,7 @@
                   <tbody id="builder-preview-workbook-body" class="divide-y divide-slate-100 text-sm text-slate-700"></tbody>
                 </table>
               </div>
+              <div id="builder-preview-dashboard-wrap" class="hidden mt-3"></div>
               <div id="builder-preview-aggregate-hint" class="hidden mt-3 rounded-lg border border-dashed border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900"></div>
               <div id="builder-preview-results-overflow" class="hidden"></div>
               <div id="builder-preview-static-wrap" class="mt-5 hidden overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -296,7 +345,10 @@
                 </summary>
                 <div class="mt-3 space-y-3 pt-3 border-t border-slate-100">
                   <div>
-                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Calculation placement</label>
+                    <div class="flex items-center gap-1 mb-1">
+                      <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Calculation placement</label>
+                      <button type="button" id="btn-calc-placement-help" class="help-icon-btn" title="Field placement guide">?</button>
+                    </div>
                     <select id="prop-calc-placement" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
                       <option value="monthly">Per-month table cell</option>
                       <option value="annual_result">Sheet/FY result under input column</option>
@@ -359,6 +411,59 @@
                       </span>
                       <span>→</span>
                     </button>
+                  </div>
+                </div>
+              </details>
+
+              <!-- Drawer 3b: Visualization (summary dashboard fields) -->
+              <details id="drawer-visualization" class="group rounded-lg border border-slate-200/85 bg-white p-3 hidden [&_summary::-webkit-details-marker]:hidden">
+                <summary class="flex items-center justify-between cursor-pointer focus:outline-none">
+                  <h3 class="text-[10px] font-bold uppercase tracking-wider text-slate-500 select-none">Visualization</h3>
+                  <svg class="h-3.5 w-3.5 text-slate-400 group-open:rotate-180 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </summary>
+                <div class="mt-3 space-y-3 pt-3 border-t border-slate-100">
+                  <p class="text-[10px] text-slate-500 flex items-start gap-1.5">
+                    <span>Configure how this field appears on summary dashboard sheets. Charts are runtime-only (not exported to Excel).</span>
+                    <button type="button" id="btn-viz-drawer-help" class="help-icon-btn mt-0.5" title="Widget help">?</button>
+                  </p>
+                  <div>
+                    <div class="flex items-center gap-1 mb-1">
+                      <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Widget type</label>
+                      <button type="button" id="btn-viz-widget-help" class="help-icon-btn" title="Widget help">?</button>
+                    </div>
+                    <select id="prop-viz-widget" class="block w-full rounded-lg border-slate-300 text-xs py-1.5 px-3 border bg-white">
+                      <option value="kpi">KPI card</option>
+                      <option value="bar">Bar chart (monthly trend)</option>
+                      <option value="line">Line chart (monthly trend)</option>
+                      <option value="donut">Donut chart (FY breakdown)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Grid span</label>
+                    <select id="prop-viz-span" class="block w-full rounded-lg border-slate-300 text-xs py-1.5 px-3 border bg-white">
+                      <option value="third">One third</option>
+                      <option value="half">Half width</option>
+                      <option value="full">Full width</option>
+                    </select>
+                  </div>
+                  <div id="prop-viz-source-wrap" class="hidden space-y-1">
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Chart source field codes</label>
+                    <textarea id="prop-viz-source-codes" rows="3" placeholder="One field code per line, e.g. jai_elec_grid_mwh" class="block w-full rounded-lg border-slate-300 text-xs px-3 py-2 border font-mono"></textarea>
+                  </div>
+                  <div id="prop-viz-donut-wrap" class="hidden space-y-2">
+                    <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Donut segments</label>
+                    <div id="prop-viz-donut-segments" class="space-y-2"></div>
+                    <button type="button" id="btn-add-donut-segment" class="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800">+ Add segment</button>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input type="checkbox" id="prop-viz-show-unit" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" checked>
+                    <label for="prop-viz-show-unit" class="text-xs text-slate-600">Show unit on KPI</label>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input type="checkbox" id="prop-viz-show-status" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" checked>
+                    <label for="prop-viz-show-status" class="text-xs text-slate-600">Show formula status badge</label>
                   </div>
                 </div>
               </details>
@@ -497,6 +602,212 @@
   </div>
 </div>
 
+<!-- Sheet Builder Help slide-out manual -->
+<div id="sheet-help-drawer" class="help-drawer">
+  <div class="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+    <h3 class="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+      <span class="bg-[#1a3a6b] text-white w-5 h-5 flex items-center justify-center rounded-full text-xs">?</span>
+      Sheet Builder Help
+    </h3>
+    <button type="button" id="btn-close-sheet-help" class="text-slate-400 hover:text-slate-600 transition-colors" aria-label="Close help">
+      <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </div>
+
+  <div class="p-5 flex-1 overflow-y-auto space-y-5 text-xs text-slate-600 leading-relaxed">
+
+    <div class="bg-amber-50 border border-amber-200 p-3 rounded-lg">
+      <p class="font-bold text-amber-900 text-[11px] uppercase tracking-wider mb-1">For sheet builders (admins)</p>
+      <p class="text-[11px] text-amber-950">This manual explains how to configure sheets and dashboards. The per-field <strong>“Help for Submitters”</strong> drawer in the Field Inspector is different — that text is shown to site users when they fill in the workbook.</p>
+    </div>
+
+    <div>
+      <h4 class="font-bold text-slate-800 text-[13px] border-b border-slate-100 pb-1 mb-3">Widget quick reference</h4>
+      <div class="grid grid-cols-2 gap-2">
+        <div class="help-catalog-card">
+          <div class="font-bold text-indigo-900 text-[11px]">KPI card</div>
+          <p class="mt-1 text-[10px]">Single FY total or intensity from the field’s own formula. Span: third / half / full.</p>
+        </div>
+        <div class="help-catalog-card">
+          <div class="font-bold text-indigo-900 text-[11px]">Bar chart</div>
+          <p class="mt-1 text-[10px]">Compare monthly inputs across the FY. Needs <code class="font-mono">source_field_codes</code>.</p>
+        </div>
+        <div class="help-catalog-card">
+          <div class="font-bold text-indigo-900 text-[11px]">Line chart</div>
+          <p class="mt-1 text-[10px]">Monthly trend over Apr–Mar. Same config as bar chart.</p>
+        </div>
+        <div class="help-catalog-card">
+          <div class="font-bold text-indigo-900 text-[11px]">Donut chart</div>
+          <p class="mt-1 text-[10px]">FY breakdown (e.g. Scope 1 vs 2). Needs 2+ <code class="font-mono">donut_segments</code>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <h4 class="font-bold text-slate-800 text-[13px] border-b border-slate-100 pb-1 mb-2">Build a dashboard (step by step)</h4>
+      <div class="space-y-1">
+        <details class="sheet-help-accordion" id="help-flow-step-1">
+          <summary><span class="text-indigo-600 font-mono">1.</span> Add monthly input fields</summary>
+          <div class="pb-3 pt-1 space-y-1 text-[11px]">
+            <p>On a <strong>data sheet</strong>, add a section with layout <strong>Monthly table</strong>. Add Numeric/Integer fields with frequency <strong>Monthly</strong> — e.g. <code class="font-mono">elec_mwh</code>, <code class="font-mono">diesel_kl</code>. Site users enter values month by month.</p>
+          </div>
+        </details>
+        <details class="sheet-help-accordion" id="help-flow-step-2">
+          <summary><span class="text-indigo-600 font-mono">2.</span> Create and publish formulas</summary>
+          <div class="pb-3 pt-1 space-y-1 text-[11px]">
+            <p>KPIs and donuts need FY calculated values. Open <a href="/module/FRMULA/" class="text-indigo-600 font-semibold hover:underline">Formula Builder</a>, create expressions (e.g. <code class="font-mono">SUM_MONTHS(elec_mwh)</code>), and <strong>Publish</strong> each formula.</p>
+          </div>
+        </details>
+        <details class="sheet-help-accordion" id="help-flow-step-3">
+          <summary><span class="text-indigo-600 font-mono">3.</span> Add a summary dashboard section</summary>
+          <div class="pb-3 pt-1 space-y-1 text-[11px]">
+            <p>On a <strong>summary sheet</strong> (or same sheet), add a section and set layout to <strong>Summary dashboard</strong>. The entire workbook tab becomes a read-only KPI/chart view — no month grid.</p>
+          </div>
+        </details>
+        <details class="sheet-help-accordion" id="help-flow-step-4">
+          <summary><span class="text-indigo-600 font-mono">4.</span> Add calculated FY fields</summary>
+          <div class="pb-3 pt-1 space-y-1 text-[11px]">
+            <p>Add <strong>Calculated</strong> fields in the dashboard section. Set frequency <strong>Annual</strong>, placement <strong>Sheet/FY result under input column</strong>, attach a published formula. Each KPI field uses its own formula result.</p>
+          </div>
+        </details>
+        <details class="sheet-help-accordion" id="help-flow-step-5">
+          <summary><span class="text-indigo-600 font-mono">5.</span> Configure visualization</summary>
+          <div class="pb-3 pt-1 space-y-1 text-[11px]">
+            <p>In the Field Inspector <strong>Visualization</strong> drawer, pick widget type, grid span, and chart sources. Use the <strong>Preview</strong> tab to see layout (preview uses mock chart data).</p>
+          </div>
+        </details>
+        <details class="sheet-help-accordion" id="help-flow-step-6">
+          <summary><span class="text-indigo-600 font-mono">6.</span> Publish the sheet</summary>
+          <div class="pb-3 pt-1 space-y-1 text-[11px]">
+            <p>Save Draft, resolve validation errors, then <strong>Publish Sheet</strong>. Submitters see the dashboard on the annual workbook tab after FY data exists.</p>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <details class="sheet-help-accordion" id="help-section-layouts" open>
+      <summary>Section layouts — when to use each</summary>
+      <div class="pb-3 pt-1 overflow-x-auto">
+        <table class="w-full text-[10px] border-collapse">
+          <thead>
+            <tr class="bg-slate-50 text-left">
+              <th class="border border-slate-200 px-2 py-1 font-bold">Layout</th>
+              <th class="border border-slate-200 px-2 py-1 font-bold">Use when</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="border border-slate-200 px-2 py-1 font-mono">monthly_table</td>
+              <td class="border border-slate-200 px-2 py-1">Site users enter data for each month (Apr–Mar grid).</td>
+            </tr>
+            <tr>
+              <td class="border border-slate-200 px-2 py-1 font-mono">annual_table</td>
+              <td class="border border-slate-200 px-2 py-1">FY-level scalar rows in a read-only results table.</td>
+            </tr>
+            <tr>
+              <td class="border border-slate-200 px-2 py-1 font-mono">reference_table</td>
+              <td class="border border-slate-200 px-2 py-1">Static or context values (not the month grid).</td>
+            </tr>
+            <tr>
+              <td class="border border-slate-200 px-2 py-1 font-mono">summary_dashboard</td>
+              <td class="border border-slate-200 px-2 py-1">Entire tab = KPI cards and charts (widgets from field visualization config).</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <details class="sheet-help-accordion" id="help-field-placement">
+      <summary>Which field to add for what</summary>
+      <div class="pb-3 pt-1 overflow-x-auto">
+        <table class="w-full text-[10px] border-collapse">
+          <thead>
+            <tr class="bg-slate-50 text-left">
+              <th class="border border-slate-200 px-2 py-1 font-bold">Goal</th>
+              <th class="border border-slate-200 px-2 py-1 font-bold">Add this</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="border border-slate-200 px-2 py-1">Monthly data entry</td>
+              <td class="border border-slate-200 px-2 py-1">Numeric/Integer, frequency Monthly, in <code class="font-mono">monthly_table</code> section</td>
+            </tr>
+            <tr>
+              <td class="border border-slate-200 px-2 py-1">FY total KPI on dashboard</td>
+              <td class="border border-slate-200 px-2 py-1">Calculated, Annual, placement Sheet/FY result, widget KPI</td>
+            </tr>
+            <tr>
+              <td class="border border-slate-200 px-2 py-1">Monthly trend chart</td>
+              <td class="border border-slate-200 px-2 py-1">Calculated “chart holder” in dashboard section + bar/line widget listing monthly <code class="font-mono">source_field_codes</code></td>
+            </tr>
+            <tr>
+              <td class="border border-slate-200 px-2 py-1">FY split donut</td>
+              <td class="border border-slate-200 px-2 py-1">Calculated chart holder + donut widget with 2+ segments pointing to annual KPI field codes</td>
+            </tr>
+            <tr>
+              <td class="border border-slate-200 px-2 py-1">Per-month formula in grid</td>
+              <td class="border border-slate-200 px-2 py-1">Calculated, placement Per-month table cell</td>
+            </tr>
+            <tr>
+              <td class="border border-slate-200 px-2 py-1">FY total below month table</td>
+              <td class="border border-slate-200 px-2 py-1">Calculated, placement Sheet/FY result below table</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <details class="sheet-help-accordion" id="help-widget-kpi">
+      <summary>Example: KPI card</summary>
+      <div class="pb-3 pt-1 space-y-2 text-[11px]">
+        <p><strong>Field:</strong> <code class="font-mono">total_energy_gj</code> · Calculated · Annual · Sheet/FY result</p>
+        <p><strong>Formula:</strong> <code class="font-mono">SUM_MONTHS(elec_mwh) * conv_factor</code> (published)</p>
+        <div class="bg-slate-50 border border-slate-200 p-2 rounded font-mono text-[10px]">visualization: { widget: "kpi", span: "third" }</div>
+        <p class="text-indigo-800 bg-indigo-50 border border-indigo-100 p-2 rounded"><strong>Real reference:</strong> Jaigarh GRI Summary — <code class="font-mono">jai_302_total_energy_gj</code>, <code class="font-mono">jai_3051_scope1_total</code> with <code class="font-mono">VIZ_KPI_*</code> configs.</p>
+      </div>
+    </details>
+
+    <details class="sheet-help-accordion" id="help-widget-bar">
+      <summary>Example: Bar chart</summary>
+      <div class="pb-3 pt-1 space-y-2 text-[11px]">
+        <p><strong>Field:</strong> <code class="font-mono">viz_energy_compare</code> · chart holder in dashboard section</p>
+        <div class="bg-slate-50 border border-slate-200 p-2 rounded font-mono text-[10px]">visualization: { widget: "bar", span: "full", source_field_codes: ["elec_mwh", "diesel_kl"] }</div>
+        <p>Sources must be monthly field codes from any sheet in the workbook.</p>
+        <p class="text-indigo-800 bg-indigo-50 border border-indigo-100 p-2 rounded"><strong>Real reference:</strong> Jaigarh — line chart <code class="font-mono">jai_viz_energy_trend</code> (bar uses the same <code class="font-mono">source_field_codes</code> pattern).</p>
+      </div>
+    </details>
+
+    <details class="sheet-help-accordion" id="help-widget-line">
+      <summary>Example: Line chart</summary>
+      <div class="pb-3 pt-1 space-y-2 text-[11px]">
+        <p><strong>Field:</strong> <code class="font-mono">viz_energy_trend</code> · chart holder in dashboard section</p>
+        <div class="bg-slate-50 border border-slate-200 p-2 rounded font-mono text-[10px]">visualization: { widget: "line", span: "full", source_field_codes: ["elec_mwh", "diesel_kl", "petrol_kl"] }</div>
+        <p class="text-indigo-800 bg-indigo-50 border border-indigo-100 p-2 rounded"><strong>Real reference:</strong> Jaigarh GRI Summary — <code class="font-mono">jai_viz_energy_trend</code> with <code class="font-mono">VIZ_LINE_ENERGY_TREND</code>.</p>
+      </div>
+    </details>
+
+    <details class="sheet-help-accordion" id="help-widget-donut">
+      <summary>Example: Donut chart</summary>
+      <div class="pb-3 pt-1 space-y-2 text-[11px]">
+        <p><strong>Field:</strong> <code class="font-mono">viz_scope_split</code> · chart holder in dashboard section</p>
+        <div class="bg-slate-50 border border-slate-200 p-2 rounded font-mono text-[10px]">visualization: { widget: "donut", span: "half", donut_segments: [{ field_code: "scope1_total", label: "Scope 1" }, { field_code: "scope2_total", label: "Scope 2" }] }</div>
+        <p>Each segment <code class="font-mono">field_code</code> must be an annual calculated KPI elsewhere on the workbook.</p>
+        <p class="text-indigo-800 bg-indigo-50 border border-indigo-100 p-2 rounded"><strong>Real reference:</strong> Jaigarh — <code class="font-mono">jai_viz_scope_split</code> with <code class="font-mono">VIZ_DONUT_SCOPE_SPLIT</code>.</p>
+      </div>
+    </details>
+
+    <div class="border-t border-slate-100 pt-3 text-[10px] text-slate-400 space-y-1">
+      <p class="font-bold text-slate-500 uppercase tracking-wider">Limitations (v1)</p>
+      <p>Charts render in the annual workbook and Form Builder preview only — not in Excel export.</p>
+      <p>Bar/line charts require explicit <code class="font-mono">source_field_codes</code>. Donut requires at least 2 segments.</p>
+      <p>Preview tab uses mock monthly series for charts. Recommend ≤8 chart widgets per sheet.</p>
+    </div>
+
+  </div>
+</div>
+
 <!-- SPOC Preview Overlay Modal -->
 <div id="preview-overlay" class="fixed inset-0 bg-navy/50 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4 overflow-hidden">
   <div class="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-[860px] overflow-hidden transition-all transform scale-100">
@@ -534,6 +845,8 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/workbook_viz.js') }}"></script>
 <script src="{{ url_for('static', filename='js/formula_runtime.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workbook_sheet.js') }}"></script>
 <script src="{{ url_for('static', filename='js/form_builder.js') }}"></script>

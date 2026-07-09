@@ -52,6 +52,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const builderPreviewStaticBody = document.getElementById("builder-preview-static-body");
   const builderPreviewResultsOverflow = document.getElementById("builder-preview-results-overflow");
   const builderPreviewAggregateHint = document.getElementById("builder-preview-aggregate-hint");
+  const builderPreviewDashboardWrap = document.getElementById("builder-preview-dashboard-wrap");
 
   const AGGREGATE_PREVIEW_HINT = "No FY totals in this preview. Add a Calculated field with placement “Sheet/FY result under input column”, attach a published SUM_MONTHS(field_code) formula, then Save Draft.";
   const inspectorPanel = document.getElementById("inspector-panel");
@@ -64,6 +65,21 @@ document.addEventListener("DOMContentLoaded", function () {
   const propSection = document.getElementById("prop-section");
   const propFrequency = document.getElementById("prop-frequency");
   const propCalcPlacement = document.getElementById("prop-calc-placement");
+  const propVizWidget = document.getElementById("prop-viz-widget");
+  const propVizSpan = document.getElementById("prop-viz-span");
+  const propVizSourceWrap = document.getElementById("prop-viz-source-wrap");
+  const propVizSourceCodes = document.getElementById("prop-viz-source-codes");
+  const propVizDonutWrap = document.getElementById("prop-viz-donut-wrap");
+  const propVizDonutSegments = document.getElementById("prop-viz-donut-segments");
+  const btnAddDonutSegment = document.getElementById("btn-add-donut-segment");
+  const propVizShowUnit = document.getElementById("prop-viz-show-unit");
+  const propVizShowStatus = document.getElementById("prop-viz-show-status");
+  const sheetHelpDrawer = document.getElementById("sheet-help-drawer");
+  const btnOpenSheetHelp = document.getElementById("btn-open-sheet-help");
+  const btnCloseSheetHelp = document.getElementById("btn-close-sheet-help");
+  const btnCalcPlacementHelp = document.getElementById("btn-calc-placement-help");
+  const btnVizWidgetHelp = document.getElementById("btn-viz-widget-help");
+  const btnVizDrawerHelp = document.getElementById("btn-viz-drawer-help");
   const dropdownOptionsList = document.getElementById("dropdown-options-list");
   const btnAddDropdownOption = document.getElementById("btn-add-dropdown-option");
 
@@ -140,8 +156,160 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function layoutDisplayName(type) {
-    const map = { monthly_table: "Monthly table", annual_table: "Annual table", reference_table: "Reference table" };
+    const map = {
+      monthly_table: "Monthly table",
+      annual_table: "Annual table",
+      reference_table: "Reference table",
+      summary_dashboard: "Summary dashboard",
+    };
     return map[type] || "Monthly table";
+  }
+
+  function openSheetHelp(anchorId) {
+    if (!sheetHelpDrawer) return;
+    sheetHelpDrawer.classList.add("open");
+    if (!anchorId) return;
+    const el = document.getElementById(anchorId);
+    if (!el) return;
+    if (el.tagName === "DETAILS") {
+      el.open = true;
+    }
+    requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function openSheetHelpForCurrentWidget() {
+    const widget = ((propVizWidget && propVizWidget.value) || "kpi").trim().toLowerCase();
+    openSheetHelp(`help-widget-${widget}`);
+  }
+
+  if (btnOpenSheetHelp) {
+    btnOpenSheetHelp.addEventListener("click", (e) => {
+      e.preventDefault();
+      openSheetHelp();
+    });
+  }
+  if (btnCloseSheetHelp && sheetHelpDrawer) {
+    btnCloseSheetHelp.addEventListener("click", (e) => {
+      e.preventDefault();
+      sheetHelpDrawer.classList.remove("open");
+    });
+  }
+  if (btnCalcPlacementHelp) {
+    btnCalcPlacementHelp.addEventListener("click", (e) => {
+      e.preventDefault();
+      openSheetHelp("help-field-placement");
+    });
+  }
+  if (btnVizWidgetHelp) {
+    btnVizWidgetHelp.addEventListener("click", (e) => {
+      e.preventDefault();
+      openSheetHelpForCurrentWidget();
+    });
+  }
+  if (btnVizDrawerHelp) {
+    btnVizDrawerHelp.addEventListener("click", (e) => {
+      e.preventDefault();
+      openSheetHelpForCurrentWidget();
+    });
+  }
+
+  function isSummaryDashboardSection(section) {
+    return String((section && section.layout_type) || "").trim().toLowerCase() === "summary_dashboard";
+  }
+
+  function fieldSection(field) {
+    return currentSections.find(section => section.code === field.section_code)
+      || currentSections.find(section => section.id && section.id === field.section_id);
+  }
+
+  function fieldSupportsVisualization(field) {
+    if (!field) return false;
+    const section = fieldSection(field);
+    if (section && isSummaryDashboardSection(section)) return true;
+    return isSheetResultField(field);
+  }
+
+  function syncVisualizationDrawerVisibility(widgetType) {
+    const type = (widgetType || (propVizWidget && propVizWidget.value) || "kpi").toLowerCase();
+    if (propVizSourceWrap) {
+      propVizSourceWrap.classList.toggle("hidden", !(type === "bar" || type === "line"));
+    }
+    if (propVizDonutWrap) {
+      propVizDonutWrap.classList.toggle("hidden", type !== "donut");
+    }
+  }
+
+  function renderDonutSegmentsEditor(segments) {
+    if (!propVizDonutSegments) return;
+    const rows = Array.isArray(segments) ? segments : [];
+    propVizDonutSegments.innerHTML = rows.map((segment, index) => `
+      <div class="grid grid-cols-12 gap-2 donut-segment-row" data-index="${index}">
+        <input type="text" class="donut-segment-label col-span-5 rounded border-slate-300 text-xs px-2 py-1 border" value="${escapeHtml(segment.label || "")}" placeholder="Label">
+        <input type="text" class="donut-segment-code col-span-6 rounded border-slate-300 text-xs px-2 py-1 border font-mono" value="${escapeHtml(segment.field_code || "")}" placeholder="field_code">
+        <button type="button" class="donut-segment-remove col-span-1 text-rose-500 text-xs font-bold">✕</button>
+      </div>
+    `).join("");
+    propVizDonutSegments.querySelectorAll(".donut-segment-remove").forEach(btn => {
+      btn.addEventListener("click", () => {
+        btn.closest(".donut-segment-row")?.remove();
+      });
+    });
+  }
+
+  function collectDonutSegmentsFromDom() {
+    if (!propVizDonutSegments) return [];
+    return Array.from(propVizDonutSegments.querySelectorAll(".donut-segment-row")).map(row => ({
+      label: row.querySelector(".donut-segment-label")?.value.trim() || "",
+      field_code: row.querySelector(".donut-segment-code")?.value.trim().toLowerCase() || "",
+    })).filter(segment => segment.field_code);
+  }
+
+  function populateVisualizationInspector(field) {
+    const drawer = document.getElementById("drawer-visualization");
+    if (!drawer) return;
+    const show = fieldSupportsVisualization(field);
+    drawer.classList.toggle("hidden", !show);
+    if (!show) return;
+
+    const viz = (field.field_config && field.field_config.visualization) || {};
+    if (propVizWidget) propVizWidget.value = viz.widget || "kpi";
+    if (propVizSpan) propVizSpan.value = viz.span || "third";
+    if (propVizSourceCodes) {
+      propVizSourceCodes.value = (viz.source_field_codes || []).join("\n");
+    }
+    if (propVizShowUnit) propVizShowUnit.checked = viz.show_unit !== false;
+    if (propVizShowStatus) propVizShowStatus.checked = viz.show_formula_status !== false;
+    renderDonutSegmentsEditor(viz.donut_segments || []);
+    syncVisualizationDrawerVisibility(viz.widget || "kpi");
+  }
+
+  function applyVisualizationConfig(field) {
+    if (!fieldSupportsVisualization(field)) {
+      if (field.field_config) delete field.field_config.visualization;
+      return;
+    }
+    field.field_config = field.field_config || {};
+    const widget = propVizWidget ? propVizWidget.value : "kpi";
+    const span = propVizSpan ? propVizSpan.value : "third";
+    const sourceCodes = propVizSourceCodes
+      ? propVizSourceCodes.value.split(/\n+/).map(code => code.trim().toLowerCase()).filter(Boolean)
+      : [];
+    const visualization = {
+      widget,
+      span,
+      source_mode: widget === "kpi" ? "self" : "fields",
+      show_unit: propVizShowUnit ? propVizShowUnit.checked : true,
+      show_formula_status: propVizShowStatus ? propVizShowStatus.checked : true,
+    };
+    if (widget === "bar" || widget === "line") {
+      visualization.source_field_codes = sourceCodes;
+    }
+    if (widget === "donut") {
+      visualization.donut_segments = collectDonutSegmentsFromDom();
+    }
+    field.field_config.visualization = visualization;
   }
 
   function fieldType(field) {
@@ -176,7 +344,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (frequency === "annual" || frequency === "static") return true;
     const section = (context.sections || []).find(item => item.id === field.section_id);
     const layoutType = String((section && section.layout_type) || "monthly_table").trim().toLowerCase();
-    return layoutType === "annual_table" || layoutType === "reference_table";
+    return layoutType === "annual_table" || layoutType === "reference_table" || layoutType === "summary_dashboard";
   }
 
   function isSheetResultField(field) {
@@ -237,6 +405,7 @@ document.addEventListener("DOMContentLoaded", function () {
       staticBody: builderPreviewStaticBody,
       overflowEl: builderPreviewResultsOverflow,
       hintEl: builderPreviewAggregateHint,
+      dashboardWrap: builderPreviewDashboardWrap,
     };
   }
 
@@ -341,6 +510,33 @@ document.addEventListener("DOMContentLoaded", function () {
   function renderPreviewWorkbookContext(context, target) {
     if (!window.WorkbookSheet || !target || !target.head || !target.body) {
       throw new Error("Workbook preview renderer is unavailable.");
+    }
+
+    const visualization = context.visualization || { mode: "default" };
+    const isDashboard = visualization.mode === "dashboard";
+
+    if (isDashboard && window.WorkbookViz && target.dashboardWrap) {
+      if (target.tableWrap) target.tableWrap.classList.add("hidden");
+      if (target.staticWrap) target.staticWrap.classList.add("hidden");
+      if (target.empty) target.empty.classList.add("hidden");
+      if (target.overflowEl) {
+        target.overflowEl.classList.add("hidden");
+        target.overflowEl.innerHTML = "";
+      }
+      if (target.hintEl) {
+        target.hintEl.classList.add("hidden");
+        target.hintEl.textContent = "";
+      }
+      window.WorkbookViz.renderSummaryDashboard(visualization, target.dashboardWrap);
+      return;
+    }
+
+    if (target.dashboardWrap) {
+      target.dashboardWrap.classList.add("hidden");
+      target.dashboardWrap.innerHTML = "";
+    }
+    if (window.WorkbookViz && typeof window.WorkbookViz.destroyCharts === "function") {
+      window.WorkbookViz.destroyCharts();
     }
 
     const fields = context.fields || [];
@@ -1154,13 +1350,18 @@ document.addEventListener("DOMContentLoaded", function () {
           <div class="section-details-area hidden space-y-1.5 pt-1.5 border-t border-slate-100">
             <input type="text" class="section-code hidden" value="${escapeHtml(section.code || "")}" placeholder="section_code">
             <div>
-              <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Layout type</label>
+              <div class="flex items-center gap-1 mb-0.5">
+                <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Layout type</label>
+                <button type="button" class="help-icon-btn section-layout-help" title="Section layouts help">?</button>
+              </div>
               <select class="section-layout block w-full rounded border-slate-300 text-[11px] px-2 py-1 border bg-white">
                 <option value="monthly_table" ${section.layout_type === "monthly_table" ? "selected" : ""}>Monthly table</option>
                 <option value="annual_table" ${section.layout_type === "annual_table" ? "selected" : ""}>Annual table</option>
                 <option value="reference_table" ${section.layout_type === "reference_table" ? "selected" : ""}>Reference table</option>
+                <option value="summary_dashboard" ${section.layout_type === "summary_dashboard" ? "selected" : ""}>Summary dashboard</option>
               </select>
             </div>
+            ${section.layout_type === "summary_dashboard" ? '<p class="text-[10px] text-indigo-700">Fields in this section render as KPI/chart widgets on the annual workbook tab—not in the month grid.</p>' : ""}
             <div>
               <label class="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Description (optional)</label>
               <textarea class="section-description block w-full rounded border-slate-300 text-[11px] px-2 py-1 border" rows="2" placeholder="Optional section description">${escapeHtml(section.description || "")}</textarea>
@@ -1406,6 +1607,7 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("drawer-numeric").classList.add("hidden");
     document.getElementById("prop-section-dropdown").classList.add("hidden");
     document.getElementById("drawer-calculated").classList.add("hidden");
+    document.getElementById("drawer-visualization").classList.add("hidden");
     document.getElementById("prop-section-file").classList.add("hidden");
     const _fHint = document.getElementById("formula-publish-hint");
     const _fOk   = document.getElementById("formula-status-ok");
@@ -1497,6 +1699,8 @@ document.addEventListener("DOMContentLoaded", function () {
         cb.checked = acceptedList.includes(cb.value);
       });
     }
+
+    populateVisualizationInspector(field);
   }
 
   function closeInspector() {
@@ -1635,6 +1839,8 @@ document.addEventListener("DOMContentLoaded", function () {
         }
       }
     }
+
+    applyVisualizationConfig(field);
 
     if (field.field_type === "file") {
       const checkedMimes = [];
@@ -1807,6 +2013,13 @@ document.addEventListener("DOMContentLoaded", function () {
         return;
       }
 
+      const sectionLayoutHelp = e.target.closest(".section-layout-help");
+      if (sectionLayoutHelp) {
+        e.preventDefault();
+        openSheetHelp("help-section-layouts");
+        return;
+      }
+
       const button = e.target.closest(".section-delete");
       if (!button) return;
       const row = button.closest(".section-row");
@@ -1970,6 +2183,17 @@ document.addEventListener("DOMContentLoaded", function () {
   btnSaveLayout.onclick = function () {
     saveDraftLayout().catch(() => {});
   };
+
+  if (propVizWidget) {
+    propVizWidget.addEventListener("change", () => syncVisualizationDrawerVisibility());
+  }
+  if (btnAddDonutSegment) {
+    btnAddDonutSegment.addEventListener("click", () => {
+      const segments = collectDonutSegmentsFromDom();
+      segments.push({ label: "", field_code: "" });
+      renderDonutSegmentsEditor(segments);
+    });
+  }
 
   // Publish validation & submit
   btnPublishForm.onclick = function () {

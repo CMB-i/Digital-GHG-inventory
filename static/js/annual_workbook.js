@@ -13,9 +13,12 @@ document.addEventListener("DOMContentLoaded", function () {
   const emptyTitleEl = document.getElementById("workbook-empty-title");
   const emptyBodyEl = document.getElementById("workbook-empty-body");
   const tableWrap = document.getElementById("workbook-table-wrap");
+  const gridTableWrap = document.getElementById("workbook-grid-table");
   const tableHead = document.getElementById("workbook-head");
   const tableBody = document.getElementById("workbook-body");
   const sheetResultsSection = document.getElementById("sheet-results-section");
+  const dashboardWrap = document.getElementById("workbook-dashboard-wrap");
+  const workbookSubtitleEl = document.querySelector(".max-w-3xl.text-sm.text-slate-500");
   const btnSave = document.getElementById("btn-save-draft");
   const btnSubmit = document.getElementById("btn-submit-sheet");
   const cellDetailModal = document.getElementById("cell-detail-modal");
@@ -584,48 +587,79 @@ document.addEventListener("DOMContentLoaded", function () {
     const fields = state.workbook.fields || [];
     const rows = state.workbook.rows || [];
     const sheetResults = state.workbook.sheet_results || [];
+    const visualization = state.workbook.visualization || { mode: "default" };
+    const isDashboard = visualization.mode === "dashboard";
 
-    if (!fields.length && !sheetResults.length) {
+    if (!fields.length && !sheetResults.length && !isDashboard) {
       setEmpty("No fields configured", "The selected form has no published fields.");
       return;
     }
 
     emptyEl.classList.add("hidden");
     tableWrap.classList.remove("hidden");
-    const mode = "entry";
 
-    window.WorkbookSheet.render({
-      mode: mode,
-      headEl: tableHead,
-      bodyEl: tableBody,
-      fields,
-      sections: state.workbook.sections || [],
-      workbookValues: state.workbook.workbook_values || {},
-      canEditWorkbookValues: hasOpenWorkbookPeriod(),
-      sheetResults,
-      rows: rows.map(row => ({
-        ...row,
-        editable: mode === "calc_results" ? false : Boolean(row.editability && row.editability.editable),
-        reason: row.editability ? row.editability.reason : ""
-      })),
-      selectedRowKey: state.selectedRowKey,
-      onRowSelect: function (key) {
-        state.selectedRowKey = key;
-        renderTable();
-        renderHeader();
-      },
-      onCellChange: function(e) {
-        onCellChange(e);
-        triggerAutosave(e);
-      },
-      onWorkbookValueChange: function(e) {
-        onWorkbookValueChange(e);
-        triggerAutosave(e);
-      },
-      onCellOpen: openCellDetail
-    });
+    if (workbookSubtitleEl) {
+      workbookSubtitleEl.textContent = isDashboard
+        ? "Read-only FY summary for this sheet. KPI and chart widgets are configured in Form Builder."
+        : "Enter site data across the April-March financial year. Each month saves as a draft automatically.";
+    }
 
-    renderSheetResultsOverflow(sheetResults);
+    if (isDashboard) {
+      if (gridTableWrap) gridTableWrap.classList.add("hidden");
+      if (sheetResultsSection) {
+        sheetResultsSection.classList.add("hidden");
+        sheetResultsSection.innerHTML = "";
+      }
+      if (window.WorkbookViz && typeof window.WorkbookViz.renderSummaryDashboard === "function") {
+        window.WorkbookViz.renderSummaryDashboard(visualization, dashboardWrap);
+      } else if (dashboardWrap) {
+        dashboardWrap.classList.remove("hidden");
+        dashboardWrap.innerHTML = '<div class="text-sm text-rose-600">Dashboard renderer unavailable.</div>';
+      }
+    } else {
+      if (dashboardWrap) {
+        dashboardWrap.classList.add("hidden");
+        dashboardWrap.innerHTML = "";
+      }
+      if (window.WorkbookViz && typeof window.WorkbookViz.destroyCharts === "function") {
+        window.WorkbookViz.destroyCharts();
+      }
+      if (gridTableWrap) gridTableWrap.classList.remove("hidden");
+      const mode = "entry";
+
+      window.WorkbookSheet.render({
+        mode: mode,
+        headEl: tableHead,
+        bodyEl: tableBody,
+        fields,
+        sections: state.workbook.sections || [],
+        workbookValues: state.workbook.workbook_values || {},
+        canEditWorkbookValues: hasOpenWorkbookPeriod(),
+        sheetResults,
+        rows: rows.map(row => ({
+          ...row,
+          editable: mode === "calc_results" ? false : Boolean(row.editability && row.editability.editable),
+          reason: row.editability ? row.editability.reason : ""
+        })),
+        selectedRowKey: state.selectedRowKey,
+        onRowSelect: function (key) {
+          state.selectedRowKey = key;
+          renderTable();
+          renderHeader();
+        },
+        onCellChange: function(e) {
+          onCellChange(e);
+          triggerAutosave(e);
+        },
+        onWorkbookValueChange: function(e) {
+          onWorkbookValueChange(e);
+          triggerAutosave(e);
+        },
+        onCellOpen: openCellDetail
+      });
+
+      renderSheetResultsOverflow(sheetResults);
+    }
 
     // Check sent back badge
     const needsCorrectionRow = rows.find(row => 
