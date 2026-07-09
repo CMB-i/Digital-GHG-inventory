@@ -554,7 +554,18 @@ document.addEventListener("DOMContentLoaded", function () {
       sheetResultsSection.innerHTML = "";
       return;
     }
-    const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(results);
+    const monthlyFieldCount = (state.workbook.fields || []).filter((field) => {
+      const frequency = String(field.frequency || "monthly").toLowerCase();
+      const fieldType = String(field.field_type || "").toLowerCase();
+      return frequency === "monthly" && fieldType !== "calculated" && fieldType !== "file";
+    }).length;
+    const hasAnnualSummaryFields = (state.workbook.fields || []).some((field) => {
+      const config = field.field_config || {};
+      return config.field_scope === "annual_result" || config.result_role === "aggregate_result";
+    });
+    const html = (monthlyFieldCount === 0 && hasAnnualSummaryFields)
+      ? ""
+      : window.WorkbookSheet.renderSheetResultsOverflowHtml(results, monthlyFieldCount);
     if (!html) {
       sheetResultsSection.classList.add("hidden");
       sheetResultsSection.innerHTML = "";
@@ -572,8 +583,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const fields = state.workbook.fields || [];
     const rows = state.workbook.rows || [];
+    const sheetResults = state.workbook.sheet_results || [];
 
-    if (!fields.length) {
+    if (!fields.length && !sheetResults.length) {
       setEmpty("No fields configured", "The selected form has no published fields.");
       return;
     }
@@ -581,8 +593,6 @@ document.addEventListener("DOMContentLoaded", function () {
     emptyEl.classList.add("hidden");
     tableWrap.classList.remove("hidden");
     const mode = "entry";
-
-    const sheetResults = state.workbook.sheet_results || [];
 
     window.WorkbookSheet.render({
       mode: mode,

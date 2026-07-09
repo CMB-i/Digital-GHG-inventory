@@ -120,6 +120,24 @@
     return "not_started";
   }
 
+  function roundOffDecimals(fieldOrResult) {
+    const config = fieldOrResult && fieldOrResult.field_config ? fieldOrResult.field_config : {};
+    const direct = fieldOrResult && fieldOrResult.round_off_decimals;
+    const raw = direct !== undefined && direct !== null ? direct : config.round_off_decimals;
+    if (raw === undefined || raw === null || raw === "") return 3;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed >= 1 && parsed <= 9 ? parsed : 3;
+  }
+
+  function formatNumericDisplay(value, decimals) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return String(value ?? "");
+    return numeric.toLocaleString("en-IN", {
+      maximumFractionDigits: decimals,
+      minimumFractionDigits: 0,
+    });
+  }
+
   function formatReadonlyValue(field, row) {
     const cell = cellObject(row, field);
     const proof = proofFor(row, field);
@@ -144,12 +162,20 @@
     if (fieldType === "calculated") {
       const unit = field.unit || (field.field_config && field.field_config.unit) || "";
       if (value === "") return '<span class="workbook-calc-empty">—</span>';
+      const display = formatNumericDisplay(value, roundOffDecimals(field));
       return unit
-        ? `${escapeHtml(value)} <span class="text-xs text-slate-400">${escapeHtml(unit)}</span>`
-        : escapeHtml(value);
+        ? `${escapeHtml(display)} <span class="text-xs text-slate-400">${escapeHtml(unit)}</span>`
+        : escapeHtml(display);
     }
 
     if (value === "") return '<span class="text-slate-400">—</span>';
+    if (["number", "integer", "decimal", "float", "numeric"].includes(fieldType)) {
+      const config = field.field_config || {};
+      const isMirror = Boolean(config.cross_sheet_source || config.readonly);
+      if (isMirror || config.round_off_decimals !== undefined) {
+        return escapeHtml(formatNumericDisplay(value, roundOffDecimals(field)));
+      }
+    }
     return escapeHtml(value);
   }
 
@@ -371,9 +397,10 @@
     }
 
     const rowLocked = row.is_locked || row.submission_status === "Approved";
-    const editable = options.mode === "entry" && row.editable && !cellLocked(row, field) && !rowLocked;
+    const isReadonlyMirror = Boolean((field.field_config || {}).cross_sheet_source || (field.field_config || {}).readonly);
+    const editable = options.mode === "entry" && row.editable && !cellLocked(row, field) && !rowLocked && !isReadonlyMirror;
     const fieldType = normalizedFieldType(field);
-    const disabled = !editable || fieldType === "calculated" || fieldType === "file";
+    const disabled = !editable || fieldType === "calculated" || fieldType === "file" || isReadonlyMirror;
     const state = cellState(row, field);
     const proof = proofFor(row, field);
     const issues = cellIssues(row, field);
@@ -474,12 +501,24 @@
     return `<input type="${type}" value="${escapeHtml(value)}" ${common}>`;
   }
 
+  function sheetResultForField(field, sheetResults) {
+    const code = normalizeFieldCode(field.field_code);
+    return (sheetResults || []).find((result) => normalizeFieldCode(result.field_code) === code) || null;
+  }
+
   function renderWorkbookValueField(field, options) {
     const values = options.workbookValues || {};
     const valueObj = values[field.field_code] || null;
+    const calculatedResult = normalizedFieldType(field) === "calculated"
+      ? sheetResultForField(field, options.sheetResults)
+      : null;
     const state = valueObj && valueObj.cell_state ? valueObj.cell_state : "blank_editable";
     const locked = Boolean(valueObj && valueObj.is_locked);
-    const editable = options.mode === "entry" && Boolean(options.canEditWorkbookValues) && isEditableWorkbookField(field, options) && !locked;
+    const editable = options.mode === "entry"
+      && Boolean(options.canEditWorkbookValues)
+      && isEditableWorkbookField(field, options)
+      && !locked
+      && !calculatedResult;
     const stateClass = {
       blank_editable: "bg-white border-slate-200",
       draft_filled: "bg-blue-50/50 border-blue-100",
@@ -497,8 +536,10 @@
           </div>
           <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">${escapeHtml(field.frequency || "context")}</span>
         </div>
-        ${renderWorkbookValueControl(field, valueObj, editable)}
-        ${!editable && normalizedFrequency(field) !== "annual" ? '<div class="mt-2 text-xs text-slate-400">Read-only context value</div>' : ""}
+        ${calculatedResult
+          ? `<div class="px-2 py-2 text-sm font-semibold text-[#1a3a6b] tabular-nums">${escapeHtml(formatSheetResultValue(calculatedResult))}</div>${calculatedResult.message ? `<div class="mt-1 text-xs text-amber-700">${escapeHtml(calculatedResult.message)}</div>` : ""}`
+          : renderWorkbookValueControl(field, valueObj, editable)}
+        ${!editable && !calculatedResult && normalizedFrequency(field) !== "annual" ? '<div class="mt-2 text-xs text-slate-400">Read-only context value</div>' : ""}
       </div>
     `;
   }
@@ -550,10 +591,8 @@
     if (!result || result.value === null || result.value === undefined || result.value === "") {
       return "—";
     }
-    const numeric = Number(result.value);
-    const value = Number.isFinite(numeric)
-      ? numeric.toLocaleString("en-IN", { maximumFractionDigits: 6 })
-      : String(result.value);
+    const decimals = roundOffDecimals(result);
+    const value = formatNumericDisplay(result.value, decimals);
     return result.unit ? `${value} ${result.unit}` : value;
   }
 
@@ -561,9 +600,12 @@
     return String(code || "").trim().toLowerCase();
   }
 
-  function splitSheetResults(sheetResults) {
-    // All sheet results render in the column footer; overflow strip is unused.
-    return { footerResults: sheetResults || [], overflowResults: [] };
+  function splitSheetResults(sheetResults, displayFieldCount) {
+    const results = sheetResults || [];
+    if (!displayFieldCount) {
+      return { footerResults: [], overflowResults: results };
+    }
+    return { footerResults: results, overflowResults: [] };
   }
 
   function renderSheetResultFooterCell(result, showLabel) {
@@ -651,8 +693,8 @@
     `;
   }
 
-  function renderSheetResultsOverflowHtml(sheetResults) {
-    const { overflowResults } = splitSheetResults(sheetResults);
+  function renderSheetResultsOverflowHtml(sheetResults, displayFieldCount) {
+    const { overflowResults } = splitSheetResults(sheetResults, displayFieldCount);
     if (!overflowResults.length) return "";
 
     return `
@@ -772,7 +814,7 @@
               </th>
             `;
           }).join("")}
-          ${!isCalcMode ? '<th rowspan="2" class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
+          ${!isCalcMode && fileField ? '<th rowspan="2" class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
         <tr>
           ${displayFields.map((field) => renderFieldHeader(field, isCalcMode)).join("")}
@@ -783,7 +825,7 @@
         <tr>
           <th class="sticky left-0 z-20 w-[100px] min-w-[100px] max-w-[100px] border border-slate-200 bg-navy text-white px-3 py-2 text-left">Month</th>
           ${displayFields.map((field) => renderFieldHeader(field, isCalcMode)).join("")}
-          ${!isCalcMode ? '<th class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
+          ${!isCalcMode && fileField ? '<th class="w-[140px] min-w-[140px] max-w-[140px] border border-slate-200 bg-navy text-white px-3 py-2 text-left whitespace-nowrap">REMARKS</th>' : ""}
         </tr>
       `;
     }
@@ -835,20 +877,54 @@
             ${escapeHtml(getFullMonthYear(row.month, row.year))}${lockSuffix}
           </td>
           ${displayFields.map((field) => renderCell(row, field, options)).join("")}
-          ${!isCalcMode ? renderRemarksCell(row, fileField, options) : ""}
+          ${!isCalcMode && fileField ? renderRemarksCell(row, fileField, options) : ""}
         </tr>
       `;
     }
 
     const sheetResults = options.sheetResults || [];
-    const footerHtml = renderSheetResultFooter(displayFields, sheetResults, options);
-
-    bodyEl.innerHTML = tbodyHtml + footerHtml + (isCalcMode ? "" : nonMonthlyGroups.map((group) => renderWorkbookValueSection(group, {
+    const footerHtml = displayFields.length
+      ? renderSheetResultFooter(displayFields, sheetResults, options)
+      : "";
+    const contextSectionHtml = isCalcMode ? "" : nonMonthlyGroups.map((group) => renderWorkbookValueSection(group, {
       ...options,
-      totalColumns: displayFields.length + 2,
-    })).join(""));
+      sheetResults,
+      totalColumns: Math.max(displayFields.length + 2, 3),
+    })).join("");
 
-    const overflowResults = splitSheetResults(sheetResults).overflowResults;
+    if (!displayFields.length && contextSectionHtml && sheetResults.length) {
+      headEl.innerHTML = `
+        <tr>
+          <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left">FY summary</th>
+        </tr>
+      `;
+      bodyEl.innerHTML = contextSectionHtml;
+    } else if (!displayFields.length && !contextSectionHtml && sheetResults.length) {
+      headEl.innerHTML = `
+        <tr>
+          <th class="border border-slate-200 bg-navy text-white px-3 py-2 text-left">Calculated results</th>
+        </tr>
+      `;
+      bodyEl.innerHTML = `
+        <tr>
+          <td class="border border-slate-200 px-4 py-4">
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              ${sheetResults.map((result) => `
+                <div class="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                  <div class="text-xs font-bold uppercase tracking-wider text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>
+                  <div class="mt-2 tabular-nums text-sm font-semibold text-[#1a3a6b]">${escapeHtml(formatSheetResultValue(result))}</div>
+                  ${result.message ? `<div class="mt-1 text-xs text-amber-700">${escapeHtml(result.message)}</div>` : ""}
+                </div>
+              `).join("")}
+            </div>
+          </td>
+        </tr>
+      `;
+    } else {
+      bodyEl.innerHTML = tbodyHtml + footerHtml + contextSectionHtml;
+    }
+
+    const overflowResults = splitSheetResults(sheetResults, displayFields.length).overflowResults;
 
     // Event Bindings
     bodyEl.querySelectorAll("tr[data-row-key]").forEach((tr) => {
