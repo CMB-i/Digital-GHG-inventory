@@ -910,6 +910,26 @@ def get_annual_workbook_options(user_id):
     }
 
 
+def _round_off_decimals(config):
+    decimals = (config or {}).get("round_off_decimals", 3)
+    try:
+        decimals = int(decimals)
+        if not (1 <= decimals <= 9):
+            return 3
+        return decimals
+    except (TypeError, ValueError):
+        return 3
+
+
+def _apply_round_off(value, config):
+    if value is None:
+        return None
+    try:
+        return round(float(value), _round_off_decimals(config))
+    except (TypeError, ValueError):
+        return value
+
+
 def _compute_preview_calculated_values(submissions, fields):
     """
     For a list of submissions (all for the same form), compute preview values
@@ -968,6 +988,7 @@ def _compute_preview_calculated_values(submissions, fields):
                     continue
                 try:
                     computed_val = evaluate_formula(fv.expression, field_values, value_set_snapshot)
+                    computed_val = _apply_round_off(computed_val, f.get("field_config"))
                     computed[code] = computed_val
                     field_values[code] = computed_val
                 except Exception:
@@ -1016,18 +1037,204 @@ def _monthly_series_for_results(rows, monthly_fields):
     return series, labels
 
 
-def _compose_sheet_results(result_fields, monthly_fields, rows):
+def _monthly_values_by_period_for_form(site_id, form, fy_start_year):
+    months = _fy_months(fy_start_year)
+    month_keys = [(item["year"], item["month"]) for item in months]
+
+    periods = ReportingPeriod.query.filter(
+        ReportingPeriod.site_id == site_id,
+        ReportingPeriod.is_deleted == False,
+        tuple_(ReportingPeriod.year, ReportingPeriod.month).in_(month_keys),
+    ).all()
+    period_by_key = {(period.year, period.month): period for period in periods}
+
+    fields = _field_payload(form.current_version_id)
+    sections = _sections_payload(form)
+    monthly_fields = monthly_table_fields(fields, sections)
+
+    submissions = Submission.query.filter(
+        Submission.site_id == site_id,
+        Submission.form_id == form.id,
+        Submission.is_deleted == False,
+        Submission.reporting_period_id.in_([period.id for period in periods] or [0]),
+    ).all()
+    submission_by_period = {
+        submission.reporting_period_id: submission
+        for submission in submissions
+    }
+    calc_preview = _compute_preview_calculated_values(list(submissions), fields)
+
+    values_by_period = {}
+    for item in months:
+        period = period_by_key.get((item["year"], item["month"]))
+        submission = submission_by_period.get(period.id) if period else None
+        values = _submission_values_payload(submission, monthly_fields)
+        if submission and submission.id in calc_preview:
+            for code, preview_val in calc_preview[submission.id].items():
+                if preview_val is not None and values.get(code) in (None, ""):
+                    values[code] = preview_val
+        values_by_period[(item["year"], item["month"])] = values
+    return values_by_period
+
+
+def _merge_cross_sheet_monthly_rows(rows, fields, site_id, fy_start_year):
+    mirror_fields = [
+        field for field in fields
+        if (field.get("field_config") or {}).get("cross_sheet_source")
+    ]
+    if not mirror_fields:
+        return rows
+
+    source_form_code = mirror_fields[0]["field_config"]["cross_sheet_source"]
+    source_form = Form.query.filter_by(code=source_form_code, is_deleted=False).first()
+    if not source_form:
+        return rows
+
+    mirror_codes = {field["field_code"] for field in mirror_fields}
+    source_values = _monthly_values_by_period_for_form(site_id, source_form, fy_start_year)
+
+    for row in rows:
+        source_row_values = source_values.get((row.get("year"), row.get("month")), {})
+        row_values = row.setdefault("values", {})
+        for code in mirror_codes:
+            source_value = source_row_values.get(code)
+            if source_value not in (None, ""):
+                row_values[code] = source_value
+    return rows
+
+
+def _formula_variable_names(expression):
+    reserved = {"min", "max", "SUM_MONTHS"}
+    names = set(re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", expression or ""))
+    return names - reserved
+
+
+def _build_workbook_formula_context(site_id, workbook_id, fy_start_year):
+    """Monthly series and annual scalars across all sheets in a workbook."""
+    months = _fy_months(fy_start_year)
+    month_keys = [(item["year"], item["month"]) for item in months]
+
+    periods = ReportingPeriod.query.filter(
+        ReportingPeriod.site_id == site_id,
+        ReportingPeriod.is_deleted == False,
+        tuple_(ReportingPeriod.year, ReportingPeriod.month).in_(month_keys),
+    ).all()
+    period_by_key = {(period.year, period.month): period for period in periods}
+    period_ids = [period.id for period in periods]
+
+    scalar_values = {}
+    monthly_series = {}
+    missing_by_code = {}
+
+    for _workbook_form, form in _workbook_sheet_rows(workbook_id):
+        fields = _field_payload(form.current_version_id)
+        sections = _sections_payload(form)
+        monthly_fields = monthly_table_fields(fields, sections)
+        field_version_to_code = {
+            field["field_version_id"]: field["field_code"]
+            for field in fields
+            if field.get("field_version_id")
+        }
+
+        workbook_values = WorkbookFieldValue.query.filter(
+            WorkbookFieldValue.site_id == site_id,
+            WorkbookFieldValue.form_id == form.id,
+            WorkbookFieldValue.fy_start_year == fy_start_year,
+            WorkbookFieldValue.field_version_id.in_(list(field_version_to_code.keys()) or [0]),
+            WorkbookFieldValue.is_deleted == False,
+        ).all()
+        for workbook_value in workbook_values:
+            code = field_version_to_code.get(workbook_value.field_version_id)
+            if not code:
+                continue
+            if workbook_value.numeric_value is not None:
+                scalar_values[code] = float(workbook_value.numeric_value)
+            elif workbook_value.value_text not in (None, ""):
+                try:
+                    scalar_values[code] = float(workbook_value.value_text)
+                except (TypeError, ValueError):
+                    pass
+
+        submissions = Submission.query.filter(
+            Submission.site_id == site_id,
+            Submission.form_id == form.id,
+            Submission.is_deleted == False,
+            Submission.reporting_period_id.in_(period_ids or [0]),
+        ).all()
+        submission_by_period = {
+            submission.reporting_period_id: submission
+            for submission in submissions
+        }
+        calc_preview = _compute_preview_calculated_values(submissions, fields)
+
+        rows = []
+        for item in months:
+            period = period_by_key.get((item["year"], item["month"]))
+            submission = submission_by_period.get(period.id) if period else None
+            values = _submission_values_payload(submission, monthly_fields)
+            if submission and submission.id in calc_preview:
+                for code, preview_val in calc_preview[submission.id].items():
+                    if preview_val is not None and values.get(code) in (None, ""):
+                        values[code] = preview_val
+            rows.append({
+                "label": item.get("label"),
+                "period_label": item.get("label"),
+                "values": values,
+            })
+
+        form_series, form_missing = _monthly_series_for_results(rows, monthly_fields)
+        monthly_series.update(form_series)
+        missing_by_code.update(form_missing)
+
+    return scalar_values, monthly_series, missing_by_code
+
+
+def _compose_sheet_results(
+    result_fields,
+    monthly_fields,
+    rows,
+    site_id=None,
+    workbook_id=None,
+    fy_start_year=None,
+):
     if not result_fields:
         return []
 
     value_set_snapshot = get_approved_valsets_snapshot()
-    monthly_series, missing_by_code = _monthly_series_for_results(rows, monthly_fields)
-    result_values = {}
+    local_series, local_missing = _monthly_series_for_results(rows, monthly_fields)
+    workbook_scalars = {}
+    workbook_series = {}
+    workbook_missing = {}
+    if site_id and workbook_id and fy_start_year:
+        workbook_scalars, workbook_series, workbook_missing = _build_workbook_formula_context(
+            site_id,
+            workbook_id,
+            fy_start_year,
+        )
+
+    monthly_series = {**workbook_series, **local_series}
+    missing_by_code = {**workbook_missing, **local_missing}
+
+    eval_fields = list(result_fields)
+    if site_id and workbook_id and fy_start_year:
+        seen_codes = {field["field_code"] for field in result_fields}
+        for _workbook_form, form in _workbook_sheet_rows(workbook_id):
+            fields = _field_payload(form.current_version_id)
+            sections = _sections_payload(form)
+            for field in fields:
+                if not is_sheet_result_field(field):
+                    continue
+                if field["field_code"] in seen_codes:
+                    continue
+                seen_codes.add(field["field_code"])
+                eval_fields.append(field)
+
+    result_values = dict(workbook_scalars)
     results_by_code = {}
 
     formula_version_ids = [
         (field.get("field_config") or {}).get("formula_version_id")
-        for field in result_fields
+        for field in eval_fields
         if (field.get("field_config") or {}).get("formula_version_id")
     ]
     formula_versions = {
@@ -1035,8 +1242,8 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
         for fv in FormulaVersion.query.filter(FormulaVersion.id.in_(formula_version_ids or [0])).all()
     }
 
-    for _pass in range(3):
-        for field in result_fields:
+    for _pass in range(5):
+        for field in eval_fields:
             code = field["field_code"]
             config = field.get("field_config") or {}
             formula_version_id = config.get("formula_version_id")
@@ -1062,42 +1269,47 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
                 continue
 
             aggregate_names = aggregate_operand_names(formula_version.expression)
+            variable_names = _formula_variable_names(formula_version.expression)
             missing_messages = []
             context_values = dict(result_values)
 
-            for name in aggregate_names:
-                if name not in monthly_series:
-                    missing_messages.append(f"Monthly field '{name}' is not available in this sheet.")
-                    continue
-                missing_months = missing_by_code.get(name) or []
-                if config.get("blank_policy", "strict") == "strict" and missing_months:
-                    preview = ", ".join(missing_months[:3])
-                    suffix = "..." if len(missing_months) > 3 else ""
-                    missing_messages.append(f"{name} is missing for {preview}{suffix}.")
-                context_values[name] = monthly_series[name]
+            for name in variable_names:
+                if name in aggregate_names:
+                    if name not in monthly_series:
+                        missing_messages.append(f"Monthly field '{name}' is not available in this workbook.")
+                        continue
+                    missing_months = missing_by_code.get(name) or []
+                    if config.get("blank_policy", "strict") == "strict" and missing_months:
+                        preview = ", ".join(missing_months[:3])
+                        suffix = "..." if len(missing_months) > 3 else ""
+                        missing_messages.append(f"{name} is missing for {preview}{suffix}.")
+                    context_values[name] = monthly_series[name]
+                elif name not in context_values:
+                    missing_messages.append(f"Field '{name}' is not available yet.")
 
             if missing_messages:
                 results_by_code[code] = {
                     "status": "needs_input",
                     "message": "Cannot calculate: " + " ".join(missing_messages),
-                    "source_field_codes": sorted(aggregate_names),
+                    "source_field_codes": sorted(variable_names),
                 }
                 continue
 
             try:
                 result = evaluate_formula(formula_version.expression, context_values, value_set_snapshot)
+                result = _apply_round_off(result, config)
                 result_values[code] = result
                 results_by_code[code] = {
                     "status": "calculated",
                     "value": result,
                     "message": "",
-                    "source_field_codes": sorted(aggregate_names),
+                    "source_field_codes": sorted(variable_names),
                 }
             except Exception as exc:
                 results_by_code[code] = {
                     "status": "error",
                     "message": str(exc),
-                    "source_field_codes": sorted(aggregate_names),
+                    "source_field_codes": sorted(variable_names),
                 }
 
     sheet_results = []
@@ -1124,6 +1336,7 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
             "message": result.get("message") or "",
             "source_field_codes": source_field_codes,
             "display_region": config.get("display_region") or "under_input_column",
+            "round_off_decimals": _round_off_decimals(config),
         })
     return sheet_results
 
@@ -1179,7 +1392,7 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
         for submission in submissions
     }
 
-    calc_preview = _compute_preview_calculated_values(list(submissions), monthly_fields)
+    calc_preview = _compute_preview_calculated_values(list(submissions), fields)
 
     rows = []
     for item in months:
@@ -1210,7 +1423,16 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
             "is_active_period": bool(period and period.status in ("OPEN", "REOPENED")),
         })
 
-    sheet_results = _compose_sheet_results(sheet_result_fields, monthly_fields, rows)
+    rows = _merge_cross_sheet_monthly_rows(rows, fields, site.id, fy_start_year)
+
+    sheet_results = _compose_sheet_results(
+        sheet_result_fields,
+        monthly_fields,
+        rows,
+        site_id=site.id,
+        workbook_id=workbook.id,
+        fy_start_year=fy_start_year,
+    )
 
     return {
         "financial_year": {
@@ -1236,7 +1458,8 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
             "code": form.code,
             "workflow_id": workbook.workflow_id,
         },
-        "fields": monthly_fields,
+        "fields": fields,
+        "monthly_fields": monthly_fields,
         "sections": sections,
         "workbook_values": workbook_values_payload(site.id, form.id, fy_start_year, fields),
         "sheet_results": sheet_results,
@@ -1417,7 +1640,8 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
             "name": human_sheet_label(form),
             "code": form.code,
         },
-        "fields": monthly_fields,
+        "fields": fields,
+        "monthly_fields": monthly_fields,
         "sections": sections,
         "workbook_values": workbook_values_payload(site.id, form.id, fy_start_year, fields),
         "rows": rows,
@@ -1656,6 +1880,7 @@ def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
                     else:
                         try:
                             preview_val = evaluate_formula(formula_version.expression, preview_field_values, value_set_snapshot)
+                            preview_val = _apply_round_off(preview_val, fv.field_config)
 
                             # Check if preview relies on unapproved values
                             unapproved_inputs = [t for t in tokens if t not in value_set_snapshot and cell_states.get(t) != "approved_locked"]
@@ -1691,6 +1916,7 @@ def compose_calculation_results(site_id, workbook_id, fy_start_year, user_id):
                     else:
                         try:
                             reportable_val = evaluate_formula(formula_version.expression, reportable_field_values, value_set_snapshot)
+                            reportable_val = _apply_round_off(reportable_val, fv.field_config)
                         except Exception as exc:
                             reportable_status = "evaluation_error"
                             reportable_warnings.append(f"Evaluation error: {str(exc)}")
@@ -2410,6 +2636,7 @@ def autosave_submission_values(submission_id, values_dict, user_id):
                 try:
                     # Run evaluation
                     result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
+                    result = _apply_round_off(result, info["field_config"])
                     
                     # Save calculation row
                     calc_row = SubmissionValue.query.filter_by(

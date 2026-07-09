@@ -295,6 +295,7 @@ FY 2024 = April 2024 – March 2025
 | Script | Purpose |
 |---|---|
 | `scripts/seed.py` | Seeds a development admin account and global AccessMatrix permissions |
+| `scripts/seed_jaigarh_workbook.py` | Seeds the Jaigarh FY25-26 GHG workbook (4 sheets: Cargo, Electricity, Fuel Consumption + GRI Summary; formulas, Excel data). Run after `seed.py`. Use `--verify-only` to re-check totals. |
 | `scripts/dev_purge_test_data.py` | **Development only** — hard-deletes test/demo data by name pattern. Requires `FLASK_ENV=development`. Run with `--dry-run` first. |
 
 ---

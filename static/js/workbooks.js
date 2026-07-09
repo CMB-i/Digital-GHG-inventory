@@ -391,11 +391,11 @@ document.addEventListener("DOMContentLoaded", function () {
       }
     }
 
-    function renderPreviewAggregateHint(sheetResults) {
+    function renderPreviewAggregateHint(sheetResults, previewMeta) {
       if (!previewAggregateHint) return;
-      const results = sheetResults || [];
+      const configuredCount = Number(previewMeta?.sheet_result_field_count) || 0;
       const hasFooter = previewBody && previewBody.querySelector(".sheet-aggregate-row");
-      if (results.length > 0 || hasFooter) {
+      if (configuredCount > 0 || hasFooter) {
         previewAggregateHint.classList.add("hidden");
         previewAggregateHint.textContent = "";
         return;
@@ -445,7 +445,7 @@ document.addEventListener("DOMContentLoaded", function () {
             selectedRowKey: null,
           });
           renderPreviewResultsOverflow(ctx.sheet_results || []);
-          renderPreviewAggregateHint(ctx.sheet_results || []);
+          renderPreviewAggregateHint(ctx.sheet_results || [], ctx.preview_meta);
         })
         .catch(err => { resetPreview(err.message || "Failed to load sheet preview."); });
     }
