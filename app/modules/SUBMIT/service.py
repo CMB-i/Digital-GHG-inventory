@@ -9,6 +9,16 @@ from sqlalchemy import tuple_
 
 from app.database import db
 from app.common.permissions import has_permission
+from app.common.submission_status import (
+    STATUS_DRAFT,
+    STATUS_SUBMITTED,
+    STATUS_RESUBMITTED,
+    STATUS_CHANGES_REQUESTED,
+    STATUS_APPROVED,
+    EDITABLE_SUBMISSION_STATUSES,
+    REVIEWABLE_STATUSES,
+    SUBMISSION_STATUS_LABELS,
+)
 from app.modules.ACCESS.model import AccessMatrix
 from app.modules.SITEMST.model import Site
 from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion
@@ -261,7 +271,6 @@ class PackageSubmissionError(ValueError):
 
 FY_MONTH_ORDER = (4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3)
 EDITABLE_PERIOD_STATUSES = ("OPEN", "REOPENED")
-EDITABLE_SUBMISSION_STATUSES = ("Draft", "Changes Requested")
 CELL_STATE_BLANK_EDITABLE = "blank_editable"
 CELL_STATE_DRAFT_FILLED = "draft_filled"
 CELL_STATE_SUBMITTED = "submitted"
@@ -305,11 +314,11 @@ def sync_submission_values_for_status(submission, user_id=None):
     values = SubmissionValue.query.filter_by(submission_id=submission.id).all()
     for value in values:
         has_content = submission_value_has_content(value)
-        if submission.status == "Approved" and has_content:
+        if submission.status == STATUS_APPROVED and has_content:
             set_submission_value_state(value, CELL_STATE_APPROVED_LOCKED)
-        elif submission.status in ("Submitted", "Resubmitted", "Under Review") and has_content:
+        elif submission.status in REVIEWABLE_STATUSES and has_content:
             set_submission_value_state(value, CELL_STATE_SUBMITTED)
-        elif submission.status == "Changes Requested" and has_content:
+        elif submission.status == STATUS_CHANGES_REQUESTED and has_content:
             set_submission_value_state(value, CELL_STATE_CHANGES_REQUESTED)
         elif has_content:
             set_submission_value_state(value, CELL_STATE_DRAFT_FILLED)
@@ -327,6 +336,11 @@ def format_period_label(year, month):
 
 def financial_year_label(start_year):
     return f"FY {start_year}-{str(start_year + 1)[-2:]}"
+
+
+def fy_start_year_for(year, month):
+    """FY start year (April-March, see FY_MONTH_ORDER) for a given calendar year/month."""
+    return year if month >= 4 else year - 1
 
 
 def _parse_form_metadata(form):
@@ -807,13 +821,13 @@ def _row_editability(period, submission, can_edit_monthly):
             "editable": False,
             "reason": "Reporting period is not open for this month.",
         }
-    if submission and (submission.is_locked or submission.status == "Approved"):
+    if submission and (submission.is_locked or submission.status == STATUS_APPROVED):
         return {
             "state": "read_only",
             "editable": False,
             "reason": "Approved or locked monthly sheet.",
         }
-    if submission and submission.status in ("Submitted", "Resubmitted", "Under Review"):
+    if submission and submission.status in REVIEWABLE_STATUSES:
         return {
             "state": "read_only",
             "editable": False,
@@ -825,14 +839,14 @@ def _row_editability(period, submission, can_edit_monthly):
             "editable": False,
             "reason": "You do not have permission to edit submissions for this site.",
         }
-    if submission and submission.status == "Changes Requested":
+    if submission and submission.status == STATUS_CHANGES_REQUESTED:
         return {
             "state": "editable",
             "editable": True,
             "reason": "Monthly sheet was sent back for changes.",
         }
     if period.status in EDITABLE_PERIOD_STATUSES and (
-        not submission or submission.status == "Draft"
+        not submission or submission.status == STATUS_DRAFT
     ):
         return {
             "state": "editable",
@@ -1828,15 +1842,7 @@ def get_spoc_sheets_buckets(user_id):
         return users_cache[uid]
 
     def plain_submission_status(status):
-        return {
-            "Approved": "Approved and locked",
-            "Draft": "Draft saved",
-            "Changes Requested": "Needs correction",
-            "Rejected": "Sent back",
-            "Resubmitted": "Sent again for review",
-            "Under Review": "Under review",
-            "Submitted": "Submitted",
-        }.get(status, status or "Unknown")
+        return SUBMISSION_STATUS_LABELS.get(status, status or "Unknown")
 
     # Track submission combos (site_id, form_id, reporting_period_id)
     submitted_combos = set()
@@ -1877,7 +1883,7 @@ def get_spoc_sheets_buckets(user_id):
             "submitted_by": get_username(sub.submitted_by)
         }
         
-        if sub.status in ("Draft", "Changes Requested"):
+        if sub.status in EDITABLE_SUBMISSION_STATUSES:
             action_needed.append(item)
         else:
             submitted.append(item)
@@ -1987,7 +1993,7 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id, work
         form_version_id=form.current_version_id,
         reporting_period_id=reporting_period_id,
         workflow_version_id=workflow.current_version_id,
-        status="Draft",
+        status=STATUS_DRAFT,
         created_by=user_id,
         updated_by=user_id,
         current_level=1
@@ -2003,7 +2009,7 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id, work
         action="CREATE_DRAFT",
         old_values=None,
         new_values={
-            "status": "Draft",
+            "status": STATUS_DRAFT,
             "site_id": site_id,
             "form_id": form_id,
             "reporting_period_id": reporting_period_id
@@ -2064,7 +2070,7 @@ def get_or_create_submission_package(site_id, period_id, user_id, package_type="
         site_id=site_id,
         period_id=period_id,
         package_type=package_type,
-        status="Draft",
+        status=STATUS_DRAFT,
         created_by=user_id,
         updated_by=user_id,
     )
@@ -2157,7 +2163,7 @@ def submit_monthly_workbook_package(site_id, workbook_id=None, period_id=None, y
             })
             continue
 
-        if submission.is_locked or submission.status == "Approved":
+        if submission.is_locked or submission.status == STATUS_APPROVED:
             skipped.append({
                 "form_id": form.id,
                 "form_name": human_sheet_label(form),
@@ -2217,7 +2223,7 @@ def submit_monthly_workbook_package(site_id, workbook_id=None, period_id=None, y
             warnings=skipped,
         )
 
-    package.status = "Submitted"
+    package.status = STATUS_SUBMITTED
     package.submitted_by = user_id
     package.submitted_at = datetime.now(timezone.utc)
     included_levels = [
@@ -2309,7 +2315,7 @@ def recalculate_submission_formulas(submission, fields_map, user_id):
 
     period = ReportingPeriod.query.get(submission.reporting_period_id)
     if period:
-        fy_start_year = period.year if period.month >= 4 else period.year - 1
+        fy_start_year = fy_start_year_for(period.year, period.month)
         version_to_code = {
             info["field_version_id"]: code
             for code, info in fields_map.items()
@@ -2376,7 +2382,7 @@ def autosave_submission_values(submission_id, values_dict, user_id):
     if not submission or submission.is_deleted:
         raise ValueError("Submission not found.")
 
-    if submission.status not in ("Draft", "Changes Requested"):
+    if submission.status not in EDITABLE_SUBMISSION_STATUSES:
         raise ValueError(f"Cannot edit submission in status: {submission.status}")
 
     if not has_permission(user_id, "submission", "edit", scope_site_id=submission.site_id):
@@ -2441,7 +2447,7 @@ def submit_submission(submission_id, user_id):
     if not submission or submission.is_deleted:
         raise ValueError("Submission not found.")
         
-    if submission.status not in ("Draft", "Changes Requested"):
+    if submission.status not in EDITABLE_SUBMISSION_STATUSES:
         raise ValueError(f"Cannot submit submission in status: {submission.status}")
         
     if not has_permission(user_id, "submission", "submit", scope_site_id=submission.site_id):
@@ -2567,9 +2573,9 @@ def submit_submission(submission_id, user_id):
         
     # Transition status
     old_status = submission.status
-    new_status = "Resubmitted" if old_status == "Changes Requested" else "Submitted"
+    new_status = STATUS_RESUBMITTED if old_status == STATUS_CHANGES_REQUESTED else STATUS_SUBMITTED
 
-    if old_status == "Changes Requested":
+    if old_status == STATUS_CHANGES_REQUESTED:
         # Soft-delete all existing ApprovalAction records for this submission
         from app.modules.APPROV.model import ApprovalAction
         prior_approvals = ApprovalAction.query.filter_by(
