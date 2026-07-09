@@ -125,11 +125,6 @@ def cleanup_jaigarh_data():
             for row in db.session.query(Field.id).filter(Field.form_id.in_(form_ids)).all()
         ]
         if field_ids:
-            Field.query.filter(Field.id.in_(field_ids)).update(
-                {Field.current_version_id: None},
-                synchronize_session=False,
-            )
-            db.session.flush()
             FieldVersion.query.filter(FieldVersion.field_id.in_(field_ids)).delete(synchronize_session=False)
             Field.query.filter(Field.id.in_(field_ids)).delete(synchronize_session=False)
         FormSection.query.filter(FormSection.form_id.in_(form_ids)).delete(synchronize_session=False)
