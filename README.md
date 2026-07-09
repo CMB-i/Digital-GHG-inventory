@@ -328,7 +328,6 @@ Honest, short list of things known to be wrong or unfinished today. If you fix o
 
 - **No shared submission-status enum.** `SUBMIT` and `APPROV` each define their own status string tuples independently; `PERIOD` and `VALSET` use yet other casing conventions for their own separate lifecycles.
 - **"SPOC" and "Submitter" (and "Approver" and "Reviewer") coexist in the codebase.** See [Terminology](#terminology) below — user-facing copy mostly says Submitter/Reviewer, but module names, JS filenames, CSS classes, and some newer admin-facing strings still say SPOC/Approver.
-- **Three separately-maintained cell-state color maps in `static/js/workbook_sheet.js` disagree with each other.** A past UI-redesign commit updated two of the three maps to a new palette and missed the third — the legend a reviewer sees today uses different colors than the grid cells for the same underlying state.
 - **No row locking anywhere in SUBMIT, APPROV, or PERIOD.** Concurrent submits, concurrent `ANY_ONE`-level approvals, and period-lock-during-in-flight-submission races are all possible.
 - **`Field.current_version_id` means something different from every sibling `current_version_id`** in the app (see [Consistency Guidelines](#consistency-guidelines)). Harmless today since nothing reads it, but a landmine for anyone who assumes it follows the app-wide convention.
 
