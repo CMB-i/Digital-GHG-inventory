@@ -293,7 +293,7 @@ def compose_preview_workbook_context(form_version_id):
         "workbook_values": workbook_values,
         "sheet_results": sheet_results,
         "preview_meta": {
-            "sheet_result_field_count": len(sheet_results),
+            "sheet_result_field_count": len(sheet_result_fields),
         },
         "rows": rows,
     }
