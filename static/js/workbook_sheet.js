@@ -381,14 +381,10 @@
     const openHandler = options.onCellOpen || options.onIssueClick;
     const canOpen = typeof openHandler === "function";
 
-    let stateClass = {
-      blank_editable: "bg-white border-slate-200",
-      draft_filled: "bg-blue-50/50 border-blue-100",
-      submitted: "bg-amber-50/50 border-amber-100",
-      approved_locked: "bg-[#eef3fa]/80 border-slate-200",
-      changes_requested: "bg-rose-50/70 border-rose-200",
-      late_entry: "bg-violet-50/60 border-violet-200 border-dashed",
-    }[state] || "bg-white border-slate-200";
+    let stateClass = (CELL_STATE_META[state] || CELL_STATE_META.blank_editable).className;
+    if (state === "late_entry") {
+      stateClass += " border-dashed";
+    }
     if (issues.length && state !== "changes_requested") {
       stateClass += " border-l-2 border-l-[#c8102e]";
     }
@@ -480,14 +476,10 @@
     const state = valueObj && valueObj.cell_state ? valueObj.cell_state : "blank_editable";
     const locked = Boolean(valueObj && valueObj.is_locked);
     const editable = options.mode === "entry" && Boolean(options.canEditWorkbookValues) && isEditableWorkbookField(field, options) && !locked;
-    const stateClass = {
-      blank_editable: "bg-white border-slate-200",
-      draft_filled: "bg-blue-50/50 border-blue-100",
-      submitted: "bg-indigo-50/60 border-indigo-100",
-      approved_locked: "bg-emerald-50/60 border-emerald-100",
-      changes_requested: "bg-amber-50/70 border-amber-200",
-      late_entry: "bg-violet-50/60 border-violet-200 border-dashed",
-    }[state] || "bg-white border-slate-200";
+    let stateClass = (CELL_STATE_META[state] || CELL_STATE_META.blank_editable).className;
+    if (state === "late_entry") {
+      stateClass += " border-dashed";
+    }
     return `
       <div class="rounded-lg border ${stateClass} p-3">
         <div class="mb-2 flex items-start justify-between gap-3">
