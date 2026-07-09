@@ -55,31 +55,10 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   // Format date string to local readable string
-  function formatDate(dateStr) {
-    if (!dateStr) return "—";
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return dateStr;
-    return date.toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true
-    });
-  }
+  const formatDate = window.UIHelpers.formatDate;
 
   // Format date string to short date
-  function formatShortDate(dateStr) {
-    if (!dateStr) return "—";
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return dateStr;
-    return date.toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric"
-    });
-  }
+  const formatShortDate = window.UIHelpers.formatShortDate;
 
   function humanStatus(status) {
     return {

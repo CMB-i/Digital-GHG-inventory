@@ -64,32 +64,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const formRejectVersion = document.getElementById("form-reject-version");
 
   // ── Helpers ───────────────────────────────────────────────────────────
-  function showToast(message, type = "success") {
-    let container = document.getElementById("toast-container");
-    if (!container) {
-      container = document.createElement("div");
-      container.id = "toast-container";
-      container.className = "fixed top-5 right-5 z-50 space-y-2 pointer-events-none";
-      document.body.appendChild(container);
-    }
-    const toast = document.createElement("div");
-    toast.className = [
-      "p-4 rounded-xl shadow-lg border text-xs font-bold",
-      "transition-all duration-300 transform translate-y-2 opacity-0",
-      "flex items-center justify-between pointer-events-auto",
-      type === "success" ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-        : type === "warning" ? "bg-amber-50 border-amber-200 text-amber-800"
-        : "bg-rose-50 border-rose-200 text-rose-800"
-    ].join(" ");
-    toast.innerHTML = `<span>${message}</span><button class="ml-4 font-normal text-slate-400 hover:text-slate-600">✕</button>`;
-    toast.querySelector("button").onclick = () => toast.remove();
-    container.appendChild(toast);
-    setTimeout(() => toast.classList.remove("translate-y-2", "opacity-0"), 10);
-    setTimeout(() => {
-      toast.classList.add("translate-y-2", "opacity-0");
-      setTimeout(() => toast.remove(), 300);
-    }, 4000);
-  }
+  const showToast = window.UIHelpers.showToast;
 
   function slugify(str) {
     return (str || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
@@ -131,13 +106,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (_vsDebug) console.debug(`[VALSET] ${label}`, data);
   }
 
-  function esc(str) {
-    return (str || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
+  const esc = window.UIHelpers.escapeHtml;
 
   // ── Inline entries table ──────────────────────────────────────────────
 

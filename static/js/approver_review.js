@@ -24,19 +24,7 @@ document.addEventListener("DOMContentLoaded", function () {
   let submissionData = null;
   const reviewableStatuses = new Set(["Submitted", "Resubmitted", "Under Review"]);
 
-  function formatDate(dateStr) {
-    if (!dateStr) return "—";
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return dateStr;
-    return date.toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true
-    });
-  }
+  const formatDate = window.UIHelpers.formatDate;
 
   function getStatusClass(status) {
     switch (status) {

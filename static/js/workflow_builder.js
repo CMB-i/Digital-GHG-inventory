@@ -79,36 +79,8 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  function showToast(message, type = "success") {
-    const container = document.getElementById("toast-container");
-    if (!container) return;
-    const toast = document.createElement("div");
-    toast.className = `pointer-events-auto flex translate-y-2 items-center justify-between rounded-xl border p-4 text-xs font-bold opacity-0 shadow-lg transition-all duration-300 ${
-      type === "success"
-        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-        : "border-rose-200 bg-rose-50 text-rose-800"
-    }`;
-    toast.innerHTML = `
-      <span>${escapeHtml(message)}</span>
-      <button class="ml-4 font-normal text-slate-400 hover:text-slate-600" type="button">x</button>
-    `;
-    toast.querySelector("button").onclick = () => toast.remove();
-    container.appendChild(toast);
-    setTimeout(() => toast.classList.remove("translate-y-2", "opacity-0"), 10);
-    setTimeout(() => {
-      toast.classList.add("translate-y-2", "opacity-0");
-      setTimeout(() => toast.remove(), 300);
-    }, 3500);
-  }
+  const escapeHtml = window.UIHelpers.escapeHtml;
+  const showToast = window.UIHelpers.showToast;
 
   function setUnsaved(value) {
     hasUnsavedChanges = value;

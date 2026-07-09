@@ -666,6 +666,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/ui_helpers.js') }}"></script>
 <script src="{{ url_for('static', filename='js/formula_runtime.js') }}"></script>
 <script src="{{ url_for('static', filename='js/formula_builder.js') }}"></script>
 {% endblock %}

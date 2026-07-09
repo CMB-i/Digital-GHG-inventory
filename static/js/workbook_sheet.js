@@ -8,14 +8,7 @@
     late_entry: { label: "Late entry", className: "bg-violet-50 text-violet-700 border-violet-200" },
   };
 
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
+  const escapeHtml = window.UIHelpers.escapeHtml;
 
   function getMonthName(month) {
     const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

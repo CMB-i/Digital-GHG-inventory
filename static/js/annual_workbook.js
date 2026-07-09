@@ -90,27 +90,10 @@ document.addEventListener("DOMContentLoaded", function () {
     return `FY ${startYear}-${String(startYear + 1).slice(-2)}`;
   }
 
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
+  const escapeHtml = window.UIHelpers.escapeHtml;
 
   function formatDateTime(value) {
-    if (!value) return "Not saved yet";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true
-    });
+    return window.UIHelpers.formatDateTime(value, "Not saved yet");
   }
 
   function fieldValue(row, field) {

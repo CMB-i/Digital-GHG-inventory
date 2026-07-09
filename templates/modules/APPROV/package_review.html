@@ -158,6 +158,7 @@
 <script>
   window.PACKAGE_ID = {{ package_id }};
 </script>
+<script src="{{ url_for('static', filename='js/ui_helpers.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workbook_sheet.js') }}"></script>
 <script src="{{ url_for('static', filename='js/package_review.js') }}"></script>
 {% endblock %}

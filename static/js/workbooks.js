@@ -2,36 +2,13 @@
 document.addEventListener("DOMContentLoaded", function () {
 
   // ── Toast ─────────────────────────────────────────────────────────────────
-  function toast(msg, type) {
-    let c = document.getElementById("toast-container");
-    if (!c) {
-      c = document.createElement("div");
-      c.id = "toast-container";
-      c.className = "fixed top-5 right-5 z-50 space-y-2 pointer-events-none";
-      document.body.appendChild(c);
-    }
-    const t = document.createElement("div");
-    t.className = [
-      "p-4 rounded-xl shadow-lg border text-xs font-bold flex items-center justify-between pointer-events-auto",
-      "transition-all duration-300 transform translate-y-2 opacity-0",
-      type === "error"   ? "bg-rose-50 border-rose-200 text-rose-800"
-        : type === "warn" ? "bg-amber-50 border-amber-200 text-amber-800"
-        : "bg-emerald-50 border-emerald-200 text-emerald-800",
-    ].join(" ");
-    t.innerHTML = `<span>${msg}</span><button class="ml-4 font-normal text-slate-400 hover:text-slate-600">✕</button>`;
-    t.querySelector("button").onclick = () => t.remove();
-    c.appendChild(t);
-    setTimeout(() => t.classList.remove("translate-y-2", "opacity-0"), 10);
-    setTimeout(() => { t.classList.add("translate-y-2", "opacity-0"); setTimeout(() => t.remove(), 300); }, 4000);
-  }
+  const toast = (msg, type) => window.UIHelpers.showToast(msg, type);
 
   function slugify(s) {
     return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   }
 
-  function esc(s) {
-    return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
+  const esc = window.UIHelpers.escapeHtml;
 
   // ══════════════════════════════════════════════════════════════════════════
   // LIST PAGE  (/workbooks/)

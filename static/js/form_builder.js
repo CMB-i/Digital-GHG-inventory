@@ -91,46 +91,11 @@ document.addEventListener("DOMContentLoaded", function () {
   const previewStaticBody = document.getElementById("preview-static-body");
   const previewResultsOverflow = document.getElementById("preview-results-overflow");
 
-  // Toast Helper
-  function showToast(message, type = "success") {
-    const container = document.getElementById("toast-container");
-    if (!container) return;
-    const toast = document.createElement("div");
-    toast.className = `p-4 rounded-xl shadow-lg border text-xs font-bold transition-all duration-300 transform translate-y-2 opacity-0 flex items-center justify-between ${
-      type === "success"
-        ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-        : "bg-rose-50 border-rose-200 text-rose-800"
-    }`;
-    toast.innerHTML = `
-      <span>${message}</span>
-      <button class="ml-4 font-normal text-slate-400 hover:text-slate-600">✕</button>
-    `;
-    toast.querySelector("button").onclick = () => toast.remove();
-    container.appendChild(toast);
-
-    // Animate in
-    setTimeout(() => {
-      toast.classList.remove("translate-y-2", "opacity-0");
-    }, 10);
-
-    // Auto remove
-    setTimeout(() => {
-      toast.classList.add("translate-y-2", "opacity-0");
-      setTimeout(() => toast.remove(), 300);
-    }, 3000);
-  }
+  const showToast = window.UIHelpers.showToast;
+  const escapeHtml = window.UIHelpers.escapeHtml;
 
   function normalizeCode(value) {
     return (value || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  }
-
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
   }
 
   function humanizeType(value) {
