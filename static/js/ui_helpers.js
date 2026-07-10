@@ -71,11 +71,36 @@
     }, 4000);
   }
 
+  // Autosave responses race against further local edits made while the
+  // request was in flight: naively applying every key the server echoes back
+  // can clobber a newer local edit with the server's stale echo of what was
+  // actually sent. `sent` must be a snapshot of the values object taken at the
+  // exact moment the request body was serialized (not any earlier point --
+  // an await between "user's edit" and "request sent" is itself a window
+  // where a later edit could slip in ahead of the snapshot). A field is only
+  // updated from `serverValues` if its current local value still strictly
+  // equals what was sent for it; anything that changed locally since is left
+  // alone for the next debounced autosave to pick up and persist correctly.
+  // Mutates `current` in place. Returns the list of field codes skipped as
+  // stale, for callers that want to avoid re-touching those in the DOM too.
+  function reconcileAutosaveResponse(current, sent, serverValues) {
+    const skipped = [];
+    Object.keys(serverValues).forEach((code) => {
+      if (current[code] === sent[code]) {
+        current[code] = serverValues[code];
+      } else {
+        skipped.push(code);
+      }
+    });
+    return skipped;
+  }
+
   window.UIHelpers = {
     escapeHtml,
     formatDate,
     formatDateTime,
     formatShortDate,
     showToast,
+    reconcileAutosaveResponse,
   };
 })();

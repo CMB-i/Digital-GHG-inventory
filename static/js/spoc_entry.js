@@ -29,6 +29,7 @@ document.addEventListener("DOMContentLoaded", function () {
   let calcStatuses = {};
   let currentStatus = "Draft";
   let isSaving = false;
+  let savePending = false;
   let autosaveTimeout = null;
 
   // Set visual indicator states
@@ -180,8 +181,22 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Execute Autosave PUT Call
   function executeAutosave() {
-    if (isSaving) return;
+    if (isSaving) {
+      // A debounced retry landed while a previous save was still in flight
+      // (e.g. slow network). Without this flag, this attempt would just be
+      // silently dropped with nothing left to schedule another one -- the
+      // same "fails and nobody finds out" failure mode as the merge bug
+      // below, just for a whole save instead of one field.
+      savePending = true;
+      return;
+    }
     isSaving = true;
+    savePending = false;
+
+    // Snapshot taken at the exact moment the request body is built, so the
+    // response handler below can tell whether the user edited a field again
+    // before the response came back (see UIHelpers.reconcileAutosaveResponse).
+    const sentSnapshot = { ...formValues };
 
     fetch(`/module/SUBMIT/api/submissions/${submissionId}/autosave`, {
       method: "PUT",
@@ -193,12 +208,15 @@ document.addEventListener("DOMContentLoaded", function () {
         return res.json();
       })
       .then((data) => {
-        isSaving = false;
         setSaveStatus("success", `Last saved: ${formatTime(new Date())}`);
 
-        // Update calculations values returned from Flask backend
+        // Only apply the server's echoed value for a field if it hasn't been
+        // edited locally since this request was sent -- otherwise this response
+        // is stale for that field and would clobber the newer local edit.
+        const skipped = window.UIHelpers.reconcileAutosaveResponse(formValues, sentSnapshot, data.data.values);
+
         Object.keys(data.data.values).forEach(code => {
-          formValues[code] = data.data.values[code];
+          if (skipped.includes(code)) return;
 
           // Dynamically update calculations input fields in DOM
           const inputEl = document.getElementById("field_" + code);
@@ -219,8 +237,14 @@ document.addEventListener("DOMContentLoaded", function () {
         displayAnomalies(data.data.anomalies || {});
       })
       .catch((err) => {
-        isSaving = false;
         setSaveStatus("error", `Failed to save: ${err.message}`);
+      })
+      .finally(() => {
+        isSaving = false;
+        if (savePending) {
+          savePending = false;
+          executeAutosave();
+        }
       });
   }
 

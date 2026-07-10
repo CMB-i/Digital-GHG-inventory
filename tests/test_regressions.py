@@ -237,3 +237,177 @@ class TestWildcardGrantIncludedInScoping:
         recipients = resolve_recipients(config, "submission", 1, {"site_id": site.id})
 
         assert any(r.id == user.id for r in recipients)
+
+
+class TestNotificationDeliveryFailureRecorded:
+    """
+    Priority 3 continued: send_mock_email/send_mock_whatsapp used to only
+    print() on failure -- no Notification row was ever created for those
+    channels, so a failed email/WhatsApp send was invisible everywhere except
+    a console nobody watches. Now every channel attempt (success or failure)
+    persists a real, queryable Notification row via delivery_status/delivery_error.
+    """
+
+    def test_failed_email_send_persists_a_queryable_failure_record(
+        self, make_user, db_session, created_objects, monkeypatch, system_user,
+    ):
+        from app.modules.NOTIFY.model import Notification, NotificationConfig, UserNotificationPreference
+        from app.modules.NOTIFY import service as notify_service
+
+        user = make_user()
+
+        pref = UserNotificationPreference(
+            user_id=user.id, pref_in_app=True, pref_desktop=False,
+            pref_email=True, pref_whatsapp=False,
+        )
+        db_session.add(pref)
+        db_session.flush()
+        created_objects.append(pref)
+
+        config = NotificationConfig(
+            name="Test Email Config",
+            event_type="TEST_EMAIL_EVENT",
+            message_template="Hello {name}",
+            recipient_type="users",
+            recipient_user_ids=str(user.id),
+            channels="email",
+            is_active=True,
+            created_by=system_user,
+            updated_by=system_user,
+        )
+        db_session.add(config)
+        db_session.flush()
+        created_objects.append(config)
+
+        monkeypatch.setattr(
+            notify_service, "send_mock_email",
+            lambda to_email, subject, body: (False, "SMTP connection refused"),
+        )
+
+        dispatched = notify_service.dispatch_notification_event(
+            event_type="TEST_EMAIL_EVENT",
+            entity_type="submission",
+            entity_id=1,
+            context={"name": "Test"},
+        )
+
+        assert len(dispatched) == 1
+        assert dispatched[0].channel == "email"
+        assert dispatched[0].delivery_status == "failed"
+        assert dispatched[0].delivery_error == "SMTP connection refused"
+        created_objects.append(dispatched[0])
+
+        # Genuinely queryable, not just the in-memory return value.
+        failed = Notification.query.filter_by(
+            user_id=user.id, channel="email", delivery_status="failed",
+        ).all()
+        assert len(failed) == 1
+        assert failed[0].delivery_error == "SMTP connection refused"
+
+    def test_successful_email_send_still_records_sent_status(
+        self, make_user, db_session, created_objects, monkeypatch, system_user,
+    ):
+        from app.modules.NOTIFY.model import NotificationConfig, UserNotificationPreference
+        from app.modules.NOTIFY import service as notify_service
+
+        user = make_user()
+
+        pref = UserNotificationPreference(
+            user_id=user.id, pref_in_app=True, pref_desktop=False,
+            pref_email=True, pref_whatsapp=False,
+        )
+        db_session.add(pref)
+        db_session.flush()
+        created_objects.append(pref)
+
+        config = NotificationConfig(
+            name="Test Email Config Success",
+            event_type="TEST_EMAIL_EVENT_OK",
+            message_template="Hello {name}",
+            recipient_type="users",
+            recipient_user_ids=str(user.id),
+            channels="email",
+            is_active=True,
+            created_by=system_user,
+            updated_by=system_user,
+        )
+        db_session.add(config)
+        db_session.flush()
+        created_objects.append(config)
+
+        monkeypatch.setattr(
+            notify_service, "send_mock_email",
+            lambda to_email, subject, body: (True, None),
+        )
+
+        dispatched = notify_service.dispatch_notification_event(
+            event_type="TEST_EMAIL_EVENT_OK",
+            entity_type="submission",
+            entity_id=1,
+            context={"name": "Test"},
+        )
+
+        assert len(dispatched) == 1
+        assert dispatched[0].delivery_status == "sent"
+        assert dispatched[0].delivery_error is None
+        created_objects.append(dispatched[0])
+
+    def test_notify_spoc_fallback_only_skips_when_something_actually_sent(
+        self, make_form, make_field, make_site, make_reporting_period, make_workflow,
+        make_user, make_submission, db_session, created_objects, monkeypatch, system_user,
+    ):
+        """
+        notify_spoc's in-app fallback must fire based on whether anything was
+        actually delivered, not merely attempted -- otherwise a channel that
+        now persists a "failed" record (instead of silently vanishing) would
+        wrongly look like "some result exists, skip the safety net."
+        """
+        from app.modules.NOTIFY.model import Notification, NotificationConfig, UserNotificationPreference
+        from app.modules.NOTIFY import service as notify_service
+
+        form, form_version = make_form()
+        make_field(form, form_version, "field_a", field_type="number")
+        submitter = make_user()
+        site = make_site()
+        period = make_reporting_period(site)
+        workflow_version = make_workflow([make_user()])
+        submission = make_submission(site, form, form_version, period, workflow_version, status="Submitted", submitted_by=submitter)
+
+        pref = UserNotificationPreference(
+            user_id=submitter.id, pref_in_app=True, pref_desktop=False,
+            pref_email=True, pref_whatsapp=False,
+        )
+        db_session.add(pref)
+        db_session.flush()
+        created_objects.append(pref)
+
+        config = NotificationConfig(
+            name="Test SPOC Approved Email-only Config",
+            event_type="SUBMISSION_APPROVED",
+            message_template="{message}",
+            recipient_type="dynamic",
+            dynamic_role="spoc",
+            channels="email",
+            is_active=True,
+            created_by=system_user,
+            updated_by=system_user,
+        )
+        db_session.add(config)
+        db_session.flush()
+        created_objects.append(config)
+
+        monkeypatch.setattr(
+            notify_service, "send_mock_email",
+            lambda to_email, subject, body: (False, "SMTP connection refused"),
+        )
+
+        result = notify_service.notify_spoc(submission.id, "APPROVED", "Your submission was approved.")
+
+        # The only configured channel (email) failed -- the in-app fallback
+        # must still fire so the submitter gets *something*.
+        assert result is not None
+        assert result.channel == "in_app"
+        created_objects.append(result)
+
+        in_app = Notification.query.filter_by(user_id=submitter.id, channel="in_app").all()
+        assert len(in_app) == 1
