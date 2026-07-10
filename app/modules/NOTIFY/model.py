@@ -12,6 +12,12 @@ class Notification(db.Model):
     entity_id = db.Column(db.Integer, nullable=False)
     message = db.Column(db.Text, nullable=False)
     channel = db.Column(db.String(30), nullable=False, default="in_app", server_default="in_app")
+    # Per-channel delivery outcome. in_app/desktop are just DB inserts that
+    # essentially can't fail the way an external email/WhatsApp send can, so
+    # they're always "sent"; email/whatsapp record the real outcome instead of
+    # only ever persisting a row on success.
+    delivery_status = db.Column(db.String(20), nullable=False, default="sent", server_default="sent")
+    delivery_error = db.Column(db.Text, nullable=True)
     is_read = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     read_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(

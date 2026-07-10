@@ -12,7 +12,7 @@ except ImportError:
     TWILIO_AVAILABLE = False
 
 
-def create_notification(user_id, event_type, entity_type, entity_id, message, channel="in_app"):
+def create_notification(user_id, event_type, entity_type, entity_id, message, channel="in_app", delivery_status="sent", delivery_error=None):
     """
     Creates and saves a single notification record for a user.
     """
@@ -22,14 +22,16 @@ def create_notification(user_id, event_type, entity_type, entity_id, message, ch
         entity_type=entity_type,
         entity_id=entity_id,
         message=message,
-        channel=channel
+        channel=channel,
+        delivery_status=delivery_status,
+        delivery_error=delivery_error,
     )
     db.session.add(notification)
     db.session.flush()
     return notification
 
 
-def create_notifications_for_users(user_ids, event_type, entity_type, entity_id, message, channel="in_app"):
+def create_notifications_for_users(user_ids, event_type, entity_type, entity_id, message, channel="in_app", delivery_status="sent", delivery_error=None):
     """
     Creates notifications for multiple users in bulk.
     """
@@ -41,7 +43,9 @@ def create_notifications_for_users(user_ids, event_type, entity_type, entity_id,
             entity_type=entity_type,
             entity_id=entity_id,
             message=message,
-            channel=channel
+            channel=channel,
+            delivery_status=delivery_status,
+            delivery_error=delivery_error,
         )
         db.session.add(n)
         notifications.append(n)
@@ -49,19 +53,36 @@ def create_notifications_for_users(user_ids, event_type, entity_type, entity_id,
     return notifications
 
 
+def _module_logger():
+    from flask import current_app
+    try:
+        return current_app.logger
+    except RuntimeError:
+        # Outside of Flask application context (e.g., test runner). Fall back
+        # to the standard library logger rather than dropping the message.
+        import logging
+        return logging.getLogger("notify")
+
+
 def send_mock_email(to_email, subject, body):
     """
     Sends a real email using SMTP configuration from environment variables,
     falling back to file logging if not configured.
+
+    Returns (sent, error): sent is True for both a live successful send and
+    the intentional unconfigured/logged-to-file dev fallback (neither is a
+    delivery failure); sent is False only when a configured SMTP send actually
+    raises, with error set to a human-readable message.
     """
+    logger = _module_logger()
     smtp_server = os.getenv("SMTP_SERVER")
     smtp_port = os.getenv("SMTP_PORT", 587)
     smtp_user = os.getenv("SMTP_USERNAME")
     smtp_password = os.getenv("SMTP_PASSWORD")
     sender = os.getenv("SMTP_SENDER", smtp_user)
-    
-    if (not smtp_server or not smtp_user or not smtp_password or 
-            smtp_user == "your-sender-email@gmail.com" or 
+
+    if (not smtp_server or not smtp_user or not smtp_password or
+            smtp_user == "your-sender-email@gmail.com" or
             smtp_password == "your-gmail-app-password"):
         from flask import current_app
         try:
@@ -70,7 +91,7 @@ def send_mock_email(to_email, subject, body):
             log_dir = os.getenv("UPLOAD_FOLDER") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "uploads"))
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, "mock_emails.log")
-        
+
         log_entry = (
             f"========================================\n"
             f"Timestamp: {datetime.now(timezone.utc).isoformat()}\n"
@@ -79,11 +100,11 @@ def send_mock_email(to_email, subject, body):
             f"Body:\n{body}\n"
             f"========================================\n\n"
         )
-        
+
         with open(log_path, "a") as f:
             f.write(log_entry)
-        print(f"[MOCK EMAIL SENT] To: {to_email} | Subject: {subject}")
-        return
+        logger.info(f"[MOCK EMAIL SENT] To: {to_email} | Subject: {subject}")
+        return True, None
 
     # Create live MIME message
     msg = MIMEText(body)
@@ -96,16 +117,22 @@ def send_mock_email(to_email, subject, body):
             server.starttls()
             server.login(smtp_user, smtp_password)
             server.sendmail(sender, [to_email], msg.as_string())
-        print(f"[EMAIL SENT] Successfully sent notification to {to_email}")
+        logger.info(f"[EMAIL SENT] Successfully sent notification to {to_email}")
+        return True, None
     except Exception as e:
-        print(f"[EMAIL ERROR] Failed to send email to {to_email}: {e}")
+        logger.error(f"[EMAIL ERROR] Failed to send email to {to_email}: {e}")
+        return False, str(e)
 
 
 def send_mock_whatsapp(to_phone, body):
     """
     Sends a real WhatsApp message using Twilio client,
     falling back to file logging if not configured.
+
+    Returns (sent, error) -- see send_mock_email for the same success/failure
+    convention (the unconfigured/logged-to-file fallback counts as sent).
     """
+    logger = _module_logger()
     account_sid = os.getenv("TWILIO_ACCOUNT_SID")
     auth_token = os.getenv("TWILIO_AUTH_TOKEN")
     from_whatsapp = os.getenv("TWILIO_SENDER")
@@ -121,7 +148,7 @@ def send_mock_whatsapp(to_phone, body):
             log_dir = os.getenv("UPLOAD_FOLDER") or os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "uploads"))
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, "mock_whatsapp.log")
-        
+
         log_entry = (
             f"========================================\n"
             f"Timestamp: {datetime.now(timezone.utc).isoformat()}\n"
@@ -129,11 +156,11 @@ def send_mock_whatsapp(to_phone, body):
             f"Message:\n{body}\n"
             f"========================================\n\n"
         )
-        
+
         with open(log_path, "a") as f:
             f.write(log_entry)
-        print(f"[MOCK WHATSAPP SENT] To: {to_phone} | Message: {body}")
-        return
+        logger.info(f"[MOCK WHATSAPP SENT] To: {to_phone} | Message: {body}")
+        return True, None
 
     # Clean phone format
     formatted_phone = to_phone.strip()
@@ -152,9 +179,11 @@ def send_mock_whatsapp(to_phone, body):
             body=body,
             to=to_whatsapp
         )
-        print(f"[WHATSAPP SENT] Message SID: {message.sid} sent to {formatted_phone}")
+        logger.info(f"[WHATSAPP SENT] Message SID: {message.sid} sent to {formatted_phone}")
+        return True, None
     except Exception as e:
-        print(f"[WHATSAPP ERROR] Failed to send to {formatted_phone}: {e}")
+        logger.error(f"[WHATSAPP ERROR] Failed to send to {formatted_phone}: {e}")
+        return False, str(e)
 
 
 def get_user_preferences(user_id):
@@ -318,16 +347,40 @@ def dispatch_notification_event(event_type, entity_type, entity_id, context):
                 )
                 dispatched.append(n)
                 
-            # 3. Email delivery
+            # 3. Email delivery -- always persist a record of the attempt, not
+            # just on success, so a failure is a queryable row instead of only
+            # ever reaching a print()/log line.
             if "email" in config_channels and pref.pref_email:
                 subject = f"GHG Platform Notification: {config.name}"
-                send_mock_email(user.email, subject, message)
-                
-            # 4. WhatsApp delivery
+                sent, error = send_mock_email(user.email, subject, message)
+                n = create_notification(
+                    user_id=user.id,
+                    event_type=event_type,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    message=message,
+                    channel="email",
+                    delivery_status="sent" if sent else "failed",
+                    delivery_error=error,
+                )
+                dispatched.append(n)
+
+            # 4. WhatsApp delivery -- same reasoning as email above.
             if "whatsapp" in config_channels and pref.pref_whatsapp:
                 phone = user.phone or "Unknown Phone"
-                send_mock_whatsapp(phone, message)
-                
+                sent, error = send_mock_whatsapp(phone, message)
+                n = create_notification(
+                    user_id=user.id,
+                    event_type=event_type,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    message=message,
+                    channel="whatsapp",
+                    delivery_status="sent" if sent else "failed",
+                    delivery_error=error,
+                )
+                dispatched.append(n)
+
     return dispatched
 
 
@@ -432,7 +485,14 @@ def notify_spoc(submission_id, event_type, message):
         entity_id=submission_id,
         context=context
     )
-    if not results and message:
+    # Note: `results` now includes a record for every channel *attempted*, not
+    # just successful ones (email/whatsapp failures persist a "failed" row
+    # instead of being silently dropped) -- so checking for an empty list here
+    # would almost never trigger the fallback even when every channel failed.
+    # What this fallback is actually meant to guarantee is that the SPOC gets
+    # at least one notification that really was delivered.
+    any_delivered = any(getattr(n, "delivery_status", "sent") == "sent" for n in results)
+    if not any_delivered and message:
         pref = get_user_preferences(submission.submitted_by)
         if pref.pref_in_app:
             fallback_notification = create_notification(
