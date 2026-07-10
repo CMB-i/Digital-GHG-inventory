@@ -43,6 +43,14 @@ class Submission(FullLifecycleMixin, db.Model):
         db.Index("idx_submissions_package", "package_id"),
         db.Index("idx_submissions_site_form", "site_id", "form_id"),
         db.Index("idx_submissions_status", "status"),
+        # Sparse boolean: most rows are false, so a partial index (same
+        # pattern as idx_notifications_user_unread) keeps it small instead of
+        # indexing every row for a "which submissions need attention" query.
+        db.Index(
+            "idx_submissions_needs_recalc_review",
+            "needs_recalc_review",
+            postgresql_where=db.text("needs_recalc_review = true"),
+        ),
     )
 
 
@@ -102,6 +110,13 @@ class SubmissionValue(LifecycleMixin, db.Model):
         db.UniqueConstraint("submission_id", "field_id", name="uq_submission_value"),
         db.Index("idx_sub_values_submission", "submission_id"),
         db.Index("idx_submission_values_cell_state", "cell_state"),
+        # field_id is the second column of uq_submission_value above, which
+        # only serves lookups that also filter by submission_id -- these are
+        # separate indexes for filtering/joining on each FK alone.
+        db.Index("idx_submission_values_field", "field_id"),
+        db.Index("idx_submission_values_field_version", "field_version_id"),
+        db.Index("idx_submission_values_formula_version", "formula_version_id"),
+        db.Index("idx_submission_values_value_set_version", "value_set_version_id"),
     )
 
 

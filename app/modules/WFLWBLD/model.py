@@ -57,3 +57,7 @@ class WorkflowLevelApprover(FullLifecycleMixin, db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     scope_site_id = db.Column(db.Integer, db.ForeignKey("sites.id"), nullable=True)
     sequence_number = db.Column(db.Integer, nullable=True)
+
+    __table_args__ = (
+        db.Index("idx_workflow_level_approvers_scope_site", "scope_site_id"),
+    )

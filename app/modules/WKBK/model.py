@@ -74,6 +74,10 @@ class WorkbookSite(db.Model):
     __table_args__ = (
         db.UniqueConstraint("workbook_id", "site_id", name="uq_workbook_site"),
         db.Index("idx_workbook_sites_workbook", "workbook_id"),
+        # site_id is the second column of uq_workbook_site above, which only
+        # serves lookups that also filter by workbook_id -- "which workbooks
+        # apply to this site" queries filter by site_id alone.
+        db.Index("idx_workbook_sites_site", "site_id"),
     )
 
 
@@ -97,4 +101,7 @@ class WorkbookSiteSubmitter(db.Model):
             name="uq_workbook_site_submitter",
         ),
         db.Index("idx_wss_workbook_site", "workbook_id", "site_id"),
+        # "which workbook/sites this user submits for" queries filter by
+        # user_id alone, which the composite index above doesn't serve.
+        db.Index("idx_wss_user", "user_id"),
     )
