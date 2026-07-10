@@ -373,6 +373,35 @@ def get_missing_submissions(user_id):
     sites_map = {s.id: s for s in Site.query.filter_by(is_deleted=False).all()}
     from app.modules.SUBMIT.service import format_period_label
 
+    period_ids = [p.id for p in periods]
+    form_ids = [f.id for f in published_forms]
+
+    # Batch-fetch which (site_id, form_id) pairs are assigned via an active
+    # workbook -- one query instead of one per (period, form) pair.
+    assigned_pairs = set(
+        db.session.query(WorkbookSite.site_id, WorkbookForm.form_id)
+        .join(Workbook, Workbook.id == WorkbookSite.workbook_id)
+        .join(WorkbookForm, WorkbookForm.workbook_id == Workbook.id)
+        .filter(
+            WorkbookForm.form_id.in_(form_ids or [0]),
+            WorkbookSite.site_id.in_(list(allowed_site_ids)),
+            Workbook.is_active == True,
+        )
+        .all()
+    )
+
+    # Batch-fetch every existing submission for these periods/forms -- one
+    # query instead of one per (period, form) pair.
+    existing_submissions = Submission.query.filter(
+        Submission.reporting_period_id.in_(period_ids or [0]),
+        Submission.form_id.in_(form_ids or [0]),
+        Submission.is_deleted == False,
+    ).all()
+    submissions_by_key = {
+        (sub.site_id, sub.form_id, sub.reporting_period_id): sub
+        for sub in existing_submissions
+    }
+
     missing_list = []
 
     for p in periods:
@@ -384,27 +413,10 @@ def get_missing_submissions(user_id):
 
         # Check form applicability using WorkbookSite as authoritative source
         for f in published_forms:
-            is_assigned = (
-                db.session.query(WorkbookForm.id)
-                .join(Workbook, Workbook.id == WorkbookForm.workbook_id)
-                .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
-                .filter(
-                    WorkbookForm.form_id == f.id,
-                    WorkbookSite.site_id == p.site_id,
-                    Workbook.is_active == True,
-                )
-                .first()
-            )
-            if not is_assigned:
+            if (p.site_id, f.id) not in assigned_pairs:
                 continue
 
-            # Query actual submission
-            sub = Submission.query.filter_by(
-                site_id=p.site_id,
-                form_id=f.id,
-                reporting_period_id=p.id,
-                is_deleted=False
-            ).first()
+            sub = submissions_by_key.get((p.site_id, f.id, p.id))
 
             status_desc = "Not Started"
             sub_id = None

@@ -135,7 +135,7 @@ Example: `FY 2024 = April 2024 – March 2025`. This has been stable and unchang
 | `SUBMISSION_CLOSED` | No | No |
 | `LOCKED` | No | No |
 
-This four-state model and its transitions have never changed across the project's visible history. There is no row locking on period transitions against in-flight submissions — see [Known Gaps](#known-gaps).
+This four-state model and its transitions have never changed across the project's visible history. `transition_period` locks the period row (`SELECT ... FOR UPDATE`), and `submit_submission` re-checks the period's status under its own lock on that same row right before its final transition, so a period lock landing mid-submit and a submission racing a period lock can no longer both win.
 
 ### Adding a Migration
 
@@ -197,7 +197,7 @@ Every calculated field carries an explicit `calc_status` (`ok` / `error` / `pend
 
 Site/workbook visibility for a submitter requires **both** an AccessMatrix `submission` grant at that site **and** an explicit `WorkbookSiteSubmitter` row for that specific workbook/site — there is no fallback either way, by design: `WorkbookSiteSubmitter` is a deliberate, explicit assignment ("this exact person submits this exact workbook"), and AccessMatrix site permission alone is never sufficient on its own. A user with AccessMatrix access but no `WorkbookSiteSubmitter` row for that site gets an empty dashboard/workbook list, but `get_annual_workbook_options` and `get_spoc_sheets_buckets` both flag this case explicitly (`needs_submitter_assignment` in their JSON response, surfaced in the UI as "you haven't been assigned as a submitter yet — contact your admin") so it reads distinctly from having no access at all.
 
-There is no row locking anywhere in this module. Two concurrent submits of the same submission (double-click, retry, two package-submits racing) can both pass their preconditions before either commits.
+`submit_submission` locks the submission row (`SELECT ... FOR UPDATE`) before checking/transitioning its status, and re-checks the reporting period's status under its own lock right before the transition rather than only at the start — so two concurrent submits of the same submission, or a submit racing a concurrent period lock, can no longer both pass their preconditions before either commits. `get_or_create_submission_package` is backed by a real unique constraint (`uq_active_submission_package`) with retry-on-conflict, so two concurrent package-submits for the same site/period/type can no longer create two live packages.
 
 ### APPROV — approval queue, review, multi-level approval progression
 
@@ -205,11 +205,11 @@ Handles the reviewer-side workflow: queue, package review, approve/reject/reques
 
 `needs_recalc_review` (set by SUBMIT) is read and displayed here, and **is now checked by the final-approval gate** alongside open, `blocks_approval=True` `Issue` rows — a submission flagged for recalculation review cannot be given final approval until a reviewer either clears the flag (`clear_recalc_review`, once they've confirmed the calculated value is acceptable) or the submitter corrects and resubmits, which recomputes the flag automatically. Intermediate-level approvals in a multi-level chain are unaffected; only the level that actually locks the submission is gated.
 
-Package-level actions (approve/reject a whole package at once) are a thin loop over submission-level actions with no first-class package state — `package.current_level` is derived after the fact as the minimum of member submission levels. If a package's member submissions have heterogeneous eligibility (different levels, or one submitted by the acting user), `approve_package` can abort partway through with no partial-success handling.
+Package-level actions (approve/reject a whole package at once) still have no first-class package state — `package.current_level` is derived after the fact as the minimum of member submission levels. But the loop over member submissions is purely additive now: a submission this caller isn't eligible for (different level, or one submitted by the acting user) is recorded as skipped/failed with a reason, inside its own SAVEPOINT, instead of aborting the whole batch and rolling back submissions that already succeeded.
 
 Submission-level `Issue` and cell-level `SubmissionValueIssue` now share the same real enforcement: both have an open→resolved lifecycle (`resolved_by`/`resolved_at`, set via `resolve_issue` / `resolve_package_value_issue`), both carry a `blocks_approval` flag (always set `True` at creation for both — there's no UI path that ever creates or flips it otherwise, on either model), and the final-approval gate checks all three conditions together in one place: no open `Issue` rows, no open `SubmissionValueIssue` rows, and `needs_recalc_review` cleared. Cell issues are raised/resolved from the package review screen (`package_review.js`); the submitter's own read-only view (`annual_workbook.js`) only displays them.
 
-No row locking here either — concurrent approvals at an `ANY_ONE` level can double-advance a level or double-notify.
+`approve_submission`/`reject_submission`/`request_changes_submission` all lock the submission row before checking/transitioning its status, so two concurrent approvals at an `ANY_ONE` level can no longer both observe the level as still-open and both try to advance/finalize it.
 
 ### WKBK — workbook management (group sheets, assign sites, submitters, approval path)
 
@@ -253,7 +253,7 @@ Draft → Submitted → Approved lifecycle. `reject_value_set_version` blocks se
 
 ### PERIOD — reporting period lifecycle
 
-See [Reporting Period Statuses](#reporting-period-statuses) above. Four states, stable across the project's entire history. Transitions have no row locking against in-flight submissions — a period can be locked by an admin in the same window a submission is mid-commit, with no atomicity between the two.
+See [Reporting Period Statuses](#reporting-period-statuses) above. Four states, stable across the project's entire history. `transition_period` locks the row and `submit_submission` re-checks the period's status under that same lock immediately before its own final transition, closing the race between an admin locking a period and a submission mid-commit in the same window.
 
 ### SITEMST — site master
 
@@ -263,7 +263,7 @@ Straightforward CRUD for sites.
 
 Filters submissions to `Approved` + `is_locked=True` before reporting, correctly matching the "reports use only approved and locked values" rule (see [Key Design Rules](#key-design-rules)). Its site/permission-scoping logic (`list_report_templates`, `_get_user_allowed_sites`) now calls the shared `get_user_permissions()` instead of hand-rolling its own `AccessMatrix` query — the same fix NOTIFY's `resolve_recipients` got (see NOTIFY below) — so a user with a blanket "all entities" permission grant is no longer silently excluded from reports they should be able to see.
 
-`get_missing_submissions` runs two queries inside a doubly-nested loop over periods × forms — a real O(n×m) query explosion that will get slower as sites/forms grow. Not yet a problem at current scale.
+`get_missing_submissions` batch-fetches workbook-assignment and existing-submission data up front (two queries total, keyed by set) instead of running two queries per (period, form) pair inside a doubly-nested loop — the same fix applied to SUBMIT's `get_spoc_sheets_buckets` and APPROV's `get_approver_queue`, which had the same O(n×m) pattern.
 
 ### AUDITL — audit log
 
@@ -327,7 +327,6 @@ Added to prevent the kind of drift documented in [Known Gaps](#known-gaps) from 
 Honest, short list of things known to be wrong or unfinished today. If you fix one of these, delete it from this list in the same change.
 
 - **"SPOC" and "Submitter" (and "Approver" and "Reviewer") coexist in the codebase.** See [Terminology](#terminology) below — user-facing copy mostly says Submitter/Reviewer, but module names, JS filenames, CSS classes, and some newer admin-facing strings still say SPOC/Approver.
-- **No row locking anywhere in SUBMIT, APPROV, or PERIOD.** Concurrent submits, concurrent `ANY_ONE`-level approvals, and period-lock-during-in-flight-submission races are all possible.
 - **`Field.current_version_id` means something different from every sibling `current_version_id`** in the app (see [Consistency Guidelines](#consistency-guidelines)). Harmless today since nothing reads it, but a landmine for anyone who assumes it follows the app-wide convention.
 
 ---
