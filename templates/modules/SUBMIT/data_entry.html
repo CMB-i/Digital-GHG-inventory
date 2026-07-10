@@ -115,6 +115,7 @@
 
 {% block scripts %}
 <!-- Load shared renderer assets first -->
+<script src="{{ url_for('static', filename='js/ui_helpers.js') }}"></script>
 <script src="{{ url_for('static', filename='js/formula_runtime.js') }}"></script>
 <script src="{{ url_for('static', filename='js/form_renderer.js') }}"></script>
 <!-- Load SPOC page controller -->

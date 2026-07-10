@@ -911,10 +911,16 @@ document.addEventListener("DOMContentLoaded", function () {
           }
         }
 
+        // Snapshot taken at the exact moment the request body is built, so the
+        // response handler below can tell whether the user edited a field
+        // again before the response came back -- see reconcileAutosaveResponse.
+        if (!row.values) row.values = {};
+        const sentSnapshot = { ...row.values };
+
         const saveResponse = await fetch(`/module/SUBMIT/api/submissions/${submissionId}/autosave`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ values: row.values || {} })
+          body: JSON.stringify({ values: row.values })
         });
         const saveData = await parseJsonResponse(saveResponse, "Could not save draft.");
         if (!saveResponse.ok) {
@@ -924,7 +930,9 @@ document.addEventListener("DOMContentLoaded", function () {
         row.submission_id = submissionId;
         row.submission_status = "Draft";
         row.last_saved = new Date().toISOString();
-        row.values = saveData.data && saveData.data.values ? saveData.data.values : row.values;
+        if (saveData.data && saveData.data.values) {
+          window.UIHelpers.reconcileAutosaveResponse(row.values, sentSnapshot, saveData.data.values);
+        }
         state.dirtyRows.delete(rowKey(row));
       }
 
@@ -985,10 +993,15 @@ document.addEventListener("DOMContentLoaded", function () {
         }
       }
 
+      // See saveSelectedRow's identical snapshot for why this must be taken
+      // right at request-body-build time, not any earlier.
+      if (!row.values) row.values = {};
+      const submitSentSnapshot = { ...row.values };
+
       const saveResponse = await fetch(`/module/SUBMIT/api/submissions/${submissionId}/autosave`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values: row.values || {} })
+        body: JSON.stringify({ values: row.values })
       });
       const saveData = await parseJsonResponse(saveResponse, "Could not save draft.");
       if (!saveResponse.ok) {
@@ -1009,7 +1022,9 @@ document.addEventListener("DOMContentLoaded", function () {
       row.submission_id = submissionId;
       row.submission_status = "Submitted";
       row.last_saved = new Date().toISOString();
-      row.values = saveData.data && saveData.data.values ? saveData.data.values : row.values;
+      if (saveData.data && saveData.data.values) {
+        window.UIHelpers.reconcileAutosaveResponse(row.values, submitSentSnapshot, saveData.data.values);
+      }
       state.dirtyRows.delete(rowKey(row));
       showAlert(`${sectionName} submitted for approval.`, "success");
       
