@@ -699,7 +699,15 @@ def approve_submission(submission_id, user_id, comment=None):
     Approves the submission at the current level.
     If the level is fully satisfied, advances to the next level or locks as Approved.
     """
-    submission = Submission.query.get(submission_id)
+    # Locks the row for the rest of this transaction so two concurrent approvals
+    # of the same submission (e.g. two eligible ANY_ONE-mode approvers, or a
+    # double-click) can't both observe is_level_completed=True and both try to
+    # advance/finalize -- Query.get() is deliberately not used, see submit_submission.
+    submission = (
+        Submission.query.filter_by(id=submission_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if not submission or submission.is_deleted:
         raise ValueError("Submission not found.")
 
@@ -900,7 +908,12 @@ def request_changes_submission(submission_id, user_id, comment):
     if not comment or not comment.strip():
         raise ValueError("A comment is required to request changes.")
 
-    submission = Submission.query.get(submission_id)
+    # See approve_submission for why this locks the row instead of using Query.get().
+    submission = (
+        Submission.query.filter_by(id=submission_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if not submission or submission.is_deleted:
         raise ValueError("Submission not found.")
 
@@ -976,7 +989,12 @@ def reject_submission(submission_id, user_id, comment):
     if not comment or not comment.strip():
         raise ValueError("A comment is required to reject a submission.")
 
-    submission = Submission.query.get(submission_id)
+    # See approve_submission for why this locks the row instead of using Query.get().
+    submission = (
+        Submission.query.filter_by(id=submission_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if not submission or submission.is_deleted:
         raise ValueError("Submission not found.")
 

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import tuple_
+from sqlalchemy.exc import IntegrityError
 
 from app.database import db
 from app.common.permissions import has_permission
@@ -2066,17 +2067,35 @@ def get_or_create_submission_package(site_id, period_id, user_id, package_type="
         package.updated_by = user_id
         return package
 
-    package = SubmissionPackage(
-        site_id=site_id,
-        period_id=period_id,
-        package_type=package_type,
-        status=STATUS_DRAFT,
-        created_by=user_id,
-        updated_by=user_id,
-    )
-    db.session.add(package)
-    db.session.flush()
-    return package
+    # Two concurrent callers can both reach here having seen no existing package
+    # (the SELECT above takes no lock). uq_active_submission_package makes the
+    # second INSERT fail with an IntegrityError instead of creating a duplicate
+    # live package -- catch that and return the package the other caller just
+    # created, rather than letting a race surface as a raw 500. Runs inside a
+    # SAVEPOINT (not a full session rollback) so it can't discard whatever else
+    # this request may have already staged in the same transaction.
+    nested = db.session.begin_nested()
+    try:
+        package = SubmissionPackage(
+            site_id=site_id,
+            period_id=period_id,
+            package_type=package_type,
+            status=STATUS_DRAFT,
+            created_by=user_id,
+            updated_by=user_id,
+        )
+        db.session.add(package)
+        db.session.flush()
+        nested.commit()
+        return package
+    except IntegrityError:
+        nested.rollback()
+        return SubmissionPackage.query.filter_by(
+            site_id=site_id,
+            period_id=period_id,
+            package_type=package_type,
+            is_deleted=False,
+        ).one()
 
 def submit_monthly_workbook_package(site_id, workbook_id=None, period_id=None, year=None, month=None, user_id=None, selected_form_id=None, values=None):
     """
@@ -2443,7 +2462,15 @@ def submit_submission(submission_id, user_id):
     """
     Validates the submission and transitions its status to Submitted.
     """
-    submission = Submission.query.get(submission_id)
+    # Locks the row for the rest of this transaction so two concurrent submits
+    # of the same submission can't both pass the status check below before
+    # either commits -- Query.get() is deliberately not used here, since it can
+    # short-circuit through the identity map instead of issuing this SELECT.
+    submission = (
+        Submission.query.filter_by(id=submission_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if not submission or submission.is_deleted:
         raise ValueError("Submission not found.")
         
