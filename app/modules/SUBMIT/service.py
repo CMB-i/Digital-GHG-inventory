@@ -2597,7 +2597,22 @@ def submit_submission(submission_id, user_id):
     ).first()
     if existing:
         raise DuplicateSubmissionError(existing.id)
-        
+
+    # Authoritative re-check, as close to the actual commit as possible: the
+    # period may have been locked by a concurrent transition_period call any
+    # time between when this request started and now. Locks the row so the
+    # two can't race -- whichever of the two gets here first wins, and the
+    # other sees the fresh, post-commit status once unblocked.
+    period = (
+        ReportingPeriod.query.filter_by(id=submission.reporting_period_id, is_deleted=False)
+        .with_for_update()
+        .one_or_none()
+    )
+    if not period or period.status not in EDITABLE_PERIOD_STATUSES:
+        raise ValueError(
+            f"Cannot submit: reporting period is {period.status if period else 'unavailable'}."
+        )
+
     # Transition status
     old_status = submission.status
     new_status = STATUS_RESUBMITTED if old_status == STATUS_CHANGES_REQUESTED else STATUS_SUBMITTED
