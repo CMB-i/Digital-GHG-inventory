@@ -65,6 +65,14 @@ class SubmissionPackage(FullLifecycleMixin, db.Model):
     __table_args__ = (
         db.Index("idx_submission_packages_site_period", "site_id", "period_id"),
         db.Index("idx_submission_packages_status", "status"),
+        db.Index(
+            "uq_active_submission_package",
+            "site_id",
+            "period_id",
+            "package_type",
+            unique=True,
+            postgresql_where=db.text("is_deleted = false"),
+        ),
     )
 
 

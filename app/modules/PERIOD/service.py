@@ -143,7 +143,14 @@ def bulk_open_month(year, month, actor_id, site_ids):
 
 
 def transition_period(period_id, target_status, actor_id, reopen_reason=None):
-    period = ReportingPeriod.query.filter_by(id=period_id, is_deleted=False).one_or_none()
+    # Locks the row so a submission mid-commit (see submit_submission's own
+    # ReportingPeriod re-check) can't land in the same window as a concurrent
+    # period-status change without one of the two waiting for the other.
+    period = (
+        ReportingPeriod.query.filter_by(id=period_id, is_deleted=False)
+        .with_for_update()
+        .one_or_none()
+    )
     if not period:
         raise ValidationError("Reporting period not found.")
 
