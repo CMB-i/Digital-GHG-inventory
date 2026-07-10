@@ -458,12 +458,33 @@ def _get_package_for_action(package_id, user_id):
     return package, queue_summary
 
 
-def _reviewable_package_submissions(package_id):
-    return [
-        submission
-        for submission in Submission.query.filter_by(package_id=package_id, is_deleted=False).all()
-        if submission.status in REVIEWABLE_STATUSES and not submission.is_locked
-    ]
+def _all_package_submissions(package_id):
+    # Ordered so that two concurrent batch calls touching overlapping
+    # submissions always acquire their per-submission row locks in the same
+    # relative order -- an arbitrary/unordered iteration order here would be a
+    # real lock-order-inversion deadlock risk once each iteration locks a row.
+    return (
+        Submission.query.filter_by(package_id=package_id, is_deleted=False)
+        .order_by(Submission.id)
+        .all()
+    )
+
+
+def _attempt_in_savepoint(fn):
+    """
+    Runs fn() inside a SAVEPOINT so a failure only undoes fn's own partial
+    changes, not whatever earlier submissions in the same batch already
+    staged in the outer transaction (those still commit together at the view
+    layer's single db.session.commit()). Returns (ok, error_message).
+    """
+    nested = db.session.begin_nested()
+    try:
+        fn()
+        nested.commit()
+        return True, None
+    except Exception as exc:
+        nested.rollback()
+        return False, str(exc)
 
 
 def _sync_package_status_from_submissions(package, user_id):
@@ -494,20 +515,40 @@ def _sync_package_status_from_submissions(package, user_id):
 
 
 def approve_package(package_id, user_id, comment=None):
+    """
+    Approves every member submission this caller is currently eligible to
+    approve. Purely additive: a submission that isn't reviewable right now, or
+    that this caller isn't eligible for, is recorded as skipped/failed with a
+    reason rather than aborting the whole batch -- members that do succeed are
+    not rolled back just because a sibling submission couldn't be actioned.
+    """
     package, queue_summary = _get_package_for_action(package_id, user_id)
     if not queue_summary.get("is_my_turn"):
         raise ValueError("It is not your turn to approve this package.")
 
-    submissions = _reviewable_package_submissions(package.id)
+    submissions = _all_package_submissions(package.id)
     if not submissions:
-        raise ValueError("No reviewable submissions found in this package.")
+        raise ValueError("No submissions found in this package.")
 
     results = []
     for submission in submissions:
-        approve_submission(submission.id, user_id, comment)
+        if submission.status not in REVIEWABLE_STATUSES or submission.is_locked:
+            results.append({
+                "submission_id": submission.id,
+                "ok": False,
+                "skipped": True,
+                "status": submission.status,
+                "error": f"Not reviewable (status: {submission.status}).",
+            })
+            continue
+
+        ok, error = _attempt_in_savepoint(lambda s=submission: approve_submission(s.id, user_id, comment))
         results.append({
             "submission_id": submission.id,
+            "ok": ok,
+            "skipped": False,
             "status": submission.status,
+            "error": error,
         })
 
     _sync_package_status_from_submissions(package, user_id)
@@ -521,7 +562,7 @@ def approve_package(package_id, user_id, comment=None):
         old_values=None,
         new_values={
             "status": package.status,
-            "submission_ids": [item["submission_id"] for item in results],
+            "results": results,
         },
         metadata={"comment": comment},
     )
@@ -530,24 +571,41 @@ def approve_package(package_id, user_id, comment=None):
 
 
 def request_changes_package(package_id, user_id, comment):
+    """
+    Requests changes on every member submission this caller is currently
+    eligible to act on. See approve_package for the partial-eligibility
+    handling this shares.
+    """
     if not comment or not comment.strip():
         raise ValueError("A comment is required to request changes.")
 
     package, _queue_summary = _get_package_for_action(package_id, user_id)
-    submissions = _reviewable_package_submissions(package.id)
+    submissions = _all_package_submissions(package.id)
     if not submissions:
-        raise ValueError("No reviewable submissions found in this package.")
+        raise ValueError("No submissions found in this package.")
 
     results = []
     for submission in submissions:
-        request_changes_submission(submission.id, user_id, comment)
+        if submission.status not in REVIEWABLE_STATUSES or submission.is_locked:
+            results.append({
+                "submission_id": submission.id,
+                "ok": False,
+                "skipped": True,
+                "status": submission.status,
+                "error": f"Not reviewable (status: {submission.status}).",
+            })
+            continue
+
+        ok, error = _attempt_in_savepoint(lambda s=submission: request_changes_submission(s.id, user_id, comment))
         results.append({
             "submission_id": submission.id,
+            "ok": ok,
+            "skipped": False,
             "status": submission.status,
+            "error": error,
         })
 
-    package.status = STATUS_CHANGES_REQUESTED
-    package.updated_by = user_id
+    _sync_package_status_from_submissions(package, user_id)
 
     from app.modules.AUDITL.service import log_audit
     log_audit(
@@ -558,7 +616,7 @@ def request_changes_package(package_id, user_id, comment):
         old_values=None,
         new_values={
             "status": package.status,
-            "submission_ids": [item["submission_id"] for item in results],
+            "results": results,
         },
         metadata={"comment": comment.strip()},
     )
@@ -567,6 +625,10 @@ def request_changes_package(package_id, user_id, comment):
 
 
 def reject_package(package_id, user_id, comment):
+    """
+    Rejects every member submission this caller is currently eligible to act
+    on. See approve_package for the partial-eligibility handling this shares.
+    """
     if not comment or not comment.strip():
         raise ValueError("A comment is required to reject a package.")
 
@@ -574,20 +636,32 @@ def reject_package(package_id, user_id, comment):
     if not has_permission(user_id, "submission", "reject", scope_site_id=package.site_id):
         raise ValueError("Permission denied: You do not have permission to reject submissions.")
 
-    submissions = _reviewable_package_submissions(package.id)
+    submissions = _all_package_submissions(package.id)
     if not submissions:
-        raise ValueError("No reviewable submissions found in this package.")
+        raise ValueError("No submissions found in this package.")
 
     results = []
     for submission in submissions:
-        reject_submission(submission.id, user_id, comment)
+        if submission.status not in REVIEWABLE_STATUSES or submission.is_locked:
+            results.append({
+                "submission_id": submission.id,
+                "ok": False,
+                "skipped": True,
+                "status": submission.status,
+                "error": f"Not reviewable (status: {submission.status}).",
+            })
+            continue
+
+        ok, error = _attempt_in_savepoint(lambda s=submission: reject_submission(s.id, user_id, comment))
         results.append({
             "submission_id": submission.id,
+            "ok": ok,
+            "skipped": False,
             "status": submission.status,
+            "error": error,
         })
 
-    package.status = STATUS_REJECTED
-    package.updated_by = user_id
+    _sync_package_status_from_submissions(package, user_id)
 
     from app.modules.AUDITL.service import log_audit
     log_audit(
@@ -598,7 +672,7 @@ def reject_package(package_id, user_id, comment):
         old_values=None,
         new_values={
             "status": package.status,
-            "submission_ids": [item["submission_id"] for item in results],
+            "results": results,
         },
         metadata={"comment": comment.strip()},
     )
