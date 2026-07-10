@@ -1790,32 +1790,55 @@ def get_spoc_sheets_buckets(user_id):
     # 2. Get all published forms
     published_forms = Form.query.filter_by(is_deleted=False).filter(Form.current_version_id.is_not(None)).all()
 
-    # Check form applicability per site using WorkbookSite as authoritative source
+    # Check form applicability per site using WorkbookSite as authoritative source.
+    # Batched across all allowed sites (one query each) instead of one query per
+    # site (workbook lookup) plus one query per workbook (_workbook_sheet_rows).
     applicable_forms_by_site = {site_id: [] for site_id in allowed_site_ids}
     form_map = {}
 
     for f in published_forms:
         form_map[f.id] = f
-    for site_id in allowed_site_ids:
-        workbook_rows = (
-            db.session.query(Workbook)
-            .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
-            .join(
-                WorkbookSiteSubmitter,
-                (WorkbookSiteSubmitter.workbook_id == Workbook.id)
-                & (WorkbookSiteSubmitter.site_id == WorkbookSite.site_id),
-            )
-            .filter(
-                WorkbookSite.site_id == site_id,
-                WorkbookSiteSubmitter.user_id == user_id,
-                Workbook.is_active == True,
-                db.func.lower(Workbook.status).in_(LIVE_WORKBOOK_STATUSES),
-            )
-            .all()
+
+    workbooks_by_site = {}
+    all_workbook_ids = set()
+    for workbook, site_id in (
+        db.session.query(Workbook, WorkbookSite.site_id)
+        .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+        .join(
+            WorkbookSiteSubmitter,
+            (WorkbookSiteSubmitter.workbook_id == Workbook.id)
+            & (WorkbookSiteSubmitter.site_id == WorkbookSite.site_id),
         )
+        .filter(
+            WorkbookSite.site_id.in_(list(allowed_site_ids) or [0]),
+            WorkbookSiteSubmitter.user_id == user_id,
+            Workbook.is_active == True,
+            db.func.lower(Workbook.status).in_(LIVE_WORKBOOK_STATUSES),
+        )
+        .all()
+    ):
+        workbooks_by_site.setdefault(site_id, []).append(workbook)
+        all_workbook_ids.add(workbook.id)
+
+    sheet_rows_by_workbook = {}
+    if all_workbook_ids:
+        for wf, form in (
+            db.session.query(WorkbookForm, Form)
+            .join(Form, Form.id == WorkbookForm.form_id)
+            .filter(
+                WorkbookForm.workbook_id.in_(all_workbook_ids),
+                Form.is_deleted == False,
+                Form.current_version_id.is_not(None),
+            )
+            .order_by(WorkbookForm.display_order.asc(), WorkbookForm.id.asc())
+            .all()
+        ):
+            sheet_rows_by_workbook.setdefault(wf.workbook_id, []).append((wf, form))
+
+    for site_id in allowed_site_ids:
         seen_forms = set()
-        for workbook in workbook_rows:
-            for _workbook_form, form in _workbook_sheet_rows(workbook.id):
+        for workbook in workbooks_by_site.get(site_id, []):
+            for _workbook_form, form in sheet_rows_by_workbook.get(workbook.id, []):
                 form_map[form.id] = form
                 if form.id not in seen_forms:
                     applicable_forms_by_site[site_id].append(form)
@@ -1827,35 +1850,69 @@ def get_spoc_sheets_buckets(user_id):
         .order_by(Submission.updated_at.desc())
         .all()
     )
-    
+
+    # Batch: which (site_id, form_id) has a user-eligible workbook, and which
+    # workbook wins the "name asc, id asc" tie-break -- replaces a per-call
+    # query in both the submissions loop below and the not-started loop
+    # further down (previously each iteration re-ran this same join).
+    workbook_by_site_form = {}
+    for site_id, form_id, workbook in (
+        db.session.query(WorkbookSite.site_id, WorkbookForm.form_id, Workbook)
+        .join(Workbook, Workbook.id == WorkbookSite.workbook_id)
+        .join(WorkbookForm, WorkbookForm.workbook_id == Workbook.id)
+        .join(
+            WorkbookSiteSubmitter,
+            (WorkbookSiteSubmitter.workbook_id == Workbook.id)
+            & (WorkbookSiteSubmitter.site_id == WorkbookSite.site_id),
+        )
+        .filter(
+            WorkbookSite.site_id.in_(list(allowed_site_ids) or [0]),
+            WorkbookSiteSubmitter.user_id == user_id,
+            Workbook.is_active == True,
+            db.func.lower(Workbook.status).in_(LIVE_WORKBOOK_STATUSES),
+        )
+        .order_by(Workbook.name.asc(), Workbook.id.asc())
+        .all()
+    ):
+        workbook_by_site_form.setdefault((site_id, form_id), workbook)
+
+    # Batch every ReportingPeriod referenced by these submissions, instead of
+    # one .get() per submission.
+    period_ids_from_submissions = {sub.reporting_period_id for sub in submissions}
+    periods_by_id = {
+        p.id: p
+        for p in ReportingPeriod.query.filter(ReportingPeriod.id.in_(period_ids_from_submissions or {0})).all()
+    }
+
     action_needed = []
     submitted = []
-    
-    # Helper to load username
+
+    # Batch every submitter's username, instead of one query per unique submitter.
     from app.modules.USRMGMT.model import User
-    users_cache = {}
+    submitter_ids = {sub.submitted_by for sub in submissions if sub.submitted_by}
+    usernames_by_id = {
+        u.id: u.full_name
+        for u in User.query.filter(User.id.in_(submitter_ids or {0})).all()
+    }
     def get_username(uid):
         if not uid:
             return "System"
-        if uid not in users_cache:
-            u = User.query.get(uid)
-            users_cache[uid] = u.full_name if u else f"User {uid}"
-        return users_cache[uid]
+        return usernames_by_id.get(uid, f"User {uid}")
 
     def plain_submission_status(status):
         return SUBMISSION_STATUS_LABELS.get(status, status or "Unknown")
 
     # Track submission combos (site_id, form_id, reporting_period_id)
     submitted_combos = set()
-    
+
     for sub in submissions:
         site = sites_map.get(sub.site_id)
         form = form_map.get(sub.form_id)
-        period = ReportingPeriod.query.get(sub.reporting_period_id)
-        
+        period = periods_by_id.get(sub.reporting_period_id)
+
         if not site or not form or not period:
             continue
-        workbook = _user_workbook_for_site_form(user_id, sub.site_id, sub.form_id)
+        workbook = workbook_by_site_form.get((sub.site_id, sub.form_id))
         if not workbook:
             continue
             
@@ -1891,19 +1948,24 @@ def get_spoc_sheets_buckets(user_id):
             
     # 4. Generate Not Started bucket
     not_started = []
-    
+
+    # Batch open periods across all allowed sites, instead of one query per site.
+    open_periods_by_site = {}
+    for period in ReportingPeriod.query.filter(
+        ReportingPeriod.site_id.in_(list(allowed_site_ids) or [0]),
+        ReportingPeriod.is_deleted == False,
+        ReportingPeriod.status.in_(("OPEN", "REOPENED")),
+    ).all():
+        open_periods_by_site.setdefault(period.site_id, []).append(period)
+
     for site_id in allowed_site_ids:
         site = sites_map.get(site_id)
-        # Fetch open periods for this site
-        open_periods = ReportingPeriod.query.filter_by(
-            site_id=site_id,
-            is_deleted=False
-        ).filter(ReportingPeriod.status.in_(("OPEN", "REOPENED"))).all()
-        
+        open_periods = open_periods_by_site.get(site_id, [])
+
         for period in open_periods:
             period_label = format_period_label(period.year, period.month)
             for form in applicable_forms_by_site[site_id]:
-                workbook = _user_workbook_for_site_form(user_id, site_id, form.id)
+                workbook = workbook_by_site_form.get((site_id, form.id))
                 if not workbook:
                     continue
                 combo = (site_id, form.id, period.id)

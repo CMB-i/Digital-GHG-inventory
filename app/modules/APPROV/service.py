@@ -45,7 +45,7 @@ def _utc_now():
 # (Removed local notification helper, now importing from NOTIFY service)
 
 
-def _queue_submission_if_eligible(sub, user_id):
+def _queue_submission_if_eligible(sub, user_id, levels_by_key=None):
     # Check site-specific permission
     if not has_permission(user_id, "submission", "approve", scope_site_id=sub.site_id) and \
        not has_permission(user_id, "submission", "reject", scope_site_id=sub.site_id):
@@ -55,12 +55,17 @@ def _queue_submission_if_eligible(sub, user_id):
     if sub.submitted_by == user_id:
         return None
 
-    # Get active level for the submission's workflow
-    lvl = WorkflowLevel.query.filter_by(
-        workflow_version_id=sub.workflow_version_id,
-        level_number=sub.current_level,
-        is_deleted=False
-    ).first()
+    # Get active level for the submission's workflow. Callers iterating many
+    # submissions at once (get_approver_queue) pass a pre-fetched dict instead
+    # of letting this run one query per submission.
+    if levels_by_key is not None:
+        lvl = levels_by_key.get((sub.workflow_version_id, sub.current_level))
+    else:
+        lvl = WorkflowLevel.query.filter_by(
+            workflow_version_id=sub.workflow_version_id,
+            level_number=sub.current_level,
+            is_deleted=False
+        ).first()
     if not lvl:
         return None
 
@@ -100,17 +105,15 @@ def _queue_submission_if_eligible(sub, user_id):
     }
 
 
-def _submission_queue_item(sub, eligibility):
-    # Load form, site, and period for metadata
-    from app.modules.FORMBLD.model import Form
-    from app.modules.SITEMST.model import Site
-    from app.modules.PERIOD.model import ReportingPeriod
-
-    form = Form.query.get(sub.form_id)
-    site = Site.query.get(sub.site_id)
-    period = ReportingPeriod.query.get(sub.reporting_period_id)
+def _submission_queue_item(sub, eligibility, lookups):
+    # lookups is the batch-fetched {"forms": {...}, "sites": {...}, "periods":
+    # {...}, "users": {...}} dict built once by get_approver_queue, its only
+    # caller -- replaces what used to be 3-4 individual .get() calls per row.
+    form = lookups["forms"].get(sub.form_id)
+    site = lookups["sites"].get(sub.site_id)
+    period = lookups["periods"].get(sub.reporting_period_id)
     lvl = eligibility["level"]
-    submitter = User.query.get(sub.submitted_by) if sub.submitted_by else None
+    submitter = lookups["users"].get(sub.submitted_by) if sub.submitted_by else None
 
     # Calculate days waiting
     start_time = sub.last_status_changed_at or sub.submitted_at or sub.created_at
@@ -137,21 +140,36 @@ def _submission_queue_item(sub, eligibility):
     }
 
 
-def _package_queue_item(package_id, grouped_items):
-    from app.modules.FORMBLD.model import Form
-    from app.modules.SITEMST.model import Site
-    from app.modules.PERIOD.model import ReportingPeriod
+def _package_queue_item(package_id, grouped_items, lookups=None):
+    # lookups (batch-fetched by get_approver_queue) is optional so
+    # get_package_summary_for_reviewer -- which only ever handles one package
+    # at a time and doesn't need batching -- can keep calling this with its
+    # original per-call lookups.
+    if lookups is not None:
+        package = lookups["packages"].get(package_id)
+    else:
+        package = SubmissionPackage.query.get(package_id)
 
-    package = SubmissionPackage.query.get(package_id)
     representative = grouped_items[0]["submission"]
     eligibility = grouped_items[0]["eligibility"]
-    site = Site.query.get(package.site_id if package else representative.site_id)
-    period = ReportingPeriod.query.get(package.period_id if package else representative.reporting_period_id)
-
+    site_id = package.site_id if package else representative.site_id
+    period_id = package.period_id if package else representative.reporting_period_id
     form_ids = [item["submission"].form_id for item in grouped_items]
-    forms = Form.query.filter(Form.id.in_(form_ids)).all() if form_ids else []
-    forms_by_id = {form.id: form for form in forms}
-    form_names = [human_sheet_label(form) for form in forms]
+
+    if lookups is not None:
+        site = lookups["sites"].get(site_id)
+        period = lookups["periods"].get(period_id)
+        forms_by_id = {fid: lookups["forms"][fid] for fid in form_ids if fid in lookups["forms"]}
+    else:
+        from app.modules.FORMBLD.model import Form
+        from app.modules.SITEMST.model import Site
+        from app.modules.PERIOD.model import ReportingPeriod
+
+        site = Site.query.get(site_id)
+        period = ReportingPeriod.query.get(period_id)
+        forms = Form.query.filter(Form.id.in_(form_ids)).all() if form_ids else []
+        forms_by_id = {form.id: form for form in forms}
+    form_names = [human_sheet_label(forms_by_id[fid]) for fid in dict.fromkeys(form_ids) if fid in forms_by_id]
 
     start_times = [
         item["submission"].last_status_changed_at
@@ -169,7 +187,8 @@ def _package_queue_item(package_id, grouped_items):
     }
     submitted_by_name = "Multiple submitters"
     if len(submitted_users) == 1:
-        submitter = User.query.get(next(iter(submitted_users)))
+        submitter_id = next(iter(submitted_users))
+        submitter = lookups["users"].get(submitter_id) if lookups is not None else User.query.get(submitter_id)
         submitted_by_name = submitter.full_name if submitter else "System"
     elif not submitted_users:
         submitted_by_name = "System"
@@ -685,29 +704,100 @@ def get_approver_queue(user_id):
     Returns a sorted list of submissions pending review by user_id.
     Matches against site-specific permissions and workflow levels.
     """
-    subs = Submission.query.filter(
-        Submission.status.in_(REVIEWABLE_STATUSES),
-        Submission.is_deleted == False
-    ).all()
+    from app.modules.ACCESS.model import AccessMatrix
+    from app.modules.FORMBLD.model import Form
+    from app.modules.SITEMST.model import Site
+    from app.modules.PERIOD.model import ReportingPeriod
 
-    queue = []
+    # Push the site filter into SQL: only consider submissions at sites where
+    # this user has SOME approve/reject grant (global, or a specific site),
+    # instead of loading every reviewable submission system-wide and relying
+    # entirely on the per-row has_permission() check below to narrow it down.
+    # This is a conservative candidate set built straight from the raw
+    # AccessMatrix rows -- it can only be too wide, never too narrow, since
+    # the actual eligibility decision is still made by the unchanged,
+    # canonical has_permission() call inside _queue_submission_if_eligible.
+    # (Never reimplement AccessMatrix scoping logic -- see Consistency
+    # Guidelines/Known Gaps; this only uses the raw rows to narrow a
+    # candidate set, it doesn't compute the permission decision itself.)
+    grant_rows = AccessMatrix.query.filter(
+        AccessMatrix.user_id == user_id,
+        AccessMatrix.is_deleted == False,
+        AccessMatrix.entity_type.in_(("submission", "all")),
+    ).all()
+    has_global_grant = any(
+        row.scope_type == "global" and (row.can_approve or row.can_reject)
+        for row in grant_rows
+    )
+    candidate_site_ids = {
+        row.scope_site_id
+        for row in grant_rows
+        if row.scope_type == "site" and row.scope_site_id is not None and (row.can_approve or row.can_reject)
+    }
+
+    query = Submission.query.filter(
+        Submission.status.in_(REVIEWABLE_STATUSES),
+        Submission.is_deleted == False,
+    )
+    if not has_global_grant:
+        if not candidate_site_ids:
+            return []
+        query = query.filter(Submission.site_id.in_(candidate_site_ids))
+    subs = query.all()
+
+    # Batch the workflow-level lookup _queue_submission_if_eligible would
+    # otherwise run once per submission.
+    workflow_version_ids = {sub.workflow_version_id for sub in subs}
+    levels_by_key = {}
+    if workflow_version_ids:
+        for lvl in WorkflowLevel.query.filter(
+            WorkflowLevel.workflow_version_id.in_(workflow_version_ids),
+            WorkflowLevel.is_deleted == False,
+        ).all():
+            levels_by_key[(lvl.workflow_version_id, lvl.level_number)] = lvl
+
+    standalone = []
     package_groups = {}
+    eligible_subs = []
     for sub in subs:
-        eligibility = _queue_submission_if_eligible(sub, user_id)
+        eligibility = _queue_submission_if_eligible(sub, user_id, levels_by_key=levels_by_key)
         if not eligibility:
             continue
+        eligible_subs.append(sub)
 
         if sub.package_id:
             package_groups.setdefault(sub.package_id, []).append({
                 "submission": sub,
                 "eligibility": eligibility,
             })
-            continue
+        else:
+            standalone.append((sub, eligibility))
 
-        queue.append(_submission_queue_item(sub, eligibility))
+    # Batch every Form/Site/ReportingPeriod/User/SubmissionPackage needed to
+    # build the queue items below, instead of several individual .get() calls
+    # per eligible row.
+    package_ids = list(package_groups.keys())
+    packages_by_id = {
+        p.id: p
+        for p in (SubmissionPackage.query.filter(SubmissionPackage.id.in_(package_ids)).all() if package_ids else [])
+    }
 
+    form_ids = {sub.form_id for sub in eligible_subs}
+    site_ids = {sub.site_id for sub in eligible_subs} | {p.site_id for p in packages_by_id.values()}
+    period_ids = {sub.reporting_period_id for sub in eligible_subs} | {p.period_id for p in packages_by_id.values()}
+    user_ids = {sub.submitted_by for sub in eligible_subs if sub.submitted_by}
+
+    lookups = {
+        "forms": {f.id: f for f in Form.query.filter(Form.id.in_(form_ids or [0])).all()},
+        "sites": {s.id: s for s in Site.query.filter(Site.id.in_(site_ids or [0])).all()},
+        "periods": {p.id: p for p in ReportingPeriod.query.filter(ReportingPeriod.id.in_(period_ids or [0])).all()},
+        "users": {u.id: u for u in User.query.filter(User.id.in_(user_ids or [0])).all()},
+        "packages": packages_by_id,
+    }
+
+    queue = [_submission_queue_item(sub, eligibility, lookups) for sub, eligibility in standalone]
     for package_id, grouped_items in package_groups.items():
-        queue.append(_package_queue_item(package_id, grouped_items))
+        queue.append(_package_queue_item(package_id, grouped_items, lookups=lookups))
 
     # Sort by days waiting descending
     queue.sort(key=lambda x: x["days_waiting"], reverse=True)
