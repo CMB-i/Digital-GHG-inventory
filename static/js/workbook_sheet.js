@@ -553,21 +553,36 @@
 
   function renderSheetResultFooterCell(result, showLabel) {
     const calculated = result.status === "calculated";
-    const valueClass = calculated ? "text-[#1a3a6b] font-bold" : "text-slate-400";
+    const partial = result.status === "partial";
+    // Partial keeps the same navy identity as a full "calculated" result
+    // (it's a real, trustworthy number, just not from every month yet) but
+    // at a lighter weight so it doesn't read as a settled final total.
+    const valueClass = calculated
+      ? "text-[#1a3a6b] font-bold"
+      : partial
+        ? "text-[#1a3a6b] font-medium"
+        : "text-slate-400";
     const statusClass = calculated
       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-      : result.status === "not_configured"
-        ? "border-rose-200 bg-rose-50 text-rose-700"
-        : "border-amber-200 bg-amber-50 text-amber-700";
+      : partial
+        ? "border-blue-200 bg-blue-50 text-blue-700"
+        : result.status === "not_configured"
+          ? "border-rose-200 bg-rose-50 text-rose-700"
+          : "border-amber-200 bg-amber-50 text-amber-700";
     const statusLabel = calculated
       ? "Calculated"
-      : result.status === "not_configured"
-        ? "Not configured"
-        : "Needs input";
+      : partial
+        ? "Partial"
+        : result.status === "not_configured"
+          ? "Not configured"
+          : "Needs input";
+    const monthsIndicator = partial && result.months_total
+      ? ` <span class="text-[9px] font-semibold text-slate-400">(${result.months_entered}/${result.months_total} mo)</span>`
+      : "";
     return `
       <div class="px-2 py-1.5 text-right">
         ${showLabel ? `<div class="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>` : ""}
-        <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
+        <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}${monthsIndicator}</div>
         <div class="mt-1 flex justify-end">
           <span class="rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase ${statusClass}">${statusLabel}</span>
         </div>
@@ -646,11 +661,19 @@
         <div class="flex flex-wrap gap-x-6 gap-y-2">
           ${overflowResults.map((result) => {
             const calculated = result.status === "calculated";
-            const valueClass = calculated ? "text-[#1a3a6b] font-semibold" : "text-slate-400";
+            const partial = result.status === "partial";
+            const valueClass = calculated
+              ? "text-[#1a3a6b] font-semibold"
+              : partial
+                ? "text-[#1a3a6b] font-medium"
+                : "text-slate-400";
+            const monthsIndicator = partial && result.months_total
+              ? ` <span class="text-[10px] font-semibold text-slate-400">(${result.months_entered}/${result.months_total} mo)</span>`
+              : "";
             return `
               <div class="min-w-[160px]">
                 <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>
-                <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
+                <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}${monthsIndicator}</div>
                 ${result.message ? `<div class="text-[10px] text-amber-700">${escapeHtml(result.message)}</div>` : ""}
               </div>
             `;

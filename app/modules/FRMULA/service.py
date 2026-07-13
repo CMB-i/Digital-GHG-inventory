@@ -14,6 +14,21 @@ AGGREGATE_FORMULA_FUNCTIONS = {"SUM_MONTHS"}
 
 
 def sum_months(values):
+    """
+    Sums whatever monthly values are present, skipping blank (None/"") months
+    rather than blocking on them -- a partial FY total from the months
+    entered so far is more useful than refusing to compute at all. A present
+    value that isn't numeric is still a real data problem (distinct from "not
+    entered yet") and still raises.
+
+    Returns a plain float, not a (value, missing) tuple: SUM_MONTHS(...) is
+    used as an operand inside larger arithmetic expressions (e.g.
+    "SUM_MONTHS(a) + SUM_MONTHS(b)"), so simpleeval requires a scalar here.
+    The caller (SUBMIT._compose_sheet_results) already independently tracks
+    which months are missing per field via its own monthly-series pass, so it
+    doesn't need this function to report that back -- it decides the
+    partial/calculated/needs_input status itself and just needs the sum.
+    """
     if values is None:
         raise FormulaValidationError("SUM_MONTHS requires monthly values.")
     if not isinstance(values, (list, tuple)):
@@ -22,7 +37,7 @@ def sum_months(values):
     total = 0.0
     for value in values:
         if value in (None, ""):
-            raise FormulaValidationError("SUM_MONTHS cannot calculate while a month is blank.")
+            continue
         try:
             total += float(value)
         except (TypeError, ValueError) as error:

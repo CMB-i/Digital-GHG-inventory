@@ -1262,6 +1262,13 @@ def _monthly_series_for_results(rows, monthly_fields):
     return series, labels
 
 
+# Default for a calculated field's blank_policy config: compute a partial
+# result from whatever months are present rather than blocking. "strict" is
+# still a supported explicit opt-in for a field that genuinely needs complete
+# data before it can be trusted (see _evaluate below).
+DEFAULT_AGGREGATE_BLANK_POLICY = "partial"
+
+
 def _compose_sheet_results(result_fields, monthly_fields, rows):
     if not result_fields:
         return []
@@ -1322,19 +1329,33 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
             return
 
         aggregate_names = aggregate_operand_names(formula_version.expression)
-        missing_messages = []
+        blank_policy = config.get("blank_policy", DEFAULT_AGGREGATE_BLANK_POLICY)
         context_values = dict(result_values)
+
+        # "Unavailable" (operand isn't a monthly field on this sheet at all)
+        # is a structural problem, not blank data -- it always blocks,
+        # regardless of blank_policy.
+        unavailable_messages = []
+        strict_block_messages = []
+        total_months = 0
+        total_present = 0
+        combined_missing_months = []
 
         for name in aggregate_names:
             if name not in monthly_series:
-                missing_messages.append(f"Monthly field '{name}' is not available in this sheet.")
+                unavailable_messages.append(f"Monthly field '{name}' is not available in this sheet.")
                 continue
+            series_values = monthly_series[name]
             missing_months = missing_by_code.get(name) or []
-            if config.get("blank_policy", "strict") == "strict" and missing_months:
-                preview = ", ".join(missing_months[:3])
-                suffix = "..." if len(missing_months) > 3 else ""
-                missing_messages.append(f"{name} is missing for {preview}{suffix}.")
-            context_values[name] = monthly_series[name]
+            total_months += len(series_values)
+            total_present += len(series_values) - len(missing_months)
+            if missing_months:
+                combined_missing_months.extend(missing_months)
+                if blank_policy == "strict":
+                    preview = ", ".join(missing_months[:3])
+                    suffix = "..." if len(missing_months) > 3 else ""
+                    strict_block_messages.append(f"{name} is missing for {preview}{suffix}.")
+            context_values[name] = series_values
 
         # Informational only -- with a topological pass order, this is only
         # ever non-empty for fields left over in a dependency cycle.
@@ -1343,10 +1364,28 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
             if name in fields_by_code and name not in result_values
         ]
 
-        if missing_messages:
+        if unavailable_messages:
             results_by_code[code] = {
                 "status": "needs_input",
-                "message": "Cannot calculate: " + " ".join(missing_messages),
+                "message": "Cannot calculate: " + " ".join(unavailable_messages),
+                "source_field_codes": sorted(aggregate_names),
+            }
+            return
+
+        # Nothing entered at all yet -- there's no partial value to show,
+        # regardless of blank_policy.
+        if total_months > 0 and total_present == 0:
+            results_by_code[code] = {
+                "status": "needs_input",
+                "message": "Cannot calculate: no months have been entered yet.",
+                "source_field_codes": sorted(aggregate_names),
+            }
+            return
+
+        if strict_block_messages:
+            results_by_code[code] = {
+                "status": "needs_input",
+                "message": "Cannot calculate: " + " ".join(strict_block_messages),
                 "source_field_codes": sorted(aggregate_names),
             }
             return
@@ -1366,12 +1405,27 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
                 except (ValueError, TypeError):
                     pass
             result_values[code] = result
-            results_by_code[code] = {
-                "status": "calculated",
-                "value": result,
-                "message": "",
-                "source_field_codes": sorted(aggregate_names),
-            }
+
+            # "calculated" means literally every month is present, not just
+            # "no error" -- any missing month (permitted through because
+            # blank_policy isn't "strict") makes this "partial" instead, so
+            # the two statuses never overlap.
+            if combined_missing_months:
+                results_by_code[code] = {
+                    "status": "partial",
+                    "value": result,
+                    "message": f"{total_present} of {total_months} months entered.",
+                    "months_entered": total_present,
+                    "months_total": total_months,
+                    "source_field_codes": sorted(aggregate_names),
+                }
+            else:
+                results_by_code[code] = {
+                    "status": "calculated",
+                    "value": result,
+                    "message": "",
+                    "source_field_codes": sorted(aggregate_names),
+                }
         except Exception as exc:
             results_by_code[code] = {
                 "status": "error",
@@ -1425,6 +1479,8 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
             "unit": config.get("unit") or field.get("unit") or "",
             "status": result.get("status") or "error",
             "message": result.get("message") or "",
+            "months_entered": result.get("months_entered"),
+            "months_total": result.get("months_total"),
             "source_field_codes": source_field_codes,
             "display_region": config.get("display_region") or "under_input_column",
         })
