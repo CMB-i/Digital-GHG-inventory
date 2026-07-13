@@ -1942,6 +1942,72 @@ document.addEventListener("DOMContentLoaded", function () {
     saveDraftLayout().catch(() => {});
   };
 
+  // ── Formula Swap Impact Modal ──────────────────────────────────────────
+  // Blocking confirmation shown before publish when the draft swapped a
+  // calculated field's Formula identity and that affects live submissions
+  // (see SUBMIT.preview_formula_swap_impact / recalc_or_flag_submissions_for_
+  // formula_swap). Not a dismissible toast: publishing this affects live
+  // compliance data, so an explicit, deliberate act is required to proceed.
+  const fsiModal = document.getElementById("formula-swap-impact-modal");
+  const fsiFieldList = document.getElementById("fsi-field-list");
+  const fsiRecalcText = document.getElementById("fsi-recalc-text");
+  const fsiFlaggedText = document.getElementById("fsi-flagged-text");
+  const fsiCheckbox = document.getElementById("fsi-confirm-checkbox");
+  const fsiBtnCancel = document.getElementById("fsi-btn-cancel");
+  const fsiBtnConfirm = document.getElementById("fsi-btn-confirm");
+
+  function formatStatusBreakdown(breakdown) {
+    return Object.keys(breakdown || {})
+      .map(status => `${breakdown[status]} ${status}`)
+      .join(", ");
+  }
+
+  function showFormulaSwapImpactModal(impact, onConfirm) {
+    const fields = impact.fields || [];
+    fsiFieldList.innerHTML = fields.map(f => `<li>${escapeHtml(f.field_name)}</li>`).join("");
+
+    // recalculated_count/flagged_count/status_breakdown are sheet-wide counts,
+    // repeated identically on every changed field's entry (a submission is
+    // recalculated as a whole, not per individual field) -- read them once
+    // from the first entry rather than summing across fields, which would
+    // multiply the count by however many fields changed.
+    const recalcCount = fields.length ? (fields[0].recalculated_count || 0) : 0;
+    const flaggedCount = fields.length ? (fields[0].flagged_count || 0) : 0;
+    const breakdown = fields.length ? fields[0].status_breakdown : {};
+
+    if (recalcCount > 0) {
+      const breakdownText = formatStatusBreakdown(breakdown);
+      fsiRecalcText.textContent = `${recalcCount} submission${recalcCount === 1 ? "" : "s"} currently in progress will be recalculated with the new formula${breakdownText ? " (" + breakdownText + ")" : ""}.`;
+      fsiRecalcText.classList.remove("hidden");
+    } else {
+      fsiRecalcText.classList.add("hidden");
+    }
+
+    if (flaggedCount > 0) {
+      fsiFlaggedText.textContent = `${flaggedCount} submission${flaggedCount === 1 ? "" : "s"} are already approved and locked. They will NOT be silently changed — they will be flagged for mandatory review. A reviewer must explicitly confirm the new calculation is correct, or the submitter must resubmit, before that submission can be approved again.`;
+      fsiFlaggedText.classList.remove("hidden");
+    } else {
+      fsiFlaggedText.classList.add("hidden");
+    }
+
+    fsiCheckbox.checked = false;
+    fsiBtnConfirm.disabled = true;
+    fsiModal.classList.remove("hidden");
+
+    fsiCheckbox.onchange = function () {
+      fsiBtnConfirm.disabled = !fsiCheckbox.checked;
+    };
+
+    fsiBtnCancel.onclick = function () {
+      fsiModal.classList.add("hidden");
+    };
+
+    fsiBtnConfirm.onclick = function () {
+      fsiModal.classList.add("hidden");
+      onConfirm();
+    };
+  }
+
   // Publish validation & submit
   btnPublishForm.onclick = function () {
     if (!selectedVersionId) return;
@@ -1981,33 +2047,52 @@ document.addEventListener("DOMContentLoaded", function () {
 
     publishErrors.classList.add("hidden");
 
-    if (!confirm(`Publish this ${noun}? It will become active immediately and cannot be edited without creating a new draft.`)) {
-      return;
+    function doPublish() {
+      fetch(`/module/FORMBLD/api/version/${selectedVersionId}/publish`, {
+        method: "POST"
+      })
+        .then(res => res.json())
+        .then(resData => {
+          if (resData.error) {
+            const friendly = resData.error === "Only Draft versions can be published."
+              ? "This published sheet needs a draft version before changes can be published. A draft has been created for your edits."
+              : resData.error;
+            // Server-side error → show in error panel, not just toast
+            publishErrorsList.innerHTML = `<li>${escapeHtml(friendly)}</li>`;
+            publishErrors.classList.remove("hidden");
+            showToast(`Publish blocked — see errors above.`, "error");
+          } else {
+            showToast(isWorkbookContext ? "Sheet published." : "Form version published.");
+            isUnsaved = false;
+            // Reload version so status badge refreshes to Published; stay in builder
+            loadVersionDetails(selectedVersionId);
+          }
+        })
+        .catch(err => {
+          console.error("Error publishing:", err);
+          showToast(`Failed to publish ${noun}. Please try again.`, "error");
+        });
     }
 
-    saveDraftLayout().then(() => fetch(`/module/FORMBLD/api/version/${selectedVersionId}/publish`, {
-      method: "POST"
-    }))
+    // Save the draft first so the formula-swap-impact check reads this
+    // version's latest field_config, then check impact before asking for
+    // confirmation — a real impact gets the high-friction modal instead of
+    // the plain confirm() dialog.
+    saveDraftLayout()
+      .then(() => fetch(`/module/FORMBLD/api/version/${selectedVersionId}/formula-swap-impact`))
       .then(res => res.json())
-      .then(resData => {
-        if (resData.error) {
-          const friendly = resData.error === "Only Draft versions can be published."
-            ? "This published sheet needs a draft version before changes can be published. A draft has been created for your edits."
-            : resData.error;
-          // Server-side error → show in error panel, not just toast
-          publishErrorsList.innerHTML = `<li>${escapeHtml(friendly)}</li>`;
-          publishErrors.classList.remove("hidden");
-          showToast(`Publish blocked — see errors above.`, "error");
-        } else {
-          showToast(isWorkbookContext ? "Sheet published." : "Form version published.");
-          isUnsaved = false;
-          // Reload version so status badge refreshes to Published; stay in builder
-          loadVersionDetails(selectedVersionId);
+      .then(impact => {
+        if (impact && impact.total_affected > 0) {
+          showFormulaSwapImpactModal(impact, doPublish);
+        } else if (confirm(`Publish this ${noun}? It will become active immediately and cannot be edited without creating a new draft.`)) {
+          doPublish();
         }
       })
       .catch(err => {
-        console.error("Error publishing:", err);
-        showToast(`Failed to publish ${noun}. Please try again.`, "error");
+        console.error("Error checking formula swap impact:", err);
+        if (confirm(`Publish this ${noun}? It will become active immediately and cannot be edited without creating a new draft.`)) {
+          doPublish();
+        }
       });
   };
 
@@ -2098,21 +2183,21 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   };
 
-  // Open Formula Builder nav button
+  // Create New Formula nav button -- always opens a blank formula, even when
+  // this field already has one attached. Formulas are never edited in place
+  // once published (see FRMULA.create_new_formula_draft), so re-opening an
+  // existing published formula for "editing" is no longer a valid action --
+  // attaching a *different* already-published formula instead is handled by
+  // the "prop-formula" dropdown above.
   const btnOpenFormulaBuilder = document.getElementById("btn-open-formula-builder");
   if (btnOpenFormulaBuilder) {
     btnOpenFormulaBuilder.onclick = function (e) {
       e.preventDefault();
       if (!selectedFormId || !selectedVersionId) return;
-      const field = currentFields.find(x => x.field_code === selectedFieldCode);
-      const formulaVerId = field && field.field_config ? field.field_config.formula_version_id : null;
-      let url = "/module/FRMULA/?return_to=" + encodeURIComponent("/module/FORMBLD/") +
+      const url = "/module/FRMULA/?return_to=" + encodeURIComponent("/module/FORMBLD/") +
         "&form_id=" + selectedFormId +
         "&version_id=" + selectedVersionId +
         "&field_id=" + encodeURIComponent(selectedFieldCode || "");
-      if (formulaVerId) {
-        url += "&open_version_id=" + formulaVerId;
-      }
       window.location.href = url;
     };
   }

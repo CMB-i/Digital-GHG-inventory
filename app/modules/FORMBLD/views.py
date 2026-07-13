@@ -239,7 +239,10 @@ def get_version_details(version_id):
     published_formulas = (
         Formula.query.filter_by(is_deleted=False)
         .join(FormulaVersion, FormulaVersion.id == Formula.current_version_id)
-        .filter(FormulaVersion.published_at.is_not(None))
+        .filter(
+            FormulaVersion.published_at.is_not(None),
+            Formula.form_id == version.form_id,
+        )
         .all()
     )
     formulas_data = [{
@@ -383,6 +386,17 @@ def publish(version_id):
         publish_form_version(version_id, user.id)
         db.session.commit()
         return success_response(message="Form published successfully.")
+    except ValueError as e:
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/version/<int:version_id>/formula-swap-impact", methods=["GET"])
+@require_permission("form", "manage_forms")
+def formula_swap_impact(version_id):
+    from app.modules.SUBMIT.service import preview_formula_swap_impact
+
+    try:
+        return jsonify(preview_formula_swap_impact(version_id))
     except ValueError as e:
         return error_response(str(e), 400)
 

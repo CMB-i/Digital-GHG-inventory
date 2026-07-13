@@ -345,7 +345,7 @@
                     <button type="button" id="btn-open-formula-builder" class="flex w-full items-center justify-between rounded-lg bg-[#1a3a6b] px-4 py-2.5 text-[12px] font-semibold text-white transition hover:bg-[#142d56]">
                       <span class="flex items-center gap-2">
                         <span class="font-mono text-base font-bold leading-none">ƒ</span>
-                        <span>Open Formula Builder</span>
+                        <span>Create New Formula</span>
                       </span>
                       <span>→</span>
                     </button>
@@ -528,6 +528,36 @@
           </table>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Formula Swap Impact Modal (blocking -- publishing a calculated field's new
+     formula identity affects live compliance data, so this is a deliberate
+     confirmation step, not a dismissible toast). -->
+<div id="formula-swap-impact-modal" class="fixed inset-0 bg-navy/50 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-[560px] overflow-hidden">
+    <div class="px-6 py-4 bg-[#fff7ed] border-b border-amber-200 flex items-center gap-2">
+      <svg class="h-5 w-5 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+      </svg>
+      <h3 class="text-sm font-bold tracking-wide uppercase text-amber-800">This will affect live submissions</h3>
+    </div>
+    <div class="max-h-[70vh] overflow-y-auto p-6 space-y-4 text-sm text-slate-700">
+      <div>
+        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Formula changed on</div>
+        <ul id="fsi-field-list" class="list-disc list-inside font-semibold text-slate-800 space-y-0.5"></ul>
+      </div>
+      <p id="fsi-recalc-text" class="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-blue-900"></p>
+      <p id="fsi-flagged-text" class="hidden rounded-lg bg-rose-50 border border-rose-100 px-3 py-2 text-rose-900"></p>
+      <label class="flex items-start gap-2 pt-1 cursor-pointer select-none">
+        <input type="checkbox" id="fsi-confirm-checkbox" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#1a3a6b] focus:ring-[#1a3a6b]">
+        <span class="text-xs font-semibold text-slate-700">I understand this affects live compliance data.</span>
+      </label>
+    </div>
+    <div class="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
+      <button type="button" id="fsi-btn-cancel" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
+      <button type="button" id="fsi-btn-confirm" disabled class="px-4 py-2 rounded-lg text-xs font-bold text-white bg-[#c8102e] hover:bg-[#a80d26] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#c8102e]">Publish anyway</button>
     </div>
   </div>
 </div>
