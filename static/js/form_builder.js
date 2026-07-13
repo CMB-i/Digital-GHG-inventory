@@ -1241,7 +1241,13 @@ document.addEventListener("DOMContentLoaded", function () {
                 <div class="truncate text-sm font-semibold text-slate-900">${escapeHtml(field.field_name || field.field_code)}</div>
                 <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
                   <span class="font-mono text-[11px] text-[#94a3b8]">${escapeHtml(field.field_code)}</span>
-                  ${indicators.map(item => `<span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">${escapeHtml(item)}</span>`).join("")}
+                  ${indicators.map(item => {
+                    const isCalculatedBadge = item === "Calculated" || item === "Sheet/FY result";
+                    const badgeClass = isCalculatedBadge
+                      ? "bg-[#355784]/10 text-[#355784]"
+                      : "bg-slate-100 text-slate-500";
+                    return `<span class="rounded-full ${badgeClass} px-1.5 py-0.5 text-[10px] font-semibold">${escapeHtml(item)}</span>`;
+                  }).join("")}
                 </div>
               </button>
               <div class="flex flex-shrink-0 items-center gap-1.5">
