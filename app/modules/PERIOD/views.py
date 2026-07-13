@@ -11,14 +11,15 @@ from app.database import db
 from app.modules.PERIOD.service import (
     MONTH_NAMES,
     STATUS_LABELS,
-    TRANSITION_ACTION,
     TRANSITION_LABELS,
     VALID_STATUSES,
     VALID_TRANSITIONS,
     bulk_open_month,
     bulk_transition_periods,
     create_period,
+    get_period,
     list_periods,
+    required_transition_action,
     sort_period_group,
     transition_period,
 )
@@ -218,10 +219,15 @@ def transition(period_id):
     target_status = (request.form.get("target_status") or "").strip()
     reopen_reason = request.form.get("reopen_reason")
 
-    required_action = TRANSITION_ACTION.get(target_status)
-    if not required_action or not has_permission(actor.id, "period", required_action):
-        flash("You do not have permission for this transition.", "error")
-        return redirect(url_for("period.index", **_period_filter_args()))
+    # required_transition_action needs the period's CURRENT status too, since
+    # LOCKED -> OPEN (reopen) and everything else -> OPEN can no longer be
+    # told apart by target_status alone.
+    existing_period = get_period(period_id)
+    if existing_period:
+        required_action = required_transition_action(existing_period.status, target_status)
+        if not required_action or not has_permission(actor.id, "period", required_action):
+            flash("You do not have permission for this transition.", "error")
+            return redirect(url_for("period.index", **_period_filter_args()))
 
     try:
         period = transition_period(
@@ -230,7 +236,7 @@ def transition(period_id):
             actor_id=actor.id,
             reopen_reason=reopen_reason,
         )
-        if period.status in ("OPEN", "REOPENED"):
+        if period.status == "OPEN":
             notify_period_open_for_entry(period.id)
         db.session.commit()
         flash("Status updated.", "success")
@@ -277,12 +283,16 @@ def bulk_transition():
         flash("No reporting periods were selected.", "error")
         return redirect(url_for("period.index", **_period_filter_args()))
 
-    required_action = TRANSITION_ACTION.get(target_status)
-    if not required_action or not has_permission(actor.id, "period", required_action):
-        flash("You do not have permission for this transition.", "error")
+    if target_status not in VALID_STATUSES:
+        flash("Invalid target status.", "error")
         return redirect(url_for("period.index", **_period_filter_args()))
 
-    if target_status == "REOPENED" and not (reopen_reason or "").strip():
+    # Permission can't be pre-checked here anymore: it depends on each
+    # period's own current status (required_transition_action), and a single
+    # batch can mix current statuses even though they share one target_status.
+    # bulk_transition_periods does that check per period and buckets anyone
+    # not permitted into "skipped" instead of silently proceeding.
+    if target_status == "OPEN" and not (reopen_reason or "").strip():
         flash("A reopen reason is required.", "error")
         return redirect(url_for("period.index", **_period_filter_args()))
 
@@ -294,7 +304,7 @@ def bulk_transition():
             reopen_reason=reopen_reason,
         )
         for period in results["succeeded"]:
-            if period.status in ("OPEN", "REOPENED"):
+            if period.status == "OPEN":
                 notify_period_open_for_entry(period.id)
         db.session.commit()
     except Exception:

@@ -7,36 +7,45 @@ from app.modules.AUDITL.service import log_audit
 from app.modules.PERIOD.model import ReportingPeriod
 
 
-VALID_STATUSES = ("OPEN", "SUBMISSION_CLOSED", "LOCKED", "REOPENED")
+VALID_STATUSES = ("OPEN", "SUBMISSION_CLOSED", "LOCKED")
 
 VALID_TRANSITIONS = {
     "OPEN": "SUBMISSION_CLOSED",
     "SUBMISSION_CLOSED": "LOCKED",
-    "LOCKED": "REOPENED",
-    "REOPENED": "OPEN",
+    "LOCKED": "OPEN",
 }
 
 TRANSITION_LABELS = {
     "OPEN": "Close Submission",
     "SUBMISSION_CLOSED": "Lock",
     "LOCKED": "Reopen",
-    "REOPENED": "Mark Open",
-}
-
-# Maps the target status to the action required to reach it.
-TRANSITION_ACTION = {
-    "SUBMISSION_CLOSED": "edit",
-    "LOCKED": "edit",
-    "REOPENED": "reopen",
-    "OPEN": "edit",
 }
 
 STATUS_LABELS = {
     "OPEN": "Open",
     "SUBMISSION_CLOSED": "Closed",
     "LOCKED": "Locked",
-    "REOPENED": "Reopened",
 }
+
+
+def required_transition_action(current_status, target_status):
+    """
+    Maps a (current_status, target_status) transition to the permission
+    action it requires. Keyed by target status alone, this used to conflate
+    two different things once LOCKED -> OPEN became a single step: "close
+    submission was reversed" (cheap, only needs "edit") and "a locked period
+    was reopened" (must require "reopen"). LOCKED -> OPEN is the one-step
+    replacement for the old two-step Lock -> Reopen -> Mark-Open cycle and is
+    the only transition that needs "reopen"; every other valid transition
+    only needs "edit". Returns None if (current_status, target_status) isn't
+    a valid direct transition at all.
+    """
+    if VALID_TRANSITIONS.get(current_status) != target_status:
+        return None
+    if current_status == "LOCKED" and target_status == "OPEN":
+        return "reopen"
+    return "edit"
+
 
 MONTH_NAMES = {
     1: "January",
@@ -178,7 +187,7 @@ def transition_period(period_id, target_status, actor_id, reopen_reason=None):
         )
 
     old_status = period.status
-    if target_status == "REOPENED":
+    if old_status == "LOCKED" and target_status == "OPEN":
         reason = (reopen_reason or "").strip()
         if not reason:
             raise ValidationError("A reopen reason is required.")
@@ -228,21 +237,12 @@ def bulk_transition_periods(period_ids, target_status, actor_id, reopen_reason=N
     APPROV/service.py for the same partial-eligibility handling.
     """
     results = {"succeeded": [], "skipped": [], "failed": []}
-    required_action = TRANSITION_ACTION.get(target_status)
-    caller_has_permission = bool(required_action) and has_permission(actor_id, "period", required_action)
 
     seen_ids = set()
     for period_id in period_ids:
         if period_id in seen_ids:
             continue
         seen_ids.add(period_id)
-
-        if not caller_has_permission:
-            results["skipped"].append({
-                "period_id": period_id,
-                "reason": "You do not have permission for this transition.",
-            })
-            continue
 
         period = get_period(period_id)
         if not period:
@@ -251,10 +251,23 @@ def bulk_transition_periods(period_ids, target_status, actor_id, reopen_reason=N
                 "reason": "Reporting period not found.",
             })
             continue
-        if VALID_TRANSITIONS.get(period.status) != target_status:
+
+        # Permission depends on the (current_status, target_status) pair, not
+        # target_status alone -- a batch can mix current statuses (e.g. some
+        # LOCKED, some SUBMISSION_CLOSED) even though today's transition graph
+        # happens to make LOCKED the only source that reaches OPEN.
+        required_action = required_transition_action(period.status, target_status)
+        if not required_action:
             results["skipped"].append({
                 "period_id": period_id,
                 "reason": f"Not eligible for this transition (current status: {period.status}).",
+            })
+            continue
+
+        if not has_permission(actor_id, "period", required_action):
+            results["skipped"].append({
+                "period_id": period_id,
+                "reason": "You do not have permission for this transition.",
             })
             continue
 

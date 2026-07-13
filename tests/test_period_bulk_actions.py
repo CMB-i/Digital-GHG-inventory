@@ -98,8 +98,9 @@ class TestBulkTransitionPermission:
     def test_caller_without_required_action_is_rejected_per_row(
         self, make_site, make_reporting_period, make_user, make_access_grant,
     ):
-        # Actor has "edit" but not "reopen" -- transitioning LOCKED -> REOPENED
-        # requires "reopen" specifically (TRANSITION_ACTION["REOPENED"]).
+        # Actor has "edit" but not "reopen" -- transitioning LOCKED -> OPEN
+        # requires "reopen" specifically (required_transition_action treats
+        # this pair differently from every other transition reaching OPEN).
         actor = make_user()
         _grant_global(make_access_grant, actor, can_edit=True)
 
@@ -110,7 +111,7 @@ class TestBulkTransitionPermission:
 
         results = bulk_transition_periods(
             period_ids=[period_1.id, period_2.id],
-            target_status="REOPENED",
+            target_status="OPEN",
             actor_id=actor.id,
             reopen_reason="Needed for correction.",
         )
@@ -138,13 +139,34 @@ class TestBulkTransitionPermission:
 
         results = bulk_transition_periods(
             period_ids=[period.id],
-            target_status="REOPENED",
+            target_status="OPEN",
             actor_id=actor.id,
             reopen_reason="Needed for correction.",
         )
 
         assert {p.id for p in results["succeeded"]} == {period.id}
-        assert ReportingPeriod.query.get(period.id).status == "REOPENED"
+        assert ReportingPeriod.query.get(period.id).status == "OPEN"
+
+    def test_edit_only_actor_can_still_close_submission(
+        self, make_site, make_reporting_period, make_user, make_access_grant,
+    ):
+        # The other half of the fix: an edit-only actor must still be able to
+        # perform transitions that were never the reopen step in the first
+        # place (OPEN -> SUBMISSION_CLOSED doesn't need "reopen").
+        actor = make_user()
+        _grant_global(make_access_grant, actor, can_edit=True)
+
+        site = make_site()
+        period = make_reporting_period(site, year=2026, month=8, status="OPEN")
+
+        results = bulk_transition_periods(
+            period_ids=[period.id],
+            target_status="SUBMISSION_CLOSED",
+            actor_id=actor.id,
+        )
+
+        assert {p.id for p in results["succeeded"]} == {period.id}
+        assert ReportingPeriod.query.get(period.id).status == "SUBMISSION_CLOSED"
 
 
 class TestSortPeriodGroup:

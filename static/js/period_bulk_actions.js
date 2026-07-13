@@ -95,7 +95,7 @@ document.addEventListener("DOMContentLoaded", function () {
       var label = targetLabels[target] || target;
       var button = document.createElement("button");
       button.type = "button";
-      button.className = "action-button " + (target === "REOPENED" ? "btn-outline" : "btn-neutral");
+      button.className = "action-button " + (target === "OPEN" ? "btn-outline" : "btn-neutral");
       button.textContent = label + " selected (" + ids.length + ")";
       button.addEventListener("click", function () {
         submitBulkTransition(target, label, ids);
@@ -105,7 +105,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function submitBulkTransition(target, label, ids) {
-    if (target === "REOPENED") {
+    if (target === "OPEN") {
       setHiddenPeriodIds(reopenForm, ids);
       if (reopenCountEl) {
         reopenCountEl.textContent = ids.length + " reporting period(s) will be reopened.";

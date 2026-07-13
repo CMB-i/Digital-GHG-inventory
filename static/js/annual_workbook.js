@@ -177,13 +177,13 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function hasOpenWorkbookPeriod() {
     if (!state.workbook || !Array.isArray(state.workbook.rows)) return false;
-    return state.workbook.rows.some(row => row.period_status === "OPEN" || row.period_status === "REOPENED");
+    return state.workbook.rows.some(row => row.period_status === "OPEN");
   }
 
   function openPeriodLabels() {
     if (!state.workbook || !Array.isArray(state.workbook.rows)) return [];
     return state.workbook.rows
-      .filter(row => row.period_status === "OPEN" || row.period_status === "REOPENED" || (row.editability && row.editability.editable))
+      .filter(row => row.period_status === "OPEN" || (row.editability && row.editability.editable))
       .map(row => row.period_label || getFullMonthYear(row.month, row.year))
       .filter(Boolean);
   }

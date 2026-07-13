@@ -518,7 +518,7 @@ def notify_period_open_for_entry(period_id):
     from app.modules.SUBMIT.service import format_period_label
 
     period = ReportingPeriod.query.filter_by(id=period_id, is_deleted=False).first()
-    if not period or period.status not in ("OPEN", "REOPENED"):
+    if not period or period.status != "OPEN":
         return []
 
     site = Site.query.get(period.site_id)

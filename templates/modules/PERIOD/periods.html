@@ -63,8 +63,7 @@
   {% set status_badge_classes = {
     "OPEN": "status-badge status-badge-info",
     "SUBMISSION_CLOSED": "status-badge status-badge-neutral",
-    "LOCKED": "status-badge status-badge-neutral",
-    "REOPENED": "status-badge status-badge-warning"
+    "LOCKED": "status-badge status-badge-neutral"
   } %}
 
   {% if month_groups %}
@@ -162,6 +161,12 @@
               <span class="{{ status_badge_classes.get(period.status, 'status-badge status-badge-neutral') }}">
                 {{ status_labels.get(period.status, period.status) }}
               </span>
+              {% if period.reopened_at %}
+              <span class="ml-1 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+                    title="Reopened {{ period.reopened_at.strftime('%d %b %Y') }}{% if period.reopen_reason %} — {{ period.reopen_reason }}{% endif %}">
+                ↺ Reopened
+              </span>
+              {% endif %}
             </td>
             <td class="whitespace-nowrap px-3 py-2.5 text-sm text-slate-500">
               {{ period.deadline.strftime("%d %b %Y") if period.deadline else "—" }}
@@ -188,7 +193,7 @@
                         method="post"
                         action="{{ url_for('period.transition', period_id=period.id, **period_filter_args) }}">
                     <input type="hidden" name="target_status" value="{{ next_status }}">
-                    <button class="action-button {% if period.status == 'REOPENED' %}btn-outline{% else %}btn-neutral{% endif %}" type="submit">
+                    <button class="action-button btn-neutral" type="submit">
                       {{ transition_labels.get(period.status, "Advance") }}
                     </button>
                   </form>
@@ -245,7 +250,7 @@
       <p class="mt-1 text-sm text-slate-600" id="bulk_reopen_modal_count"></p>
     </div>
     <form class="space-y-4 px-5 py-5" id="bulk_reopen_form" method="post" action="{{ bulk_transition_url }}">
-      <input type="hidden" name="target_status" value="REOPENED">
+      <input type="hidden" name="target_status" value="OPEN">
       <div>
         <label class="text-xs font-medium text-slate-600" for="bulk_reopen_reason_input">Reason for reopening</label>
         <textarea class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
@@ -267,7 +272,7 @@
       <p class="mt-1 text-sm text-slate-600" id="reopen_modal_period"></p>
     </div>
     <form class="space-y-4 px-5 py-5" id="reopen_form" method="post">
-      <input type="hidden" name="target_status" value="REOPENED">
+      <input type="hidden" name="target_status" value="OPEN">
       <div>
         <label class="text-xs font-medium text-slate-600" for="reopen_reason_input">Reason for reopening</label>
         <textarea class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
