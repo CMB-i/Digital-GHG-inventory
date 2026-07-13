@@ -576,17 +576,27 @@
         : result.status === "not_configured"
           ? "Not configured"
           : "Needs input";
-    const monthsIndicator = partial && result.months_total
-      ? ` <span class="text-[9px] font-semibold text-slate-400">(${result.months_entered}/${result.months_total} mo)</span>`
-      : "";
+    // The fraction lives in the badge for a partial result ("PARTIAL · 7/12")
+    // instead of repeating three times across the card -- next to the value,
+    // in the badge, and again as a full sentence. A full "calculated" result
+    // never shows a fraction since 12/12 is implied.
+    const badgeText = partial && result.months_total
+      ? `${statusLabel} · ${result.months_entered}/${result.months_total}`
+      : statusLabel;
+    // Full detail (the "7 of 12 months entered." sentence, plus whatever
+    // else the result carries) moves to a hover tooltip instead of staying
+    // permanently visible on the card.
+    const tooltipParts = [statusLabel];
+    if (result.message) tooltipParts.push(result.message);
+    const tooltipTitle = escapeHtml(tooltipParts.join(" · "));
     return `
-      <div class="px-2 py-1.5 text-right">
+      <div class="px-2 py-1.5 text-right" title="${tooltipTitle}">
         ${showLabel ? `<div class="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>` : ""}
-        <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}${monthsIndicator}</div>
+        <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
         <div class="mt-1 flex justify-end">
-          <span class="rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase ${statusClass}">${statusLabel}</span>
+          <span class="whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase ${statusClass}">${escapeHtml(badgeText)}</span>
         </div>
-        ${result.message ? `<div class="mt-1 text-left text-[10px] font-medium text-amber-700">${escapeHtml(result.message)}</div>` : ""}
+        ${result.message && !partial ? `<div class="mt-1 text-left text-[10px] font-medium text-amber-700">${escapeHtml(result.message)}</div>` : ""}
       </div>
     `;
   }
@@ -596,14 +606,27 @@
     if (!allResults.length) return "";
 
     const isCalcMode = options.mode === "calc_results";
-    const showLabels = allResults.length > 1;
     const fieldByCode = {};
     displayFields.forEach((field) => {
       fieldByCode[normalizeFieldCode(field.field_code)] = field;
     });
 
+    // "below_monthly_table" results (explicit, multi-source combined totals
+    // like TOTAL NON COASTAL) never belong to a single column -- they always
+    // render in their own dedicated row below, regardless of how many source
+    // fields they touch or whether the first one alphabetically/positionally
+    // happens to match a display column. Everything else ("under_input_column",
+    // covering both manual per-field totals and every automatic one) aggregates
+    // exactly one source field by construction, so it's safe to bucket by column.
+    const combinedResults = allResults.filter((result) => result.display_region === "below_monthly_table");
+    const perColumnResults = allResults.filter((result) => result.display_region !== "below_monthly_table");
+
+    // Each column now holds at most one result, so no per-result label is
+    // needed -- the column header above it already identifies the field.
+    const showLabels = false;
+
     const resultsBySource = {};
-    allResults.forEach((result) => {
+    perColumnResults.forEach((result) => {
       const sourceCodes = Array.isArray(result.source_field_codes) && result.source_field_codes.length
         ? result.source_field_codes
         : [];
@@ -614,7 +637,10 @@
       resultsBySource[key].push(result);
     });
 
-    const unmappedResults = allResults.filter((result) => {
+    // Still possible for a per-field result: a legacy manually-built
+    // under-input-column field with no formula attached yet has no source
+    // field code at all, so it can't be placed under any column.
+    const unmappedResults = perColumnResults.filter((result) => {
       const sourceCodes = Array.isArray(result.source_field_codes) ? result.source_field_codes : [];
       if (!sourceCodes.length) return true;
       return !fieldByCode[normalizeFieldCode(sourceCodes[0])];
@@ -634,6 +660,20 @@
         }).join("")}
         ${!isCalcMode ? '<td class="border border-slate-200 bg-slate-50"></td>' : ""}
       </tr>
+      ${combinedResults.length ? `
+        <tr class="sheet-aggregate-row bg-slate-50 border-t border-slate-200">
+          <td colspan="${displayFields.length + (isCalcMode ? 1 : 2)}" class="border border-slate-200 px-4 py-3">
+            <div class="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-600">Combined totals</div>
+            <div class="flex flex-wrap gap-4">
+              ${combinedResults.map((result) => `
+                <div class="min-w-[160px] rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                  ${renderSheetResultFooterCell(result, true)}
+                </div>
+              `).join("")}
+            </div>
+          </td>
+        </tr>
+      ` : ""}
       ${unmappedResults.length ? `
         <tr class="sheet-aggregate-row bg-amber-50/80 border-t border-amber-200">
           <td colspan="${displayFields.length + (isCalcMode ? 1 : 2)}" class="border border-amber-200 px-4 py-3">
@@ -667,14 +707,17 @@
               : partial
                 ? "text-[#1a3a6b] font-medium"
                 : "text-slate-400";
-            const monthsIndicator = partial && result.months_total
-              ? ` <span class="text-[10px] font-semibold text-slate-400">(${result.months_entered}/${result.months_total} mo)</span>`
+            const badgeSuffix = partial && result.months_total
+              ? ` (${result.months_entered}/${result.months_total})`
               : "";
+            const tooltipParts = [calculated ? "Calculated" : partial ? "Partial" : (result.status || "")];
+            if (result.message) tooltipParts.push(result.message);
+            const tooltipTitle = escapeHtml(tooltipParts.filter(Boolean).join(" · "));
             return `
-              <div class="min-w-[160px]">
-                <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>
-                <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}${monthsIndicator}</div>
-                ${result.message ? `<div class="text-[10px] text-amber-700">${escapeHtml(result.message)}</div>` : ""}
+              <div class="min-w-[160px]" title="${tooltipTitle}">
+                <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}${escapeHtml(badgeSuffix)}</div>
+                <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
+                ${result.message && !partial ? `<div class="text-[10px] text-amber-700">${escapeHtml(result.message)}</div>` : ""}
               </div>
             `;
           }).join("")}

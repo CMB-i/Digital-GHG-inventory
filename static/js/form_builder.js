@@ -1543,7 +1543,9 @@ document.addEventListener("DOMContentLoaded", function () {
         field.field_config.display_region = placement === "annual_result_below"
           ? "below_monthly_table"
           : "under_input_column";
-        field.field_config.blank_policy = field.field_config.blank_policy || "strict";
+        // blank_policy is left untouched -- no UI here lets a builder choose
+        // it, so an unset field just takes the backend's "partial" default.
+        // Used to unconditionally inject "strict"; don't reintroduce that.
         field.field_config.is_required = false;
         field.field_config.remarks_required = false;
         field.field_config.proof_required = false;
