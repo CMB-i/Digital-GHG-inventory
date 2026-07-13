@@ -375,6 +375,19 @@ def save_form_sections(form_version_id, sections_list, user_id):
     return saved_sections
 
 def normalize_calculated_field_config(field_type, field_config, frequency):
+    """
+    "under_input_column" (a per-field FY total attached to one source field
+    via a manual SUM_MONTHS formula) is legacy-only as of the automatic FY
+    total feature -- every monthly numeric field now gets one synthesized
+    for free (see SUBMIT.synthesize_automatic_fy_totals), so the Sheet
+    Builder UI no longer offers it as a creatable Calculation Placement.
+    A field that already has it (from before this change) keeps working
+    exactly as before -- normalize_calculated_field_config still recognizes
+    and preserves it, this function just never assigns it to a field that
+    doesn't already have it. "below_monthly_table" (a genuine multi-field
+    combined total needing a real custom formula) is unaffected and remains
+    the only annual-result placement the UI can create going forward.
+    """
     config = dict(field_config or {})
     normalized_type = (field_type or "").strip().lower()
     normalized_frequency = (frequency or "monthly").strip().lower()
@@ -392,9 +405,15 @@ def normalize_calculated_field_config(field_type, field_config, frequency):
         normalized_frequency = "annual"
         config["field_scope"] = "annual_result"
         config["result_role"] = "aggregate_result"
-        if config.get("display_region") != "below_monthly_table":
-            config["display_region"] = "under_input_column"
-        config["blank_policy"] = config.get("blank_policy") or "strict"
+        if config.get("display_region") != "under_input_column":
+            config["display_region"] = "below_monthly_table"
+        # blank_policy is intentionally left untouched here -- no UI has ever
+        # offered a way to choose it deliberately, so a field with no
+        # persisted blank_policy value just takes SUBMIT's DEFAULT_AGGREGATE_
+        # BLANK_POLICY ("partial") at read time. This used to unconditionally
+        # inject "strict" onto every annual-result field, which is exactly
+        # the leftover scripts/fix_blank_policy_default.py cleans up -- don't
+        # reintroduce it here.
         config["is_required"] = False
         config["remarks_required"] = False
         config["proof_required"] = False

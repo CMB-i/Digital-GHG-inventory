@@ -35,7 +35,7 @@ from app.modules.SUBMIT.model import (
     SubmissionPackage,
 )
 from app.modules.FRMULA.model import FormulaVersion
-from app.modules.FRMULA.service import aggregate_operand_names, evaluate_formula
+from app.modules.FRMULA.service import aggregate_operand_names, evaluate_formula, sum_months
 from app.modules.WFLWBLD.model import Workflow
 from app.modules.WFLWBLD.service import (
     find_next_applicable_level,
@@ -591,6 +591,102 @@ def is_non_monthly_field(field, sections):
 def monthly_table_fields(fields, sections):
     """Fields that belong in the monthly grid and SUM_MONTHS operand series."""
     return [field for field in fields if not is_non_monthly_field(field, sections)]
+
+
+def _explicitly_covered_monthly_field_codes(explicit_result_fields):
+    """
+    Field codes that already have a manually-built, per-field FY-total Field
+    (field_config.display_region == "under_input_column", a SUM_MONTHS(x)
+    formula pointed back at one source field) -- these must not also get an
+    automatic synthetic entry, or the column would show a duplicate FY total.
+
+    Scoped specifically to "under_input_column" placements: a
+    "below_monthly_table" combined total (e.g. diesel + petrol summed
+    together into one custom figure) is a different, additive result, not a
+    per-field override, so it never suppresses automatic per-field totals for
+    diesel or petrol individually.
+    """
+    covered = set()
+    per_field_overrides = [
+        field for field in explicit_result_fields
+        if (field.get("field_config") or {}).get("display_region") == "under_input_column"
+    ]
+    if not per_field_overrides:
+        return covered
+
+    formula_version_ids = [
+        (field.get("field_config") or {}).get("formula_version_id")
+        for field in per_field_overrides
+        if (field.get("field_config") or {}).get("formula_version_id")
+    ]
+    formula_versions = {
+        fv.id: fv
+        for fv in FormulaVersion.query.filter(FormulaVersion.id.in_(formula_version_ids or [0])).all()
+    }
+    for field in per_field_overrides:
+        formula_version_id = (field.get("field_config") or {}).get("formula_version_id")
+        formula_version = formula_versions.get(formula_version_id)
+        if formula_version:
+            covered.update(aggregate_operand_names(formula_version.expression))
+    return covered
+
+
+def _is_numeric_field(field):
+    field_type = _normalized_field_type(field.get("field_type"))
+    if field_type == "calculated":
+        return True
+    from app.modules.FORMBLD.service import NUMERIC_FIELD_TYPES
+
+    config = field.get("field_config") or {}
+    return (
+        field_type in NUMERIC_FIELD_TYPES
+        or str(config.get("result_type") or config.get("value_type") or "").lower() in NUMERIC_FIELD_TYPES
+        or config.get("is_numeric") is True
+    )
+
+
+def synthesize_automatic_fy_totals(monthly_fields, explicit_result_fields):
+    """
+    Every monthly, numeric field -- raw input or a per-row calculated field,
+    it doesn't matter which -- gets an automatic FY total unless it's already
+    covered by an explicit per-field override (see
+    _explicitly_covered_monthly_field_codes). This is what makes an FY total
+    mandatory and zero-setup instead of something the sheet builder has to
+    remember to build by hand.
+
+    Annual/static fields never reach this function at all: monthly_fields is
+    already scoped to monthly_table_fields()'s output, which excludes them by
+    definition. That's deliberate, not an oversight -- an annual/static
+    field's "FY aggregate" would just be its own single value, a trivial
+    identity, not a real SUM_MONTHS computation, so it doesn't get a
+    synthetic entry (see the calling code's docstring/summary for the full
+    reasoning).
+
+    Non-numeric field types (dropdown/text/file) are skipped -- summing them
+    is meaningless.
+    """
+    covered = _explicitly_covered_monthly_field_codes(explicit_result_fields)
+
+    synthetic = []
+    for field in monthly_fields:
+        code = field.get("field_code")
+        if not code or code in covered or not _is_numeric_field(field):
+            continue
+
+        config = field.get("field_config") or {}
+        synthetic.append({
+            "field_id": field.get("field_id") or field.get("id"),
+            "field_code": f"{code}__auto_fy_total",
+            "field_name": field.get("field_name"),
+            "field_type": "calculated",
+            "field_config": {
+                "auto_aggregate_source_field_code": code,
+                "unit": config.get("unit") or "",
+                "round_off_decimals": config.get("round_off_decimals", 3),
+                "display_region": "under_input_column",
+            },
+        })
+    return synthetic
 
 
 def is_editable_workbook_field(field, sections):
@@ -1270,6 +1366,13 @@ def _monthly_series_for_results(rows, monthly_fields):
     return series, labels
 
 
+# Default for a calculated field's blank_policy config: compute a partial
+# result from whatever months are present rather than blocking. "strict" is
+# still a supported explicit opt-in for a field that genuinely needs complete
+# data before it can be trusted (see _evaluate below).
+DEFAULT_AGGREGATE_BLANK_POLICY = "partial"
+
+
 def _compose_sheet_results(result_fields, monthly_fields, rows):
     if not result_fields:
         return []
@@ -1310,39 +1413,64 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
     def _evaluate(code):
         field = fields_by_code[code]
         config = field.get("field_config") or {}
-        formula_version_id = config.get("formula_version_id")
+        auto_source_code = config.get("auto_aggregate_source_field_code")
 
-        if not formula_version_id:
-            results_by_code[code] = {
-                "status": "not_configured",
-                "message": "Formula is not configured.",
-                "source_field_codes": [],
-            }
-            return
+        if auto_source_code:
+            # Automatic FY total: a plain SUM_MONTHS of the field's own
+            # monthly series. No Formula/FormulaVersion row involved -- there's
+            # no custom logic here, just a sum, so it's synthesized directly
+            # rather than requiring one to exist in the database.
+            formula_version = None
+            aggregate_names = {auto_source_code}
+        else:
+            formula_version_id = config.get("formula_version_id")
 
-        formula_version = formula_versions.get(formula_version_id)
-        if not formula_version:
-            results_by_code[code] = {
-                "status": "not_configured",
-                "message": "Formula version not found.",
-                "source_field_codes": [],
-            }
-            return
+            if not formula_version_id:
+                results_by_code[code] = {
+                    "status": "not_configured",
+                    "message": "Formula is not configured.",
+                    "source_field_codes": [],
+                }
+                return
 
-        aggregate_names = aggregate_operand_names(formula_version.expression)
-        missing_messages = []
+            formula_version = formula_versions.get(formula_version_id)
+            if not formula_version:
+                results_by_code[code] = {
+                    "status": "not_configured",
+                    "message": "Formula version not found.",
+                    "source_field_codes": [],
+                }
+                return
+
+            aggregate_names = aggregate_operand_names(formula_version.expression)
+
+        blank_policy = config.get("blank_policy", DEFAULT_AGGREGATE_BLANK_POLICY)
         context_values = dict(result_values)
+
+        # "Unavailable" (operand isn't a monthly field on this sheet at all)
+        # is a structural problem, not blank data -- it always blocks,
+        # regardless of blank_policy.
+        unavailable_messages = []
+        strict_block_messages = []
+        total_months = 0
+        total_present = 0
+        combined_missing_months = []
 
         for name in aggregate_names:
             if name not in monthly_series:
-                missing_messages.append(f"Monthly field '{name}' is not available in this sheet.")
+                unavailable_messages.append(f"Monthly field '{name}' is not available in this sheet.")
                 continue
+            series_values = monthly_series[name]
             missing_months = missing_by_code.get(name) or []
-            if config.get("blank_policy", "strict") == "strict" and missing_months:
-                preview = ", ".join(missing_months[:3])
-                suffix = "..." if len(missing_months) > 3 else ""
-                missing_messages.append(f"{name} is missing for {preview}{suffix}.")
-            context_values[name] = monthly_series[name]
+            total_months += len(series_values)
+            total_present += len(series_values) - len(missing_months)
+            if missing_months:
+                combined_missing_months.extend(missing_months)
+                if blank_policy == "strict":
+                    preview = ", ".join(missing_months[:3])
+                    suffix = "..." if len(missing_months) > 3 else ""
+                    strict_block_messages.append(f"{name} is missing for {preview}{suffix}.")
+            context_values[name] = series_values
 
         # Informational only -- with a topological pass order, this is only
         # ever non-empty for fields left over in a dependency cycle.
@@ -1351,16 +1479,37 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
             if name in fields_by_code and name not in result_values
         ]
 
-        if missing_messages:
+        if unavailable_messages:
             results_by_code[code] = {
                 "status": "needs_input",
-                "message": "Cannot calculate: " + " ".join(missing_messages),
+                "message": "Cannot calculate: " + " ".join(unavailable_messages),
+                "source_field_codes": sorted(aggregate_names),
+            }
+            return
+
+        # Nothing entered at all yet -- there's no partial value to show,
+        # regardless of blank_policy.
+        if total_months > 0 and total_present == 0:
+            results_by_code[code] = {
+                "status": "needs_input",
+                "message": "Cannot calculate: no months have been entered yet.",
+                "source_field_codes": sorted(aggregate_names),
+            }
+            return
+
+        if strict_block_messages:
+            results_by_code[code] = {
+                "status": "needs_input",
+                "message": "Cannot calculate: " + " ".join(strict_block_messages),
                 "source_field_codes": sorted(aggregate_names),
             }
             return
 
         try:
-            result = evaluate_formula(formula_version.expression, context_values, value_set_snapshot)
+            if auto_source_code:
+                result = sum_months(context_values[auto_source_code])
+            else:
+                result = evaluate_formula(formula_version.expression, context_values, value_set_snapshot)
             decimals = config.get("round_off_decimals", 3)
             try:
                 decimals = int(decimals)
@@ -1374,12 +1523,27 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
                 except (ValueError, TypeError):
                     pass
             result_values[code] = result
-            results_by_code[code] = {
-                "status": "calculated",
-                "value": result,
-                "message": "",
-                "source_field_codes": sorted(aggregate_names),
-            }
+
+            # "calculated" means literally every month is present, not just
+            # "no error" -- any missing month (permitted through because
+            # blank_policy isn't "strict") makes this "partial" instead, so
+            # the two statuses never overlap.
+            if combined_missing_months:
+                results_by_code[code] = {
+                    "status": "partial",
+                    "value": result,
+                    "message": f"{total_present} of {total_months} months entered.",
+                    "months_entered": total_present,
+                    "months_total": total_months,
+                    "source_field_codes": sorted(aggregate_names),
+                }
+            else:
+                results_by_code[code] = {
+                    "status": "calculated",
+                    "value": result,
+                    "message": "",
+                    "source_field_codes": sorted(aggregate_names),
+                }
         except Exception as exc:
             results_by_code[code] = {
                 "status": "error",
@@ -1433,6 +1597,8 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
             "unit": config.get("unit") or field.get("unit") or "",
             "status": result.get("status") or "error",
             "message": result.get("message") or "",
+            "months_entered": result.get("months_entered"),
+            "months_total": result.get("months_total"),
             "source_field_codes": source_field_codes,
             "display_region": config.get("display_region") or "under_input_column",
         })
@@ -1460,9 +1626,12 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
     workbook_form, form = _require_form_in_workbook(workbook.id, selected_id)
 
     fields = _field_payload(form.current_version_id)
-    sheet_result_fields = [field for field in fields if is_sheet_result_field(field)]
+    explicit_result_fields = [field for field in fields if is_sheet_result_field(field)]
     sections = _sections_payload(form.current_version_id)
     monthly_fields = monthly_table_fields(fields, sections)
+    sheet_result_fields = explicit_result_fields + synthesize_automatic_fy_totals(
+        monthly_fields, explicit_result_fields
+    )
     months = _fy_months(fy_start_year)
     can_edit_monthly = (
         has_permission(user_id, "submission", "edit", scope_site_id=site_id)

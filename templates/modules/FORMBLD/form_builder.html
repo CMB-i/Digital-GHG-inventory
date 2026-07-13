@@ -299,9 +299,13 @@
                     <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Calculation placement</label>
                     <select id="prop-calc-placement" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs py-1.5 px-3 border bg-white">
                       <option value="monthly">Per-month table cell</option>
-                      <option value="annual_result">Sheet/FY result under input column</option>
                       <option value="annual_result_below">Sheet/FY result below table</option>
+                      <!-- Legacy-only: no longer creatable, kept so an existing field built with
+                           this placement still displays/saves correctly instead of silently
+                           reverting to "monthly" the next time its inspector is opened and saved. -->
+                      <option value="annual_result" disabled hidden>Sheet/FY result under input column (legacy)</option>
                     </select>
+                    <p class="mt-1 text-[10px] text-slate-400">Every monthly numeric field already gets an automatic FY total shown underneath it — no setup needed. Use "below table" only for a combined total across multiple fields.</p>
                   </div>
                   <div>
                     <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Attached Formula</label>
