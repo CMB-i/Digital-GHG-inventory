@@ -109,7 +109,7 @@
     if (!row.period_id) return "not_open";
     if (row.period_status === "LOCKED") return "not_open";
     if (row.period_status === "SUBMISSION_CLOSED") return "not_open";
-    if (row.period_status === "OPEN" || row.period_status === "REOPENED") return "not_started";
+    if (row.period_status === "OPEN") return "not_started";
     return "not_started";
   }
 
@@ -848,7 +848,7 @@
       const status = row.submission_status || row.status || row.period_status || "Unavailable";
 
       let rowClass = selected ? "bg-indigo-50/60" : "bg-white hover:bg-slate-50/60";
-      if (row.is_active_period && (row.period_status === "OPEN" || row.period_status === "REOPENED")) {
+      if (row.is_active_period && row.period_status === "OPEN") {
         rowClass = "bg-white font-semibold active-reporting-row current-month-row";
       } else if (row.submission_status === "Approved" || row.is_locked) {
         rowClass = "bg-[#eef3fa]/50 opacity-85 text-slate-500";
@@ -857,7 +857,7 @@
       const rowState = getRowStatusState(row);
       let monthBgClass = "";
       let lockSuffix = "";
-      if (row.is_active_period && (row.period_status === "OPEN" || row.period_status === "REOPENED")) {
+      if (row.is_active_period && row.period_status === "OPEN") {
         monthBgClass = "bg-white text-[#1f2937]";
       } else if (rowState === "approved") {
         monthBgClass = "bg-[#e6f4ea] text-[#1f2937] border-l-4 border-l-[#137333]";

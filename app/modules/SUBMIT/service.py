@@ -272,7 +272,7 @@ class PackageSubmissionError(ValueError):
         self.warnings = warnings or []
 
 FY_MONTH_ORDER = (4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3)
-EDITABLE_PERIOD_STATUSES = ("OPEN", "REOPENED")
+EDITABLE_PERIOD_STATUSES = ("OPEN",)
 CELL_STATE_BLANK_EDITABLE = "blank_editable"
 CELL_STATE_DRAFT_FILLED = "draft_filled"
 CELL_STATE_SUBMITTED = "submitted"
@@ -1688,7 +1688,7 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
             "editability": editability,
             "values": values,
             "issues": submission_value_issues_by_field(submission, monthly_fields),
-            "is_active_period": bool(period and period.status in ("OPEN", "REOPENED")),
+            "is_active_period": bool(period and period.status == "OPEN"),
         })
 
     sheet_results = _compose_sheet_results(sheet_result_fields, monthly_fields, rows)
@@ -2131,7 +2131,7 @@ def get_spoc_sheets_buckets(user_id):
     for period in ReportingPeriod.query.filter(
         ReportingPeriod.site_id.in_(list(allowed_site_ids) or [0]),
         ReportingPeriod.is_deleted == False,
-        ReportingPeriod.status.in_(("OPEN", "REOPENED")),
+        ReportingPeriod.status == "OPEN",
     ).all():
         open_periods_by_site.setdefault(period.site_id, []).append(period)
 
@@ -2183,7 +2183,7 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id, work
     period = ReportingPeriod.query.get(reporting_period_id)
     if not period or period.is_deleted:
         raise ValueError("Reporting period not found.")
-    if period.status not in ("OPEN", "REOPENED"):
+    if period.status != "OPEN":
         raise ValueError(f"Cannot create a submission for a reporting period that is {period.status}.")
         
     workbook = None

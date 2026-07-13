@@ -363,7 +363,7 @@ def get_missing_submissions(user_id):
     # Get all active open periods
     periods = ReportingPeriod.query.filter(
         ReportingPeriod.site_id.in_(list(allowed_site_ids)),
-        ReportingPeriod.status.in_(("OPEN", "REOPENED")),
+        ReportingPeriod.status == "OPEN",
         ReportingPeriod.is_deleted == False
     ).order_by(ReportingPeriod.year.desc(), ReportingPeriod.month.desc()).all()
 
