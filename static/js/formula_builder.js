@@ -926,7 +926,10 @@ document.addEventListener("DOMContentLoaded", function () {
         const createRes = await fetch("/module/FRMULA/api", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, code, expression, tokens })
+          body: JSON.stringify({
+            name, code, expression, tokens,
+            form_id: _returnFormId ? parseInt(_returnFormId, 10) : null,
+          })
         });
         const createData = await createRes.json();
         if (createData.error) {

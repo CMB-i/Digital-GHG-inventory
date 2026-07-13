@@ -14,6 +14,7 @@ from app.common.submission_status import (
     STATUS_DRAFT,
     STATUS_SUBMITTED,
     STATUS_RESUBMITTED,
+    STATUS_UNDER_REVIEW,
     STATUS_CHANGES_REQUESTED,
     STATUS_APPROVED,
     EDITABLE_SUBMISSION_STATUSES,
@@ -23,7 +24,7 @@ from app.common.submission_status import (
 from app.modules.ACCESS.model import AccessMatrix
 from app.modules.SITEMST.model import Site
 from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion
-from app.modules.FORMBLD.service import get_form_version_fields
+from app.modules.FORMBLD.service import calculated_field_formula_swaps, get_form_version_fields
 from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.SUBMIT.model import (
     Submission,
@@ -1175,6 +1176,14 @@ def _compute_preview_calculated_values(submissions, fields):
     {"status", "value", "error_message"}}} for every calculated field, so a
     genuine calculation error or unresolved dependency is distinguishable from
     a field that's simply still blank, instead of both being silently dropped.
+
+    Approved + is_locked submissions are skipped entirely (never given an
+    entry in the returned dict): a locked submission is a frozen compliance
+    record, and a calculated field with no persisted SubmissionValue row on
+    one must render as plainly blank, not as a live number recomputed against
+    whatever formula happens to be attached right now -- that would silently
+    drift every time the formula changes, with no flag and no persisted
+    record, which is exactly what locking is supposed to prevent.
     """
     fields_map = {
         f["field_code"]: {
@@ -1190,7 +1199,8 @@ def _compute_preview_calculated_values(submissions, fields):
     if not _calculated_field_codes(fields_map):
         return {}
 
-    sub_ids = [s.id for s in submissions if s]
+    open_submissions = [s for s in submissions if s and not s.is_locked]
+    sub_ids = [s.id for s in open_submissions]
     if not sub_ids:
         return {}
 
@@ -1205,9 +1215,7 @@ def _compute_preview_calculated_values(submissions, fields):
         svs_by_sub.setdefault(sv.submission_id, []).append(sv)
 
     result = {}
-    for sub in submissions:
-        if not sub:
-            continue
+    for sub in open_submissions:
         field_values = {}
         for sv in svs_by_sub.get(sub.id, []):
             code = id_to_code.get(sv.field_id)
@@ -2453,6 +2461,140 @@ def recalculate_submission_formulas(submission, fields_map, user_id):
 
     db.session.flush()
     return calculation_errors, values_by_field_id
+
+
+# Statuses recalculated in place when a calculated field's formula is swapped
+# to a different Formula identity. Rejected is deliberately excluded: it's a
+# terminal status, not still in-flight, unlike every status listed here
+# (including Resubmitted, which is still open and unlocked).
+RECALC_ON_FORMULA_SWAP_STATUSES = (
+    STATUS_DRAFT,
+    STATUS_SUBMITTED,
+    STATUS_RESUBMITTED,
+    STATUS_UNDER_REVIEW,
+    STATUS_CHANGES_REQUESTED,
+)
+
+
+def recalc_or_flag_submissions_for_formula_swap(form_id, user_id):
+    """
+    Called right after a calculated field's field_config.formula_version_id is
+    repointed at a genuinely different Formula (not just a new version of the
+    same one) and that change goes live. Every open submission for this sheet
+    is affected, since a formula swap is a live, in-place field_config edit --
+    not a new form/field version -- so existing in-flight rows are computed
+    against whatever formula is currently live for the field, the same as a
+    fresh autosave would be.
+
+    - Draft / Submitted / Resubmitted / Under Review / Changes Requested
+      submissions are recalculated immediately via the shared
+      recalculate_submission_formulas path, so a previously entered row
+      reflects the new formula right away.
+    - Approved + locked submissions are frozen and never silently recomputed;
+      instead needs_recalc_review is set so the existing final-approval gate
+      (APPROV.service, "needs_recalc_review") forces explicit reviewer
+      clearance or a resubmission, exactly like the calc-error-at-submit path.
+
+    Returns {"recalculated": [submission_id, ...], "flagged": [submission_id, ...]}.
+    """
+    form = Form.query.get(form_id)
+    if not form or not form.current_version_id:
+        return {"recalculated": [], "flagged": []}
+
+    fields_map = _build_fields_map(get_form_version_fields(form.current_version_id))
+
+    submissions = Submission.query.filter(
+        Submission.form_id == form_id,
+        Submission.is_deleted == False,
+    ).all()
+
+    recalculated = []
+    flagged = []
+    for submission in submissions:
+        if submission.status == STATUS_APPROVED and submission.is_locked:
+            submission.needs_recalc_review = True
+            submission.updated_by = user_id
+            flagged.append(submission.id)
+        elif submission.status in RECALC_ON_FORMULA_SWAP_STATUSES:
+            recalculate_submission_formulas(submission, fields_map, user_id)
+            recalculated.append(submission.id)
+
+    db.session.flush()
+    return {"recalculated": recalculated, "flagged": flagged}
+
+
+def preview_formula_swap_impact(draft_form_version_id):
+    """
+    Non-destructive preview of what publishing draft_form_version_id would
+    trigger for calculated-field formula swaps -- run BEFORE publish so the
+    Sheet Builder can surface the impact and require confirmation first,
+    instead of only finding out after recalc_or_flag_submissions_for_formula_swap
+    has already run. Uses the same diff publish_form_version's trigger runs
+    after the fact (calculated_field_formula_swaps, comparing the draft
+    against the currently-published version of the same form); this just runs
+    it early and never touches the database.
+
+    Returns:
+      {
+        "total_affected": int,
+        "fields": [
+          {
+            "field_code": str, "field_name": str,
+            "recalculated_count": int, "flagged_count": int,
+            "status_breakdown": {status_label: count, ...},
+          }, ...
+        ],
+      }
+
+    "fields" is empty (and total_affected is 0) whenever no calculated field's
+    Formula identity actually changed, or when the sheet has no submissions
+    yet -- both are legitimate zero-impact cases that should never block a
+    publish.
+    """
+    draft_version = FormVersion.query.get(draft_form_version_id)
+    if not draft_version:
+        raise ValueError("Form version not found.")
+
+    form = Form.query.get(draft_version.form_id)
+    if not form or not form.current_version_id:
+        return {"total_affected": 0, "fields": []}
+
+    swaps = calculated_field_formula_swaps(form.current_version_id, draft_form_version_id)
+    if not swaps:
+        return {"total_affected": 0, "fields": []}
+
+    submissions = Submission.query.filter(
+        Submission.form_id == form.id,
+        Submission.is_deleted == False,
+    ).all()
+
+    status_breakdown = {}
+    recalculated_count = 0
+    flagged_count = 0
+    for submission in submissions:
+        if submission.status == STATUS_APPROVED and submission.is_locked:
+            flagged_count += 1
+            status_breakdown[submission.status] = status_breakdown.get(submission.status, 0) + 1
+        elif submission.status in RECALC_ON_FORMULA_SWAP_STATUSES:
+            recalculated_count += 1
+            status_breakdown[submission.status] = status_breakdown.get(submission.status, 0) + 1
+
+    total_affected = recalculated_count + flagged_count
+    if total_affected == 0:
+        return {"total_affected": 0, "fields": []}
+
+    fields_payload = [
+        {
+            "field_code": field_code,
+            "field_name": info["field_name"],
+            "recalculated_count": recalculated_count,
+            "flagged_count": flagged_count,
+            "status_breakdown": dict(status_breakdown),
+        }
+        for field_code, info in swaps.items()
+    ]
+
+    return {"total_affected": total_affected, "fields": fields_payload}
 
 
 def autosave_submission_values(submission_id, values_dict, user_id):

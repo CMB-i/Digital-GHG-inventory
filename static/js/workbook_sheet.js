@@ -553,7 +553,7 @@
 
   function renderSheetResultFooterCell(result, showLabel) {
     const calculated = result.status === "calculated";
-    const valueClass = calculated ? "text-[#1a3a6b] font-bold" : "text-slate-400";
+    const valueClass = calculated ? "font-bold" : "text-slate-400";
     const statusClass = calculated
       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
       : result.status === "not_configured"
@@ -646,7 +646,7 @@
         <div class="flex flex-wrap gap-x-6 gap-y-2">
           ${overflowResults.map((result) => {
             const calculated = result.status === "calculated";
-            const valueClass = calculated ? "text-[#1a3a6b] font-semibold" : "text-slate-400";
+            const valueClass = calculated ? "font-semibold" : "text-slate-400";
             return `
               <div class="min-w-[160px]">
                 <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>

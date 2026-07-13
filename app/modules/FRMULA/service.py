@@ -139,19 +139,20 @@ def get_formula_by_code(code):
     return Formula.query.filter_by(code=code, is_deleted=False).one_or_none()
 
 
-def create_formula(name, code, expression, tokens, user_id):
+def create_formula(name, code, expression, tokens, user_id, form_id=None):
     if not name or not name.strip():
         raise ValueError("Formula name is required.")
     if not code or not code.strip():
         raise ValueError("Formula code is required.")
-        
+
     existing = get_formula_by_code(code)
     if existing:
         raise ValueError(f"Formula with code '{code}' already exists.")
-        
+
     formula = Formula(
         name=name.strip(),
         code=code.strip(),
+        form_id=form_id,
         created_by=user_id,
         updated_by=user_id
     )
@@ -175,7 +176,12 @@ def create_new_formula_draft(formula_id, expression, tokens, user_id):
     formula = get_formula(formula_id)
     if not formula:
         raise ValueError("Formula not found.")
-        
+
+    if formula.current_version_id is not None:
+        raise ValueError(
+            "This formula is published and cannot be revised. Create a new formula instead."
+        )
+
     # Check if there is already a draft (published_at is None)
     pending_draft = FormulaVersion.query.filter_by(
         formula_id=formula_id,
