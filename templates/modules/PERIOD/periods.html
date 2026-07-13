@@ -31,6 +31,8 @@
 
   <form class="flex flex-wrap items-center gap-3 border border-[#d0d8e4] bg-white px-4 py-3"
         method="get" action="{{ url_for('period.index') }}">
+    <input type="hidden" name="sort" value="{{ sort_by or '' }}">
+    <input type="hidden" name="dir" value="{{ sort_dir }}">
     <div class="flex items-center gap-2">
       <label class="text-xs font-medium text-slate-500" for="filter_site_id">Site</label>
       <select class="border border-slate-300 px-3 py-1.5 text-sm"
@@ -70,29 +72,45 @@
   <div class="rp-table-wrapper">
     <table class="rp-table">
         <colgroup>
-          <col class="w-[30%]">
-          <col class="w-[13%]">
-          <col class="w-[15%]">
+          <col class="w-[4%]">
+          <col class="w-[27%]">
+          <col class="w-[12%]">
           <col class="w-[14%]">
+          <col class="w-[15%]">
           <col class="w-[28%]">
         </colgroup>
         <thead class="text-left text-xs font-semibold uppercase tracking-wide">
           <tr>
+            <th class="px-3 py-2.5">
+              <input type="checkbox" class="page-select-all h-4 w-4 rounded border-slate-300" title="Select all">
+            </th>
             <th class="px-4 py-2.5">Site</th>
             <th class="px-3 py-2.5">Status</th>
             <th class="px-3 py-2.5">Deadline</th>
-            <th class="px-3 py-2.5">Last Updated</th>
+            <th class="px-3 py-2.5">
+              <a class="inline-flex items-center gap-1 hover:text-slate-900" href="{{ last_updated_sort_url }}" title="Sort by last updated">
+                Last Updated
+                {% if sort_by == "updated_at" %}
+                <span aria-hidden="true">{{ "↓" if sort_dir == "desc" else "↑" }}</span>
+                {% endif %}
+              </a>
+            </th>
             <th class="px-3 py-2.5 text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
 
           {% for group in month_groups %}
+          {% set month_key = "%d-%02d" % (group.year, group.month) %}
 
           <tr class="period-month-row month-group-header">
-            <td colspan="5">
+            <td colspan="6">
               <div class="flex items-center justify-between gap-4">
                 <div class="flex flex-wrap items-center gap-3">
+                  <label class="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                    <input type="checkbox" class="month-select-all h-4 w-4 rounded border-slate-300" data-month-key="{{ month_key }}">
+                    Select all
+                  </label>
                   <span class="text-[13px] font-semibold text-[#1a3a6b]">{{ group.month_name }} {{ group.year }}</span>
                   <span class="month-summary">
                     {% set ns = namespace(first=true) %}
@@ -124,7 +142,17 @@
           {% for period in group.periods %}
           {% set site = site_map.get(period.site_id) %}
           {% set next_status = valid_transitions.get(period.status) %}
+          {% set can_bulk_select = next_status and ((period.status == "LOCKED" and perm_reopen) or (period.status != "LOCKED" and perm_edit)) %}
           <tr class="border-b border-[#dde5ef] align-middle hover:bg-[#f0f4f8]">
+            <td class="px-3 py-2.5">
+              {% if can_bulk_select %}
+              <input type="checkbox" class="period-select-checkbox h-4 w-4 rounded border-slate-300"
+                     data-period-id="{{ period.id }}"
+                     data-current-status="{{ period.status }}"
+                     data-month-key="{{ month_key }}"
+                     data-period-label="{{ group.month_name }} {{ group.year }}{% if site %} — {{ site.name }}{% endif %}">
+              {% endif %}
+            </td>
             <td class="max-w-0 px-4 py-2.5">
               <div class="truncate text-sm text-slate-800" title="{{ site.name if site else '' }}">
                 {{ site.name if site else "—" }}
@@ -197,6 +225,40 @@
   {% endif %}
 
 </section>
+
+<div class="fixed inset-x-0 bottom-0 z-40 hidden border-t border-[#d0d8e4] bg-white px-4 py-3 shadow-[0_-4px_12px_rgba(15,23,42,0.08)]" id="bulk_action_bar">
+  <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
+    <span class="text-sm font-medium text-slate-700"><span id="bulk_selected_count">0</span> selected</span>
+    <div id="bulk_action_buttons" class="flex flex-wrap items-center gap-2"></div>
+    <button type="button" id="bulk_clear_selection" class="text-xs font-medium text-slate-500 underline hover:text-slate-900">Clear selection</button>
+  </div>
+</div>
+
+<form class="hidden" id="bulk_transition_form" method="post" action="{{ bulk_transition_url }}">
+  <input type="hidden" name="target_status" id="bulk_transition_target_status" value="">
+</form>
+
+<div class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4" id="bulk_reopen_modal">
+  <div class="w-full max-w-md bg-white shadow-xl" role="dialog" aria-modal="true" aria-labelledby="bulk_reopen_modal_title">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="text-lg font-semibold" id="bulk_reopen_modal_title">Reopen Periods</h2>
+      <p class="mt-1 text-sm text-slate-600" id="bulk_reopen_modal_count"></p>
+    </div>
+    <form class="space-y-4 px-5 py-5" id="bulk_reopen_form" method="post" action="{{ bulk_transition_url }}">
+      <input type="hidden" name="target_status" value="REOPENED">
+      <div>
+        <label class="text-xs font-medium text-slate-600" for="bulk_reopen_reason_input">Reason for reopening</label>
+        <textarea class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
+                  id="bulk_reopen_reason_input" name="reopen_reason" rows="3" required
+                  placeholder="Describe why these periods are being reopened…"></textarea>
+      </div>
+      <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
+        <button class="bulk-reopen-cancel action-button action-button-secondary" type="button">Cancel</button>
+        <button class="action-button action-button-primary" type="submit">Reopen Periods</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <div class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4" id="reopen_modal">
   <div class="w-full max-w-md bg-white shadow-xl" role="dialog" aria-modal="true" aria-labelledby="reopen_modal_title">
@@ -283,6 +345,11 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+  window.PERIOD_VALID_TRANSITIONS = {{ valid_transitions | tojson }};
+  window.PERIOD_TRANSITION_LABELS = {{ transition_labels | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/period_bulk_actions.js') }}"></script>
 <script>
   (function () {
     document.querySelectorAll(".period-transition-form").forEach(function (form) {

@@ -16,8 +16,10 @@ from app.modules.PERIOD.service import (
     VALID_STATUSES,
     VALID_TRANSITIONS,
     bulk_open_month,
+    bulk_transition_periods,
     create_period,
     list_periods,
+    sort_period_group,
     transition_period,
 )
 from app.modules.SITEMST.model import Site
@@ -32,11 +34,16 @@ def _period_filter_args(source=None):
     source = source or request.args
     site_id = source.get("site_id", type=int)
     status = (source.get("status") or "").strip()
+    sort = (source.get("sort") or "").strip()
+    sort_dir = (source.get("dir") or "").strip().lower()
     args = {}
     if site_id:
         args["site_id"] = site_id
     if status in VALID_STATUSES:
         args["status"] = status
+    if sort == "updated_at":
+        args["sort"] = sort
+        args["dir"] = sort_dir if sort_dir in ("asc", "desc") else "desc"
     return args
 
 
@@ -48,6 +55,13 @@ def index():
 
     if filter_status not in VALID_STATUSES:
         filter_status = None
+
+    sort_by = (request.args.get("sort") or "").strip()
+    if sort_by != "updated_at":
+        sort_by = None
+    sort_dir = (request.args.get("dir") or "").strip().lower()
+    if sort_dir not in ("asc", "desc"):
+        sort_dir = "desc"
 
     user = current_user()
     perm_create = has_permission(user.id, "period", "create")
@@ -81,9 +95,7 @@ def index():
     month_groups = []
     for year_key, month_key in sorted(grouped.keys(), reverse=True):
         month_periods = grouped[(year_key, month_key)]
-        month_periods.sort(
-            key=lambda p: site_map[p.site_id].name if p.site_id in site_map else ""
-        )
+        sort_period_group(month_periods, site_map, sort_by=sort_by, sort_dir=sort_dir)
 
         status_counts = defaultdict(int)
         for p in month_periods:
@@ -105,6 +117,11 @@ def index():
     today = date.today()
     years = list(range(today.year - 2, today.year + 2))
 
+    next_sort_dir = "asc" if (sort_by == "updated_at" and sort_dir == "desc") else "desc"
+    last_updated_sort_args = dict(_period_filter_args())
+    last_updated_sort_args.update(sort="updated_at", dir=next_sort_dir)
+    last_updated_sort_url = url_for("period.index", **last_updated_sort_args)
+
     return render_template(
         "modules/PERIOD/periods.html",
         module_code=MODULE_CODE,
@@ -114,6 +131,9 @@ def index():
         site_map=site_map,
         filter_site_id=filter_site_id,
         filter_status=filter_status,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        last_updated_sort_url=last_updated_sort_url,
         create_drawer_open=create_drawer_open,
         valid_statuses=VALID_STATUSES,
         valid_transitions=VALID_TRANSITIONS,
@@ -126,6 +146,7 @@ def index():
         perm_create=perm_create,
         perm_edit=perm_edit,
         perm_reopen=perm_reopen,
+        bulk_transition_url=url_for("period.bulk_transition", **_period_filter_args()),
     )
 
 
@@ -219,4 +240,68 @@ def transition(period_id):
     except Exception:
         db.session.rollback()
         flash("Could not update period status.", "error")
+    return redirect(url_for("period.index", **_period_filter_args()))
+
+
+def _bulk_transition_message(target_status, results):
+    succeeded = len(results["succeeded"])
+    skipped = len(results["skipped"])
+    failed = len(results["failed"])
+    label = STATUS_LABELS.get(target_status, target_status)
+
+    parts = [f"{succeeded} updated to {label}"]
+    if skipped:
+        parts.append(f"{skipped} skipped")
+    if failed:
+        parts.append(f"{failed} failed")
+    message = ", ".join(parts) + "."
+
+    if failed:
+        category = "error"
+    elif succeeded:
+        category = "success"
+    else:
+        category = "info"
+    return message, category
+
+
+@bp.route("/bulk-transition", methods=["POST"])
+@require_permission("period", ("edit", "reopen"))
+def bulk_transition():
+    actor = current_user()
+    target_status = (request.form.get("target_status") or "").strip()
+    reopen_reason = request.form.get("reopen_reason")
+    period_ids = [pid for pid in request.form.getlist("period_ids", type=int) if pid]
+
+    if not period_ids:
+        flash("No reporting periods were selected.", "error")
+        return redirect(url_for("period.index", **_period_filter_args()))
+
+    required_action = TRANSITION_ACTION.get(target_status)
+    if not required_action or not has_permission(actor.id, "period", required_action):
+        flash("You do not have permission for this transition.", "error")
+        return redirect(url_for("period.index", **_period_filter_args()))
+
+    if target_status == "REOPENED" and not (reopen_reason or "").strip():
+        flash("A reopen reason is required.", "error")
+        return redirect(url_for("period.index", **_period_filter_args()))
+
+    try:
+        results = bulk_transition_periods(
+            period_ids=period_ids,
+            target_status=target_status,
+            actor_id=actor.id,
+            reopen_reason=reopen_reason,
+        )
+        for period in results["succeeded"]:
+            if period.status in ("OPEN", "REOPENED"):
+                notify_period_open_for_entry(period.id)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        flash("Could not process bulk update.", "error")
+        return redirect(url_for("period.index", **_period_filter_args()))
+
+    message, category = _bulk_transition_message(target_status, results)
+    flash(message, category)
     return redirect(url_for("period.index", **_period_filter_args()))

@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 
+from app.common.permissions import has_permission
 from app.common.validators import ValidationError
 from app.database import db
 from app.modules.AUDITL.service import log_audit
@@ -72,6 +73,22 @@ def list_periods(site_id=None, status=None):
 
 def get_period(period_id):
     return ReportingPeriod.query.filter_by(id=period_id, is_deleted=False).one_or_none()
+
+
+def sort_period_group(periods, site_map, sort_by=None, sort_dir="desc"):
+    """
+    Sorts periods belonging to a single (year, month) group in place. This is
+    scoped to one month's periods only -- the month grouping/ordering itself
+    is a separate, unrelated concern handled by the index view.
+
+    sort_by="updated_at" sorts by last-updated timestamp (direction per
+    sort_dir); anything else falls back to the default site-name ordering.
+    """
+    if sort_by == "updated_at":
+        periods.sort(key=lambda p: p.updated_at, reverse=(sort_dir == "desc"))
+    else:
+        periods.sort(key=lambda p: site_map[p.site_id].name if p.site_id in site_map else "")
+    return periods
 
 
 def create_period(site_id, year, month, deadline, actor_id):
@@ -180,3 +197,81 @@ def transition_period(period_id, target_status, actor_id, reopen_reason=None):
         new_values={"status": target_status},
     )
     return period
+
+
+def _run_in_savepoint(fn):
+    """
+    Runs fn() inside a SAVEPOINT so a failure for one period doesn't undo
+    periods already transitioned earlier in the same batch -- those still
+    commit together at the view layer's single db.session.commit(). Mirrors
+    APPROV.service._attempt_in_savepoint.
+    """
+    nested = db.session.begin_nested()
+    try:
+        fn()
+        nested.commit()
+        return True, None
+    except Exception as exc:
+        nested.rollback()
+        return False, str(exc)
+
+
+def bulk_transition_periods(period_ids, target_status, actor_id, reopen_reason=None):
+    """
+    Transitions every given period to target_status where the caller is
+    permitted and the period is currently eligible. Purely additive: a period
+    the caller lacks permission for, one whose current status doesn't lead to
+    target_status (or that no longer exists), is recorded as skipped rather
+    than aborting the batch; one that raises during transition_period itself
+    is recorded as failed. Neither skip nor fail rolls back periods that
+    already succeeded earlier in the same call -- see approve_package in
+    APPROV/service.py for the same partial-eligibility handling.
+    """
+    results = {"succeeded": [], "skipped": [], "failed": []}
+    required_action = TRANSITION_ACTION.get(target_status)
+    caller_has_permission = bool(required_action) and has_permission(actor_id, "period", required_action)
+
+    seen_ids = set()
+    for period_id in period_ids:
+        if period_id in seen_ids:
+            continue
+        seen_ids.add(period_id)
+
+        if not caller_has_permission:
+            results["skipped"].append({
+                "period_id": period_id,
+                "reason": "You do not have permission for this transition.",
+            })
+            continue
+
+        period = get_period(period_id)
+        if not period:
+            results["skipped"].append({
+                "period_id": period_id,
+                "reason": "Reporting period not found.",
+            })
+            continue
+        if VALID_TRANSITIONS.get(period.status) != target_status:
+            results["skipped"].append({
+                "period_id": period_id,
+                "reason": f"Not eligible for this transition (current status: {period.status}).",
+            })
+            continue
+
+        outcome = {}
+
+        def _do(pid=period_id):
+            outcome["period"] = transition_period(
+                period_id=pid,
+                target_status=target_status,
+                actor_id=actor_id,
+                reopen_reason=reopen_reason,
+            )
+
+        ok, error = _run_in_savepoint(_do)
+        if ok:
+            results["succeeded"].append(outcome["period"])
+        else:
+            results["failed"].append({"period_id": period_id, "reason": error})
+
+    return results
