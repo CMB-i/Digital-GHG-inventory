@@ -546,6 +546,61 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
     db.session.flush()
     return True
 
+def calculated_field_formula_swaps(old_form_version_id, new_form_version_id):
+    """
+    Compares calculated-field Formula identities between two form versions of
+    the same form and returns every field that swapped to a genuinely
+    different Formula (not just a new version of the same one, and not a
+    field that's newly calculated or newly given its first formula -- both
+    sides must already reference a formula). Read-only: never mutates
+    anything, so it's safe to call before a version is actually published
+    (see SUBMIT.preview_formula_swap_impact) as well as right after
+    (publish_form_version's own trigger).
+
+    Returns {field_code: {"field_name": str, "old_formula_id": int, "new_formula_id": int}}.
+    """
+    if not old_form_version_id or not new_form_version_id:
+        return {}
+
+    old_fields = get_form_version_fields(old_form_version_id)
+    new_fields = get_form_version_fields(new_form_version_id)
+
+    referenced_version_ids = {
+        (fv.field_config or {}).get("formula_version_id")
+        for fv, _f in (old_fields + new_fields)
+        if fv.field_type == "calculated" and (fv.field_config or {}).get("formula_version_id")
+    }
+    formula_id_by_version_id = {
+        v.id: v.formula_id
+        for v in FormulaVersion.query.filter(FormulaVersion.id.in_(referenced_version_ids or [0])).all()
+    }
+
+    old_formula_id_by_code = {}
+    for ofv, of in old_fields:
+        if ofv.field_type != "calculated":
+            continue
+        old_fv_id = (ofv.field_config or {}).get("formula_version_id")
+        if old_fv_id:
+            old_formula_id_by_code[of.field_code] = formula_id_by_version_id.get(old_fv_id)
+
+    swaps = {}
+    for nfv, nf in new_fields:
+        if nfv.field_type != "calculated":
+            continue
+        old_formula_id = old_formula_id_by_code.get(nf.field_code)
+        if old_formula_id is None:
+            continue
+        new_fv_id = (nfv.field_config or {}).get("formula_version_id")
+        new_formula_id = formula_id_by_version_id.get(new_fv_id) if new_fv_id else None
+        if new_formula_id is not None and new_formula_id != old_formula_id:
+            swaps[nf.field_code] = {
+                "field_name": nfv.field_name,
+                "old_formula_id": old_formula_id,
+                "new_formula_id": new_formula_id,
+            }
+    return swaps
+
+
 def publish_form_version(form_version_id, user_id):
     form_version = FormVersion.query.get(form_version_id)
     if not form_version:
@@ -580,19 +635,39 @@ def publish_form_version(form_version_id, user_id):
         form_id=form_version.form_id,
         status="Published"
     ).filter(FormVersion.id != form_version_id).first()
-    
+
+    # Diff against the version being replaced *before* archiving it, so a
+    # genuine formula swap (a field re-pointed at a different Formula, not
+    # just a new version of the same one) can be detected once this version
+    # goes live.
+    formula_swaps = (
+        calculated_field_formula_swaps(prev_published.id, form_version_id)
+        if prev_published else {}
+    )
+
     if prev_published:
         prev_published.status = "Archived"
-        
+
     # Mark Published
     form_version.status = "Published"
     form_version.published_at = datetime.now(timezone.utc)
     form_version.published_by = user_id
-    
+
     form = get_form(form_version.form_id)
     form.current_version_id = form_version_id
     form.updated_by = user_id
-    
+
+    # A calculated field's formula is a live, in-place field_config edit (see
+    # FRMULA.create_new_formula_draft -- formulas themselves are never edited
+    # in place, but which Formula a field points at can change). If any
+    # calculated field just swapped to a genuinely different Formula identity,
+    # every open submission on this sheet needs to either be recalculated
+    # against the new formula or, if already approved and locked, flagged for
+    # review instead of silently recomputed.
+    if formula_swaps:
+        from app.modules.SUBMIT.service import recalc_or_flag_submissions_for_formula_swap
+        recalc_or_flag_submissions_for_formula_swap(form.id, user_id)
+
     return form_version
 
 def create_new_form_version_draft(form_id, user_id):

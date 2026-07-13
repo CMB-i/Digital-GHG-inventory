@@ -3,6 +3,8 @@ body[data-theme="jsw-excel"],
 .theme-jsw-excel {
   --ghg-navy: #1a3a6b;
   --ghg-navy-dark: #15305a;
+  --ghg-navy-light: #355784;
+  --ghg-navy-lighter: #5477A1;
   --ghg-red: #c8102e;
   --ghg-page-bg: #f0f4f8;
   --ghg-sitebar-bg: #e8eff8;
@@ -1450,11 +1452,12 @@ body.builder-canvas-active main > div {
 
 /* ── Inline calculated field column styling ────────────────────────── */
 th.workbook-col-calculated {
-  background-color: #3d4b63 !important;  /* grey-blue, clearly distinct from navy without colour drama */
+  background-color: var(--ghg-navy-light) !important;  /* brand-derived navy tint: distinct from regular navy headers without introducing a new hue */
+  color: #ffffff !important;
+  border-bottom: 3px solid var(--ghg-red) !important;
 }
 
 td.workbook-cell-calculated {
-  background-color: #f3f4f6 !important;
   cursor: default;
 }
 
@@ -1584,9 +1587,9 @@ body[data-theme="jsw-excel"] .approver-workbook-review td[data-field-code][data-
   border-left: 2px solid var(--ghg-red) !important;
 }
 
-body[data-theme="jsw-excel"] .approver-workbook-review td.workbook-cell-calculated {
-  background: #f3f4f6 !important;
-  color: var(--ghg-muted) !important;
+body[data-theme="jsw-excel"] .approver-workbook-review th.workbook-col-calculated {
+  background: var(--ghg-navy-light) !important;
+  color: #ffffff !important;
 }
 
 body[data-theme="jsw-excel"] .approver-workbook-review tbody td:last-child {

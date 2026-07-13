@@ -10,6 +10,10 @@ class Formula(FullLifecycleMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
     code = db.Column(db.String(100), nullable=False)
+    # Sheet this formula was built for, from the Formula Builder's sheet context
+    # at creation time. Nullable: formulas created before this column existed
+    # have no reliable way to attribute a single owning sheet (see migration).
+    form_id = db.Column(db.Integer, db.ForeignKey("forms.id"), nullable=True)
     current_version_id = db.Column(
         db.Integer,
         db.ForeignKey("formula_versions.id", use_alter=True, name="fk_formulas_current_version_id"),

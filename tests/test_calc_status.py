@@ -7,6 +7,7 @@ point into the shared resolve_calculated_fields resolver (also used by the
 preview and sheet-result paths), so it's the one worth pinning down first.
 """
 from app.modules.FORMBLD.service import get_form_version_fields
+from app.modules.SUBMIT.model import SubmissionValue
 from app.modules.SUBMIT.service import (
     CALC_STATUS_ERROR,
     CALC_STATUS_OK,
@@ -14,9 +15,43 @@ from app.modules.SUBMIT.service import (
     _build_fields_map,
     _compose_sheet_results,
     monthly_table_fields,
+    _compute_preview_calculated_values,
+    _field_payload,
+    preview_formula_swap_impact,
+    recalc_or_flag_submissions_for_formula_swap,
     recalculate_submission_formulas,
     synthesize_automatic_fy_totals,
 )
+
+
+def _make_draft_form_version(db_session, created_objects, system_user, form, version_number):
+    from app.modules.FORMBLD.model import FormVersion
+
+    version = FormVersion(form_id=form.id, version_number=version_number, status="Draft", created_by=system_user)
+    db_session.add(version)
+    db_session.flush()
+    created_objects.append(version)
+    return version
+
+
+def _make_field_version(db_session, created_objects, system_user, field, form_version, version_number, field_type, field_config, field_name=None):
+    from app.modules.FORMBLD.model import FieldVersion
+
+    version = FieldVersion(
+        field_id=field.id,
+        version_number=version_number,
+        field_name=field_name or field.field_code.replace("_", " ").title(),
+        field_type=field_type,
+        field_config=field_config or {},
+        form_version_id=form_version.id,
+        frequency="monthly",
+        created_by=system_user,
+        updated_by=system_user,
+    )
+    db_session.add(version)
+    db_session.flush()
+    created_objects.append(version)
+    return version
 
 
 def _fields_map(form_version):
@@ -363,3 +398,293 @@ class TestAutomaticFyTotals:
 
         assert results[0]["status"] == "calculated"
         assert results[0]["value"] == 20
+class TestRecalcOrFlagSubmissionsForFormulaSwap:
+    """
+    A calculated field's formula_version_id is a live, in-place field_config
+    edit (unlike the Formula itself, which is never edited in place once
+    published -- see test_formula_lifecycle.py). recalc_or_flag_submissions_for_
+    formula_swap is what runs immediately after that live edit: open
+    submissions get recalculated against whatever formula is now live for the
+    field, while anything already Approved and locked is frozen and flagged
+    for reviewer follow-up instead of silently recomputed.
+    """
+
+    def _setup(
+        self, make_form, make_field, make_formula_version, make_site, make_reporting_period,
+        make_workflow, make_user, make_submission, make_submission_value, new_formula_expression,
+    ):
+        form, form_version = make_form()
+        old_formula = make_formula_version("field_a + field_b", {"field_a": {}, "field_b": {}})
+        new_formula = make_formula_version(new_formula_expression, {"field_a": {}, "field_b": {}})
+
+        field_a, fv_a = make_field(form, form_version, "field_a", field_type="number")
+        field_b, fv_b = make_field(form, form_version, "field_b", field_type="number")
+        # field_c's live field_config already points at the new formula --
+        # simulating the moment right after the swap was saved.
+        field_c, fv_c = make_field(
+            form, form_version, "field_c", field_type="calculated",
+            field_config={"formula_version_id": new_formula.id},
+        )
+
+        approver = make_user()
+        site = make_site()
+        workflow_version = make_workflow([approver])
+        months = iter([4, 5, 6, 7, 8, 9])
+
+        def _make_submission_with_values(status, **kwargs):
+            # uq_active_submission is unique on (site_id, form_id, reporting_period_id),
+            # so each submission in this test needs its own period.
+            period = make_reporting_period(site, month=next(months))
+            submission = make_submission(site, form, form_version, period, workflow_version, status=status, **kwargs)
+            make_submission_value(submission, field_a, fv_a, raw_value="3")
+            make_submission_value(submission, field_b, fv_b, raw_value="4")
+            # Seed field_c with a stale calculated value computed under the OLD formula.
+            make_submission_value(
+                submission, field_c, fv_c,
+                calculated_value=7, formula_version_id=old_formula.id, calc_status=CALC_STATUS_OK,
+            )
+            return submission
+
+        return form, field_c, approver, _make_submission_with_values
+
+    def test_recalculates_open_submissions_and_flags_approved_locked(
+        self, make_form, make_field, make_formula_version, make_site, make_reporting_period,
+        make_workflow, make_user, make_submission, make_submission_value,
+    ):
+        form, field_c, approver, _make_submission_with_values = self._setup(
+            make_form, make_field, make_formula_version, make_site, make_reporting_period,
+            make_workflow, make_user, make_submission, make_submission_value,
+            new_formula_expression="field_a * field_b",
+        )
+
+        draft_sub = _make_submission_with_values("Draft")
+        submitted_sub = _make_submission_with_values("Submitted")
+        approved_sub = _make_submission_with_values("Approved", is_locked=True)
+
+        result = recalc_or_flag_submissions_for_formula_swap(form.id, approver.id)
+
+        assert set(result["recalculated"]) == {draft_sub.id, submitted_sub.id}
+        assert result["flagged"] == [approved_sub.id]
+
+        draft_c = SubmissionValue.query.filter_by(submission_id=draft_sub.id, field_id=field_c.id).one()
+        assert draft_c.calc_status == CALC_STATUS_OK
+        assert float(draft_c.calculated_value) == 12.0  # 3 * 4 under the new formula
+
+        submitted_c = SubmissionValue.query.filter_by(submission_id=submitted_sub.id, field_id=field_c.id).one()
+        assert float(submitted_c.calculated_value) == 12.0
+
+        # Approved + locked: value untouched, flagged for reviewer follow-up instead.
+        approved_c = SubmissionValue.query.filter_by(submission_id=approved_sub.id, field_id=field_c.id).one()
+        assert float(approved_c.calculated_value) == 7.0
+        assert approved_sub.needs_recalc_review is True
+
+    def test_recalculates_under_review_resubmitted_and_changes_requested(
+        self, make_form, make_field, make_formula_version, make_site, make_reporting_period,
+        make_workflow, make_user, make_submission, make_submission_value,
+    ):
+        form, field_c, approver, _make_submission_with_values = self._setup(
+            make_form, make_field, make_formula_version, make_site, make_reporting_period,
+            make_workflow, make_user, make_submission, make_submission_value,
+            new_formula_expression="field_a * field_b",
+        )
+
+        under_review_sub = _make_submission_with_values("Under Review")
+        resubmitted_sub = _make_submission_with_values("Resubmitted")
+        changes_requested_sub = _make_submission_with_values("Changes Requested")
+
+        result = recalc_or_flag_submissions_for_formula_swap(form.id, approver.id)
+
+        assert set(result["recalculated"]) == {under_review_sub.id, resubmitted_sub.id, changes_requested_sub.id}
+        assert result["flagged"] == []
+
+        for submission in (under_review_sub, resubmitted_sub, changes_requested_sub):
+            value = SubmissionValue.query.filter_by(submission_id=submission.id, field_id=field_c.id).one()
+            assert value.calc_status == CALC_STATUS_OK
+            assert float(value.calculated_value) == 12.0
+
+
+class TestPreviewFormulaSwapImpact:
+    """
+    preview_formula_swap_impact runs the same diff as publish_form_version's
+    trigger, but read-only and before publish, so the Sheet Builder can warn
+    the user first. It must stay silent (zero impact) whenever there's
+    nothing to warn about: the formula didn't actually change, or the sheet
+    has no submissions yet.
+    """
+
+    def test_zero_impact_when_formula_unchanged(
+        self, make_form, make_field, make_formula_version, db_session, created_objects, system_user,
+    ):
+        form, published_version = make_form()
+        formula = make_formula_version("field_a + field_b", {"field_a": {}, "field_b": {}})
+        make_field(form, published_version, "field_a", field_type="number")
+        make_field(form, published_version, "field_b", field_type="number")
+        field_c, _fv_c = make_field(
+            form, published_version, "field_c", field_type="calculated",
+            field_config={"formula_version_id": formula.id},
+        )
+
+        draft_version = _make_draft_form_version(db_session, created_objects, system_user, form, 2)
+        _make_field_version(
+            db_session, created_objects, system_user, field_c, draft_version, 2,
+            "calculated", {"formula_version_id": formula.id},
+        )
+
+        assert preview_formula_swap_impact(draft_version.id) == {"total_affected": 0, "fields": []}
+
+    def test_zero_impact_when_no_submissions_exist(
+        self, make_form, make_field, make_formula_version, db_session, created_objects, system_user,
+    ):
+        form, published_version = make_form()
+        old_formula = make_formula_version("field_a + field_b", {"field_a": {}, "field_b": {}})
+        new_formula = make_formula_version("field_a * field_b", {"field_a": {}, "field_b": {}})
+        make_field(form, published_version, "field_a", field_type="number")
+        make_field(form, published_version, "field_b", field_type="number")
+        field_c, _fv_c = make_field(
+            form, published_version, "field_c", field_type="calculated",
+            field_config={"formula_version_id": old_formula.id},
+        )
+
+        draft_version = _make_draft_form_version(db_session, created_objects, system_user, form, 2)
+        _make_field_version(
+            db_session, created_objects, system_user, field_c, draft_version, 2,
+            "calculated", {"formula_version_id": new_formula.id},
+        )
+
+        # A real formula swap, but no submissions exist on this sheet at all.
+        assert preview_formula_swap_impact(draft_version.id) == {"total_affected": 0, "fields": []}
+
+    def test_counts_mixed_submission_statuses(
+        self, make_form, make_field, make_formula_version, make_site, make_reporting_period,
+        make_workflow, make_user, make_submission, db_session, created_objects, system_user,
+    ):
+        form, published_version = make_form()
+        old_formula = make_formula_version("field_a + field_b", {"field_a": {}, "field_b": {}})
+        new_formula = make_formula_version("field_a * field_b", {"field_a": {}, "field_b": {}})
+        make_field(form, published_version, "field_a", field_type="number")
+        make_field(form, published_version, "field_b", field_type="number")
+        field_c, _fv_c = make_field(
+            form, published_version, "field_c", field_type="calculated",
+            field_config={"formula_version_id": old_formula.id},
+        )
+
+        draft_version = _make_draft_form_version(db_session, created_objects, system_user, form, 2)
+        _make_field_version(
+            db_session, created_objects, system_user, field_c, draft_version, 2,
+            "calculated", {"formula_version_id": new_formula.id}, field_name="Field C",
+        )
+
+        approver = make_user()
+        site = make_site()
+        workflow_version = make_workflow([approver])
+        months = iter([4, 5, 6, 7])
+
+        def _sub(status, **kwargs):
+            period = make_reporting_period(site, month=next(months))
+            return make_submission(site, form, published_version, period, workflow_version, status=status, **kwargs)
+
+        _sub("Draft")
+        _sub("Submitted")
+        _sub("Approved", is_locked=True)
+        _sub("Rejected")  # terminal -- excluded from both buckets
+
+        result = preview_formula_swap_impact(draft_version.id)
+
+        assert result["total_affected"] == 3
+        assert len(result["fields"]) == 1
+        field_entry = result["fields"][0]
+        assert field_entry["field_code"] == "field_c"
+        assert field_entry["field_name"] == "Field C"
+        assert field_entry["recalculated_count"] == 2
+        assert field_entry["flagged_count"] == 1
+        assert field_entry["status_breakdown"] == {"Draft": 1, "Submitted": 1, "Approved": 1}
+
+
+class TestPreviewCalculatedValuesSkipsLockedSubmissions:
+    """
+    _compute_preview_calculated_values fills a blank calculated cell with a
+    live, non-persisted computation purely for read-only display (e.g. a
+    field added to the sheet after some submissions were already approved
+    and locked never got a persisted row). That's correct for an open,
+    editable submission -- it's a live preview. On an Approved + is_locked
+    submission it isn't: the displayed number would silently drift every
+    time the live formula changes, with no flag and no persisted record,
+    which is exactly what locking is supposed to prevent. Locked submissions
+    must be skipped entirely, not just filtered out after computing.
+    """
+
+    def test_locked_submission_with_no_persisted_value_is_not_computed(
+        self, make_form, make_field, make_formula_version, make_site, make_reporting_period,
+        make_workflow, make_user, make_submission, make_submission_value,
+    ):
+        form, form_version = make_form()
+        formula = make_formula_version("field_a + field_b", {"field_a": {}, "field_b": {}})
+        field_a, fv_a = make_field(form, form_version, "field_a", field_type="number")
+        field_b, fv_b = make_field(form, form_version, "field_b", field_type="number")
+        make_field(
+            form, form_version, "field_c", field_type="calculated",
+            field_config={"formula_version_id": formula.id},
+        )
+
+        approver = make_user()
+        site = make_site()
+        period = make_reporting_period(site)
+        workflow_version = make_workflow([approver])
+        locked_submission = make_submission(
+            site, form, form_version, period, workflow_version, status="Approved", is_locked=True,
+        )
+        # Raw inputs exist, but field_c was never calculated/persisted for this
+        # submission -- e.g. added to the sheet after it was already locked.
+        make_submission_value(locked_submission, field_a, fv_a, raw_value="3")
+        make_submission_value(locked_submission, field_b, fv_b, raw_value="4")
+
+        fields = _field_payload(form_version.id)
+        preview = _compute_preview_calculated_values([locked_submission], fields)
+
+        assert preview == {}
+
+    def test_open_submission_still_gets_a_live_preview_even_after_a_formula_swap(
+        self, make_form, make_field, make_formula_version, make_site, make_reporting_period,
+        make_workflow, make_user, make_submission, make_submission_value, db_session,
+    ):
+        form, form_version = make_form()
+        old_formula = make_formula_version("field_a + field_b", {"field_a": {}, "field_b": {}})
+        new_formula = make_formula_version("field_a * field_b", {"field_a": {}, "field_b": {}})
+        field_a, fv_a = make_field(form, form_version, "field_a", field_type="number")
+        field_b, fv_b = make_field(form, form_version, "field_b", field_type="number")
+        field_c, fv_c = make_field(
+            form, form_version, "field_c", field_type="calculated",
+            field_config={"formula_version_id": old_formula.id},
+        )
+
+        approver = make_user()
+        site = make_site()
+        period = make_reporting_period(site)
+        workflow_version = make_workflow([approver])
+        locked_submission = make_submission(
+            site, form, form_version, period, workflow_version, status="Approved", is_locked=True,
+        )
+        make_submission_value(locked_submission, field_a, fv_a, raw_value="3")
+        make_submission_value(locked_submission, field_b, fv_b, raw_value="4")
+
+        # Simulate the live, in-place field_config edit a formula swap makes.
+        fv_c.field_config = {"formula_version_id": new_formula.id}
+        db_session.flush()
+
+        fields = _field_payload(form_version.id)
+
+        # Still skipped for the locked submission, even against the new formula.
+        assert _compute_preview_calculated_values([locked_submission], fields) == {}
+
+        # An open submission in the identical post-swap state is unaffected by
+        # this guard -- it still gets its live preview, now under the new formula.
+        open_submission = make_submission(
+            site, form, form_version,
+            make_reporting_period(site, month=5), workflow_version, status="Draft",
+        )
+        make_submission_value(open_submission, field_a, fv_a, raw_value="3")
+        make_submission_value(open_submission, field_b, fv_b, raw_value="4")
+
+        preview = _compute_preview_calculated_values([open_submission], fields)
+        assert preview[open_submission.id]["field_c"]["status"] == CALC_STATUS_OK
+        assert preview[open_submission.id]["field_c"]["value"] == 12.0  # 3 * 4 under the new formula
