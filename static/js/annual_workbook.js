@@ -53,6 +53,11 @@ document.addEventListener("DOMContentLoaded", function () {
   let lastSavedTime = null;
   let isSaving = false;
   let savePending = false;
+  // Snapshot of the row/values a queued (savePending) save intended to write,
+  // captured synchronously at queue time so the retry in saveSelectedRow()'s
+  // finally block doesn't have to re-read live state that may have been
+  // replaced by a concurrent loadWorkbook() in the meantime.
+  let pendingSaveSnapshot = null;
 
   function paramInt(name) {
     const value = parseInt(initialParams.get(name), 10);
@@ -842,13 +847,46 @@ document.addEventListener("DOMContentLoaded", function () {
 
   async function saveSelectedRow({ reloadAfterSave = false } = {}) {
     if (isSaving) {
+      // Capture what this call would have saved right now, synchronously,
+      // before any await gives loadWorkbook() a chance to swap out
+      // state.workbook out from under the eventual retry.
+      const queuedRow = selectedRow();
+      if (queuedRow) {
+        pendingSaveSnapshot = {
+          rowKey: rowKey(queuedRow),
+          formId: state.selectedFormId,
+          values: queuedRow.values ? { ...queuedRow.values } : {}
+        };
+      }
       savePending = true;
       return;
     }
     isSaving = true;
     savePending = false;
 
-    const row = selectedRow();
+    // If a save queued up while the previous one was in flight, its snapshot
+    // takes priority over whatever is "currently selected" -- state.workbook
+    // may have been reloaded (or the selection changed) since it was queued.
+    const snapshot = pendingSaveSnapshot;
+    pendingSaveSnapshot = null;
+
+    let row = selectedRow();
+    if (snapshot) {
+      const snapshotFormStillActive = state.workbook && state.workbook.selected_form
+        && state.workbook.selected_form.id === snapshot.formId;
+      const targetRow = snapshotFormStillActive
+        ? state.workbook.rows.find(r => rowKey(r) === snapshot.rowKey)
+        : null;
+      if (targetRow) {
+        targetRow.values = { ...(targetRow.values || {}), ...snapshot.values };
+        state.dirtyRows.add(rowKey(targetRow));
+        row = targetRow;
+      } else {
+        console.warn(`[autosave] Could not reapply a queued save for row ${snapshot.rowKey} -- it no longer exists in the loaded workbook.`);
+        showAlert("A recent change may not have saved. Please re-check your entries before navigating away.", "error");
+      }
+    }
+
     const shouldSaveMonthly = row && row.editability && row.editability.editable;
     const shouldSaveWorkbookValues = state.dirtyWorkbookFields.size > 0;
     if (!shouldSaveMonthly && !shouldSaveWorkbookValues) {
