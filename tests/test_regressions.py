@@ -317,6 +317,214 @@ class TestWorkbookChildRemovalChecks:
         assert WorkbookSite.query.filter_by(workbook_id=workbook.id, site_id=site.id).first() is None
 
 
+class TestSiteDeactivationBlockedByInProgressSubmissions:
+    """deactivate_site used to have no dependency check at all -- just an
+    existence check before flipping is_deleted. It must get the same
+    in-progress-submission guard deactivate_workbook already has."""
+
+    def _setup(self, make_form, make_site, make_reporting_period, make_workflow):
+        form, form_version = make_form()
+        site = make_site()
+        period = make_reporting_period(site)
+        workflow_version = make_workflow([])
+        return form, form_version, site, period, workflow_version
+
+    def test_deactivate_blocked_when_in_progress_submission_exists(
+        self, make_form, make_site, make_reporting_period, make_workflow, make_submission, make_user,
+    ):
+        from app.modules.SITEMST.model import Site
+        from app.modules.SITEMST.service import deactivate_site
+
+        form, form_version, site, period, workflow_version = self._setup(
+            make_form, make_site, make_reporting_period, make_workflow
+        )
+        actor = make_user()
+        make_submission(site, form, form_version, period, workflow_version, status="Submitted")
+
+        with pytest.raises(ValueError, match="Cannot deactivate site"):
+            deactivate_site(site.id, actor.id)
+
+        assert Site.query.filter_by(id=site.id, is_deleted=False).first() is not None
+
+    def test_deactivate_succeeds_when_no_in_progress_submission(
+        self, make_form, make_site, make_reporting_period, make_workflow, make_submission, make_user,
+    ):
+        from app.modules.SITEMST.model import Site
+        from app.modules.SITEMST.service import deactivate_site
+
+        form, form_version, site, period, workflow_version = self._setup(
+            make_form, make_site, make_reporting_period, make_workflow
+        )
+        actor = make_user()
+        make_submission(site, form, form_version, period, workflow_version, status="Approved")
+
+        deactivated = deactivate_site(site.id, actor.id)
+
+        assert deactivated is not None
+        assert Site.query.filter_by(id=site.id, is_deleted=False).first() is None
+
+
+class TestValueSetDeleteBlockedByActiveFieldReference:
+    """delete_value_set used to require only a reason string and existence --
+    no check for FieldVersion.field_config["value_set_version_id"] usage,
+    since that's a JSON key, not a real FK."""
+
+    def _make_value_set_version(self, db_session, system_user, author, code_suffix, status="Approved"):
+        from app.modules.VALSET.model import ValueSet, ValueSetVersion
+
+        vs = ValueSet(name="Test VS", code=f"test-vs-{code_suffix}", created_by=system_user, updated_by=system_user)
+        db_session.add(vs)
+        db_session.flush()
+
+        version = ValueSetVersion(
+            value_set_id=vs.id, version_number=1, status=status,
+            effective_from=date.today(), created_by=author.id,
+        )
+        db_session.add(version)
+        db_session.flush()
+        return vs, version
+
+    def test_delete_blocked_when_active_field_references_the_value_set(
+        self, make_user, make_form, make_field, db_session, system_user,
+    ):
+        from app.modules.VALSET.service import delete_value_set
+
+        author = make_user()
+        vs, version = self._make_value_set_version(db_session, system_user, author, f"del-{author.id}")
+
+        form, form_version = make_form()
+        make_field(
+            form, form_version, "dropdown_field", field_type="dropdown",
+            field_config={"value_set_version_id": version.id},
+        )
+
+        with pytest.raises(ValueError, match="Cannot delete value set"):
+            delete_value_set(vs.id, author.id, "no longer needed")
+
+        db_session.delete(version)
+        db_session.delete(vs)
+
+    def test_delete_succeeds_when_no_field_references_the_value_set(
+        self, make_user, db_session, system_user,
+    ):
+        from app.modules.VALSET.service import delete_value_set
+
+        author = make_user()
+        vs, version = self._make_value_set_version(db_session, system_user, author, f"del-ok-{author.id}")
+
+        deleted = delete_value_set(vs.id, author.id, "no longer needed")
+
+        assert deleted.is_deleted is True
+
+        db_session.delete(version)
+        db_session.delete(vs)
+
+
+class TestValueSetEntryEditRequiresDraftVersion:
+    """add_or_update_entries used to replace all entries for a version
+    regardless of status, including an already-Approved version in active
+    use. Entry edits must be restricted to Draft versions, mirroring
+    FORMBLD.save_form_draft_fields' Draft-only convention."""
+
+    def _make_value_set_version(self, db_session, system_user, author, code_suffix, status):
+        from app.modules.VALSET.model import ValueSet, ValueSetVersion
+
+        vs = ValueSet(name="Test VS", code=f"test-vs-{code_suffix}", created_by=system_user, updated_by=system_user)
+        db_session.add(vs)
+        db_session.flush()
+
+        version = ValueSetVersion(
+            value_set_id=vs.id, version_number=1, status=status,
+            effective_from=date.today(), created_by=author.id,
+        )
+        db_session.add(version)
+        db_session.flush()
+        return vs, version
+
+    def test_entries_blocked_on_approved_version(self, make_user, db_session, system_user):
+        from app.modules.VALSET.service import add_or_update_entries
+
+        author = make_user()
+        vs, version = self._make_value_set_version(db_session, system_user, author, f"entries-{author.id}", "Approved")
+
+        with pytest.raises(ValueError, match="Draft version"):
+            add_or_update_entries(version.id, [{"entry_code": "a", "entry_label": "A"}], author.id)
+
+        db_session.delete(version)
+        db_session.delete(vs)
+
+    def test_entries_succeed_on_draft_version(self, make_user, db_session, system_user):
+        from app.modules.VALSET.service import add_or_update_entries
+
+        author = make_user()
+        vs, version = self._make_value_set_version(db_session, system_user, author, f"entries-ok-{author.id}", "Draft")
+
+        entries = add_or_update_entries(version.id, [{"entry_code": "a", "entry_label": "A"}], author.id)
+
+        assert len(entries) == 1
+        assert entries[0].entry_code == "a"
+
+        for e in entries:
+            db_session.delete(e)
+        vs.current_version_id = None
+        db_session.flush()
+        db_session.delete(version)
+        db_session.delete(vs)
+
+
+class TestFormulaPublishFieldScopedToOwnForm:
+    """publish_formula_version used to validate tokens against every active
+    Field in the system, despite field_code only being unique per-form -- so
+    a formula could publish while referencing a field code that actually
+    belongs to a different sheet. Validation must be scoped to the formula's
+    own form_id."""
+
+    def test_publish_fails_when_token_belongs_to_a_different_form(
+        self, make_form, make_field, make_user, db_session, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+
+        own_form, _own_form_version = make_form()
+        other_form, other_form_version = make_form()
+        make_field(other_form, other_form_version, "shared_code")
+
+        user = make_user()
+        formula = create_formula(
+            "Test Formula", f"test-scope-{user.id}", "shared_code + 1",
+            {"shared_code": {}}, user.id, form_id=own_form.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        with pytest.raises(ValueError, match="does not exist as an active field"):
+            publish_formula_version(version.id, user.id)
+
+    def test_publish_succeeds_when_token_belongs_to_the_formulas_own_form(
+        self, make_form, make_field, make_user, db_session, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+
+        own_form, own_form_version = make_form()
+        make_field(own_form, own_form_version, "own_code")
+
+        user = make_user()
+        formula = create_formula(
+            "Test Formula", f"test-scope-ok-{user.id}", "own_code + 1",
+            {"own_code": {}}, user.id, form_id=own_form.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        publish_formula_version(version.id, user.id)
+
+        assert version.published_at is not None
+        assert formula.current_version_id == version.id
+
+
 class TestNotificationDeliveryFailureRecorded:
     """
     Priority 3 continued: send_mock_email/send_mock_whatsapp used to only
