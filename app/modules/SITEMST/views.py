@@ -116,6 +116,9 @@ def deactivate(site_id):
         else:
             db.session.commit()
             flash("Site deactivated.", "success")
+    except ValueError as error:
+        db.session.rollback()
+        flash(str(error), "error")
     except Exception:
         db.session.rollback()
         flash("Could not deactivate site.", "error")
