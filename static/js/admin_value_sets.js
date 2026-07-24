@@ -62,6 +62,11 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnCloseReject   = document.getElementById("btn-close-reject");
   const btnCancelReject  = document.getElementById("btn-cancel-reject");
   const formRejectVersion = document.getElementById("form-reject-version");
+  const btnDeleteValSet  = document.getElementById("btn-delete-valset");
+  const modalDeleteValSet = document.getElementById("modal-delete-valset");
+  const btnCloseDeleteValSet = document.getElementById("btn-close-delete-valset");
+  const btnCancelDeleteValSet = document.getElementById("btn-cancel-delete-valset");
+  const formDeleteValSet = document.getElementById("form-delete-valset");
 
   // ── Helpers ───────────────────────────────────────────────────────────
   const showToast = window.UIHelpers.showToast;
@@ -280,6 +285,7 @@ document.addEventListener("DOMContentLoaded", function () {
     btnReject.classList.toggle("hidden", !permissions.can_approve);
     btnPublish.classList.toggle("hidden", !permissions.can_publish);
     publishedNotice.classList.toggle("hidden", !permissions.can_create_version);
+    btnDeleteValSet.classList.toggle("hidden", !permissions.can_delete);
     
     if (status === "rejected" && version.rejection_reason) {
       rejectionNotice.textContent = `Rejection reason: ${version.rejection_reason}`;
@@ -521,6 +527,46 @@ document.addEventListener("DOMContentLoaded", function () {
     } finally {
       submitBtn.disabled = false;
       submitBtn.textContent = "Submit Rejection";
+    }
+  };
+
+  // ── Delete value set ──────────────────────────────────────────────────
+  btnDeleteValSet.onclick = () => modalDeleteValSet.classList.remove("hidden");
+  btnCloseDeleteValSet.onclick = () => modalDeleteValSet.classList.add("hidden");
+  btnCancelDeleteValSet.onclick = () => modalDeleteValSet.classList.add("hidden");
+
+  formDeleteValSet.onsubmit = async function (e) {
+    e.preventDefault();
+    if (!selectedValSetId) return;
+    const reason = document.getElementById("delete-valset-reason").value;
+    const submitBtn = this.querySelector("button[type=submit]");
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Deleting…";
+    try {
+      const res = await fetch(`/module/VALSET/api/${selectedValSetId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      const resData = await res.json();
+      if (resData.error) {
+        showToast(resData.error, "error");
+      } else {
+        showToast("Value set deleted.");
+        modalDeleteValSet.classList.add("hidden");
+        document.getElementById("delete-valset-reason").value = "";
+        selectedValSetId = null;
+        selectedVersionId = null;
+        entries = [];
+        detailsPanel.classList.add("hidden");
+        emptyState.classList.remove("hidden");
+        loadValueSets();
+      }
+    } catch {
+      showToast("Failed to delete value set.", "error");
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Delete Value Set";
     }
   };
 

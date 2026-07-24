@@ -59,7 +59,9 @@ def add_or_update_entries(version_id, entries_list, user_id):
     version = get_value_set_version(version_id)
     if not version:
         raise ValueError("Value set version not found.")
-        
+    if version.status != "Draft":
+        raise ValueError("Entries can only be edited on a Draft version.")
+
     # Mark existing entries as deleted first
     existing_entries = ValueSetEntry.query.filter_by(
         value_set_version_id=version_id,
@@ -248,7 +250,27 @@ def delete_value_set(value_set_id, user_id, reason):
     value_set = get_value_set(value_set_id)
     if not value_set:
         raise ValueError("Value set not found.")
-        
+
+    # No FK from FieldVersion to ValueSetVersion -- the link is stored as
+    # field_config["value_set_version_id"] (see SUBMIT.service dropdown
+    # validation), so it has to be scanned in Python rather than joined.
+    version_ids = {
+        v.id for v in ValueSetVersion.query.filter_by(value_set_id=value_set_id).all()
+    }
+    if version_ids:
+        from app.modules.FORMBLD.model import FieldVersion
+
+        referencing_count = sum(
+            1
+            for fv in FieldVersion.query.filter_by(is_deleted=False).all()
+            if (fv.field_config or {}).get("value_set_version_id") in version_ids
+        )
+        if referencing_count > 0:
+            raise ValueError(
+                f"Cannot delete value set: {referencing_count} active field(s) "
+                "still reference it."
+            )
+
     value_set.is_deleted = True
     value_set.deleted_by = user_id
     value_set.deleted_at = datetime.now(timezone.utc)
