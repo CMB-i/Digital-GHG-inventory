@@ -138,6 +138,23 @@ def remove_sheet_from_workbook(workbook_id, form_id):
     wf = WorkbookForm.query.filter_by(workbook_id=workbook_id, form_id=form_id).first()
     if not wf:
         raise ValueError("Sheet not found in this workbook.")
+
+    from app.modules.SUBMIT.model import Submission
+
+    site_ids = [row.site_id for row in WorkbookSite.query.filter_by(workbook_id=workbook_id).all()]
+    if site_ids:
+        in_progress_count = Submission.query.filter(
+            Submission.form_id == form_id,
+            Submission.site_id.in_(site_ids),
+            Submission.status.in_(IN_PROGRESS_SUBMISSION_STATUSES),
+            Submission.is_deleted == False,
+        ).count()
+        if in_progress_count > 0:
+            raise ValueError(
+                f"Cannot remove sheet: {in_progress_count} in-progress submission(s) "
+                "still depend on it."
+            )
+
     db.session.delete(wf)
     db.session.flush()
 
@@ -269,6 +286,23 @@ def remove_site_from_workbook(workbook_id, site_id):
     row = WorkbookSite.query.filter_by(workbook_id=workbook_id, site_id=site_id).first()
     if not row:
         raise ValueError("Site is not assigned to this workbook.")
+
+    from app.modules.SUBMIT.model import Submission
+
+    form_ids = [wf.form_id for wf in WorkbookForm.query.filter_by(workbook_id=workbook_id).all()]
+    if form_ids:
+        in_progress_count = Submission.query.filter(
+            Submission.form_id.in_(form_ids),
+            Submission.site_id == site_id,
+            Submission.status.in_(IN_PROGRESS_SUBMISSION_STATUSES),
+            Submission.is_deleted == False,
+        ).count()
+        if in_progress_count > 0:
+            raise ValueError(
+                f"Cannot remove site: {in_progress_count} in-progress submission(s) "
+                "still depend on it."
+            )
+
     WorkbookSiteSubmitter.query.filter_by(workbook_id=workbook_id, site_id=site_id).delete()
     db.session.delete(row)
     db.session.flush()
