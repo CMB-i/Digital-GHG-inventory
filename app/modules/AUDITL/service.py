@@ -61,13 +61,15 @@ def resolve_entity_details(entity_type, entity_id):
                 site = db.session.get(Site, sub.site_id)
                 period = db.session.get(ReportingPeriod, sub.reporting_period_id)
                 
+                # WorkbookSite is hard-deleted (no is_deleted column) -- a
+                # missing row here just means no match, not an inactive one.
                 workbook = (
                     db.session.query(Workbook)
                     .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
-                    .filter(WorkbookSite.site_id == sub.site_id, WorkbookSite.is_deleted == False, Workbook.is_active == True)
+                    .filter(WorkbookSite.site_id == sub.site_id, Workbook.is_active == True)
                     .first()
                 )
-                
+
                 parts = []
                 if workbook:
                     parts.append(f"Workbook: {workbook.name}")
@@ -92,13 +94,15 @@ def resolve_entity_details(entity_type, entity_id):
             if package:
                 site = db.session.get(Site, package.site_id)
                 period = db.session.get(ReportingPeriod, package.period_id)
+                # WorkbookSite is hard-deleted (no is_deleted column) -- a
+                # missing row here just means no match, not an inactive one.
                 workbook = (
                     db.session.query(Workbook)
                     .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
-                    .filter(WorkbookSite.site_id == package.site_id, WorkbookSite.is_deleted == False, Workbook.is_active == True)
+                    .filter(WorkbookSite.site_id == package.site_id, Workbook.is_active == True)
                     .first()
                 )
-                
+
                 parts = []
                 if workbook:
                     parts.append(f"Workbook: {workbook.name}")
