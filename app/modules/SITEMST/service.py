@@ -99,6 +99,21 @@ def deactivate_site(site_id, actor_id):
     site = Site.query.filter_by(id=site_id, is_deleted=False).one_or_none()
     if not site:
         return None
+
+    from app.modules.SUBMIT.model import Submission
+    from app.modules.WKBK.service import IN_PROGRESS_SUBMISSION_STATUSES
+
+    in_progress_count = Submission.query.filter(
+        Submission.site_id == site_id,
+        Submission.status.in_(IN_PROGRESS_SUBMISSION_STATUSES),
+        Submission.is_deleted == False,
+    ).count()
+    if in_progress_count > 0:
+        raise ValueError(
+            f"Cannot deactivate site: {in_progress_count} in-progress submission(s) "
+            "still depend on it."
+        )
+
     site.is_deleted = True
     site.deleted_at = _utc_now()
     site.deleted_by = actor_id

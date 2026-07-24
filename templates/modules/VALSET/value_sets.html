@@ -70,10 +70,15 @@
         </div>
 
         <!-- Value set identity (read-only) -->
-        <div class="px-5 py-4 border-b border-slate-100">
-          <h2 id="detail-name" class="text-xl font-bold text-slate-800"></h2>
-          <p id="detail-code" class="text-xs font-mono text-slate-400 mt-0.5"></p>
-          <p id="detail-desc" class="text-xs text-slate-500 mt-1 hidden"></p>
+        <div class="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <h2 id="detail-name" class="text-xl font-bold text-slate-800"></h2>
+            <p id="detail-code" class="text-xs font-mono text-slate-400 mt-0.5"></p>
+            <p id="detail-desc" class="text-xs text-slate-500 mt-1 hidden"></p>
+          </div>
+          <button id="btn-delete-valset" class="hidden shrink-0 px-3 py-1.5 border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-bold rounded-lg transition-colors">
+            Delete Value Set
+          </button>
         </div>
 
         <!-- Published version notice -->
@@ -189,6 +194,42 @@
         <button type="submit"
           class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
           Submit Rejection
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Delete Value Set Modal -->
+<div id="modal-delete-valset" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+      <h3 class="text-base font-bold text-slate-800">Delete Value Set</h3>
+      <button id="btn-close-delete-valset" class="text-slate-400 hover:text-slate-500">
+        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+    <form id="form-delete-valset" class="p-6 space-y-4">
+      <p class="text-xs text-slate-500">
+        This permanently removes the value set and all its versions. Fields still using it must be
+        unlinked first — deletion will be blocked otherwise.
+      </p>
+      <div>
+        <label class="block text-xs font-semibold text-slate-700 uppercase">Reason for Deletion</label>
+        <textarea id="delete-valset-reason" required rows="4"
+          placeholder="Explain why this value set is being deleted..."
+          class="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-rose-500 focus:ring-rose-500 text-sm p-3 border"></textarea>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2">
+        <button type="button" id="btn-cancel-delete-valset"
+          class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-semibold rounded-lg transition-colors">
+          Cancel
+        </button>
+        <button type="submit"
+          class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold rounded-lg shadow transition-colors">
+          Delete Value Set
         </button>
       </div>
     </form>

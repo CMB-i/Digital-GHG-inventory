@@ -173,6 +173,10 @@ def get_version_details(version_id):
             "can_publish": can_manage and version.status in ("Draft", "Submitted"),
             "can_create_version": can_manage and version.status == "Approved",
             "can_approve": can_approve and version.status == "Submitted",
+            # Deletion acts on the whole ValueSet, not this specific version --
+            # unlike the version-scoped actions above, it isn't gated by status
+            # (mirrors deactivate_site, which is permission-only too).
+            "can_delete": can_manage,
         }
     }
     return jsonify(data)
