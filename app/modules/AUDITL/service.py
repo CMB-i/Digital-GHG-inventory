@@ -17,6 +17,17 @@ def _json_default(value):
     return str(value)
 
 
+def _module_logger():
+    from flask import current_app
+    try:
+        return current_app.logger
+    except RuntimeError:
+        # Outside of Flask application context (e.g., test runner). Fall back
+        # to the standard library logger rather than dropping the message.
+        import logging
+        return logging.getLogger("auditl")
+
+
 def log_audit(
     actor_user_id,
     entity_type,
@@ -60,14 +71,16 @@ def resolve_entity_details(entity_type, entity_id):
                 form = db.session.get(Form, sub.form_id)
                 site = db.session.get(Site, sub.site_id)
                 period = db.session.get(ReportingPeriod, sub.reporting_period_id)
-                
+
+                # WorkbookSite is hard-deleted (no is_deleted column) -- a
+                # missing row here just means no match, not an inactive one.
                 workbook = (
                     db.session.query(Workbook)
                     .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
-                    .filter(WorkbookSite.site_id == sub.site_id, WorkbookSite.is_deleted == False, Workbook.is_active == True)
+                    .filter(WorkbookSite.site_id == sub.site_id, Workbook.is_active == True)
                     .first()
                 )
-                
+
                 parts = []
                 if workbook:
                     parts.append(f"Workbook: {workbook.name}")
@@ -92,13 +105,15 @@ def resolve_entity_details(entity_type, entity_id):
             if package:
                 site = db.session.get(Site, package.site_id)
                 period = db.session.get(ReportingPeriod, package.period_id)
+                # WorkbookSite is hard-deleted (no is_deleted column) -- a
+                # missing row here just means no match, not an inactive one.
                 workbook = (
                     db.session.query(Workbook)
                     .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
-                    .filter(WorkbookSite.site_id == package.site_id, WorkbookSite.is_deleted == False, Workbook.is_active == True)
+                    .filter(WorkbookSite.site_id == package.site_id, Workbook.is_active == True)
                     .first()
                 )
-                
+
                 parts = []
                 if workbook:
                     parts.append(f"Workbook: {workbook.name}")
@@ -147,7 +162,16 @@ def resolve_entity_details(entity_type, entity_id):
                 return f"Access Matrix Record #{entity_id} ({user_str}{site_str})"
 
     except Exception:
-        pass
+        # Every branch above only reaches here on a genuine code-level failure
+        # (bad attribute/column reference, unexpected schema drift, etc.) --
+        # a legitimately missing entity is already handled without raising,
+        # via the `if sub:` / `if user:` / etc. guards. So there is no
+        # "expected" case being silenced here; log it so a bug like this
+        # (see the WorkbookSite.is_deleted fix) shows up somewhere instead of
+        # only ever being visible as a silently thinner audit-log label.
+        _module_logger().exception(
+            f"Failed to resolve audit-log entity details for {entity_type} #{entity_id}"
+        )
 
     # Fallback to simple format
     return f"{entity_type.replace('_', ' ').title()} #{entity_id}"

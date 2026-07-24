@@ -844,6 +844,14 @@ document.addEventListener("DOMContentLoaded", function () {
            </button>`
         : "";
 
+      const deleteChainBtn = chain.workflow_id
+        ? `<button type="button" id="delete-approval-path-btn"
+             class="rounded-lg border border-rose-200 px-4 py-1.5 text-xs font-semibold text-rose-600
+                    hover:bg-rose-50 disabled:opacity-40">
+             Delete Approval Chain
+           </button>`
+        : "";
+
       content.innerHTML = `
         <div class="space-y-5">
           <div class="flex items-center justify-between">
@@ -857,6 +865,7 @@ document.addEventListener("DOMContentLoaded", function () {
             <div class="flex items-center gap-3">
               ${statusBadge}
               ${publishBtn}
+              ${deleteChainBtn}
             </div>
           </div>
           <div id="approval-sites-list" class="space-y-4"></div>
@@ -884,6 +893,33 @@ document.addEventListener("DOMContentLoaded", function () {
             toast("Failed to publish approval path.", "error");
             publishBtnEl.disabled = false;
             publishBtnEl.textContent = "Publish Approval Path";
+          }
+        };
+      }
+
+      const deleteChainBtnEl = document.getElementById("delete-approval-path-btn");
+      if (deleteChainBtnEl) {
+        deleteChainBtnEl.onclick = async () => {
+          if (!confirm("Delete this approval chain? This removes the entire configured workflow for this workbook and cannot be undone.")) return;
+          deleteChainBtnEl.disabled = true;
+          deleteChainBtnEl.textContent = "Deleting…";
+          try {
+            const res = await fetch(`/workbooks/api/${WORKBOOK_ID}/chain`, { method: "DELETE" });
+            const data = await res.json();
+            if (!res.ok) {
+              toast(data.error || "Failed to delete approval chain.", "error");
+              deleteChainBtnEl.disabled = false;
+              deleteChainBtnEl.textContent = "Delete Approval Chain";
+              return;
+            }
+            toast("Approval chain deleted.");
+            approvalTabLoaded = false;
+            loadApprovalTab();
+            loadReadiness();
+          } catch {
+            toast("Failed to delete approval chain.", "error");
+            deleteChainBtnEl.disabled = false;
+            deleteChainBtnEl.textContent = "Delete Approval Chain";
           }
         };
       }

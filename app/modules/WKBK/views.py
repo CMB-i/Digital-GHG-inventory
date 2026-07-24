@@ -566,6 +566,33 @@ def api_publish_chain(workbook_id):
         return error_response(str(e), 400)
 
 
+@bp.route("/api/<int:workbook_id>/chain", methods=["DELETE"])
+@require_permission("form", "manage_forms")
+def api_delete_chain(workbook_id):
+    from app.modules.WFLWBLD.service import delete_workflow
+
+    wb = get_workbook(workbook_id)
+    if not wb:
+        return error_response("Workbook not found.", 404)
+
+    if not wb.workflow_id:
+        return error_response("No approval path configured for this workbook.", 400)
+
+    workflow_id = wb.workflow_id
+    user = current_user()
+    try:
+        # Detach first: delete_workflow() refuses if any active Workbook still
+        # points to it, which this workbook itself does until we clear it.
+        wb.workflow_id = None
+        db.session.flush()
+        delete_workflow(workflow_id, user.id)
+        db.session.commit()
+        return success_response(data=_build_chain_payload(wb), message="Approval chain deleted.")
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+
+
 @bp.route("/api/<int:workbook_id>/chain/init", methods=["POST"])
 @require_permission("form", "manage_forms")
 def api_init_chain(workbook_id):
