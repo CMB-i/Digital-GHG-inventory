@@ -234,11 +234,20 @@ def publish_formula_version(version_id, user_id):
         raise ValueError("Formula version is already published.")
         
     tokens_keys = set((version.tokens or {}).keys())
-    
+
+    formula = get_formula(version.formula_id)
+
     # Cross-check tokens against actual live form field codes and current value set entry codes.
+    # field_code is only unique per-form (uq_fields_code_per_form), so this must be scoped to
+    # the formula's own sheet -- a global check would let a token silently match a field on a
+    # completely different sheet. Formulas created before form_id existed have no reliable sheet
+    # attribution, so they fall back to the old unscoped check.
     from app.modules.FORMBLD.model import Field
-    active_field_codes = {f.field_code for f in Field.query.filter_by(is_deleted=False).all()}
-    
+    field_query = Field.query.filter_by(is_deleted=False)
+    if formula is not None and formula.form_id is not None:
+        field_query = field_query.filter_by(form_id=formula.form_id)
+    active_field_codes = {f.field_code for f in field_query.all()}
+
     from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
     current_valsets = (
         ValueSet.query.filter_by(is_deleted=False)
@@ -266,7 +275,6 @@ def publish_formula_version(version_id, user_id):
     version.published_at = datetime.now(timezone.utc)
     version.published_by = user_id
     
-    formula = get_formula(version.formula_id)
     formula.current_version_id = version.id
     formula.updated_by = user_id
     
