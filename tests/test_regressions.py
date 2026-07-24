@@ -239,6 +239,84 @@ class TestWildcardGrantIncludedInScoping:
         assert any(r.id == user.id for r in recipients)
 
 
+class TestWorkbookChildRemovalChecks:
+    """remove_sheet_from_workbook/remove_site_from_workbook used to hard-delete
+    the WorkbookForm/WorkbookSite row with no dependency check at all, even
+    though deactivate_workbook (same dependency graph, whole-workbook scope)
+    already blocks on in-progress submissions. These narrower removals must
+    get the same guard, scoped to the specific sheet/site being removed."""
+
+    def _setup(self, make_form, make_site, make_reporting_period, make_workflow, make_workbook):
+        form, form_version = make_form()
+        site = make_site()
+        period = make_reporting_period(site)
+        workflow_version = make_workflow([])
+        workbook = make_workbook(form, site)
+        return form, form_version, site, period, workflow_version, workbook
+
+    def test_remove_sheet_blocked_when_in_progress_submission_exists(
+        self, make_form, make_site, make_reporting_period, make_workflow, make_workbook, make_submission,
+    ):
+        from app.modules.WKBK.model import WorkbookForm
+        from app.modules.WKBK.service import remove_sheet_from_workbook
+
+        form, form_version, site, period, workflow_version, workbook = self._setup(
+            make_form, make_site, make_reporting_period, make_workflow, make_workbook
+        )
+        make_submission(site, form, form_version, period, workflow_version, status="Submitted")
+
+        with pytest.raises(ValueError, match="Cannot remove sheet"):
+            remove_sheet_from_workbook(workbook.id, form.id)
+
+        assert WorkbookForm.query.filter_by(workbook_id=workbook.id, form_id=form.id).first() is not None
+
+    def test_remove_sheet_succeeds_when_no_in_progress_submission(
+        self, make_form, make_site, make_reporting_period, make_workflow, make_workbook, make_submission,
+    ):
+        from app.modules.WKBK.model import WorkbookForm
+        from app.modules.WKBK.service import remove_sheet_from_workbook
+
+        form, form_version, site, period, workflow_version, workbook = self._setup(
+            make_form, make_site, make_reporting_period, make_workflow, make_workbook
+        )
+        make_submission(site, form, form_version, period, workflow_version, status="Approved")
+
+        remove_sheet_from_workbook(workbook.id, form.id)
+
+        assert WorkbookForm.query.filter_by(workbook_id=workbook.id, form_id=form.id).first() is None
+
+    def test_remove_site_blocked_when_in_progress_submission_exists(
+        self, make_form, make_site, make_reporting_period, make_workflow, make_workbook, make_submission,
+    ):
+        from app.modules.WKBK.model import WorkbookSite
+        from app.modules.WKBK.service import remove_site_from_workbook
+
+        form, form_version, site, period, workflow_version, workbook = self._setup(
+            make_form, make_site, make_reporting_period, make_workflow, make_workbook
+        )
+        make_submission(site, form, form_version, period, workflow_version, status="Under Review")
+
+        with pytest.raises(ValueError, match="Cannot remove site"):
+            remove_site_from_workbook(workbook.id, site.id)
+
+        assert WorkbookSite.query.filter_by(workbook_id=workbook.id, site_id=site.id).first() is not None
+
+    def test_remove_site_succeeds_when_no_in_progress_submission(
+        self, make_form, make_site, make_reporting_period, make_workflow, make_workbook, make_submission,
+    ):
+        from app.modules.WKBK.model import WorkbookSite
+        from app.modules.WKBK.service import remove_site_from_workbook
+
+        form, form_version, site, period, workflow_version, workbook = self._setup(
+            make_form, make_site, make_reporting_period, make_workflow, make_workbook
+        )
+        make_submission(site, form, form_version, period, workflow_version, status="Rejected")
+
+        remove_site_from_workbook(workbook.id, site.id)
+
+        assert WorkbookSite.query.filter_by(workbook_id=workbook.id, site_id=site.id).first() is None
+
+
 class TestNotificationDeliveryFailureRecorded:
     """
     Priority 3 continued: send_mock_email/send_mock_whatsapp used to only
