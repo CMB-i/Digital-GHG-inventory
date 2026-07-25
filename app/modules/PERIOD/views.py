@@ -18,6 +18,7 @@ from app.modules.PERIOD.service import (
     bulk_open_month,
     bulk_transition_periods,
     create_period,
+    delete_period,
     list_periods,
     sort_period_group,
     transition_period,
@@ -67,6 +68,7 @@ def index():
     perm_create = has_permission(user.id, "period", "create")
     perm_edit = has_permission(user.id, "period", "edit")
     perm_reopen = has_permission(user.id, "period", "reopen")
+    perm_delete = has_permission(user.id, "period", "delete")
 
     create_drawer_open = request.args.get("drawer") == "create" and perm_create
 
@@ -146,6 +148,7 @@ def index():
         perm_create=perm_create,
         perm_edit=perm_edit,
         perm_reopen=perm_reopen,
+        perm_delete=perm_delete,
         bulk_transition_url=url_for("period.bulk_transition", **_period_filter_args()),
     )
 
@@ -240,6 +243,27 @@ def transition(period_id):
     except Exception:
         db.session.rollback()
         flash("Could not update period status.", "error")
+    return redirect(url_for("period.index", **_period_filter_args()))
+
+
+@bp.route("/<int:period_id>/delete", methods=["POST"])
+@require_permission("period", "delete")
+def delete(period_id):
+    actor = current_user()
+    try:
+        delete_period(
+            period_id=period_id,
+            actor_id=actor.id,
+            reason=request.form.get("delete_reason"),
+        )
+        db.session.commit()
+        flash("Reporting period deleted.", "success")
+    except ValidationError as error:
+        db.session.rollback()
+        flash(str(error), "error")
+    except Exception:
+        db.session.rollback()
+        flash("Could not delete reporting period.", "error")
     return redirect(url_for("period.index", **_period_filter_args()))
 
 
