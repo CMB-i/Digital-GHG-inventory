@@ -1694,6 +1694,11 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!selectedFieldCode) return;
     if (!confirm("Are you sure you want to delete this field from the sheet layout?")) return;
 
+    // The save can now genuinely fail (e.g. a published formula still
+    // references this field) -- don't remove it from the canvas or claim
+    // success until saveDraftLayout() actually confirms it. Its own
+    // then/catch already shows the right toast either way.
+    const previousFields = currentFields;
     currentFields = currentFields.filter(x => x.field_code !== selectedFieldCode);
 
     // Normalize display order numbers
@@ -1704,8 +1709,14 @@ document.addEventListener("DOMContentLoaded", function () {
     updateSaveStatusText();
     renderSections();
     renderWorkspace();
-    showToast("Field deleted.");
-    saveDraftLayout().catch(() => {});
+    saveDraftLayout().catch(() => {
+      // Rejected -- restore the field so the canvas matches what's actually saved.
+      currentFields = previousFields;
+      normalizeFieldDisplayOrder();
+      updateSaveStatusText();
+      renderSections();
+      renderWorkspace();
+    });
   };
 
   if (btnAddSection) {

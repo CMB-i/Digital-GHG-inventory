@@ -499,6 +499,114 @@ class TestFormulaPublishFieldScopedToOwnForm:
         assert formula.current_version_id == version.id
 
 
+class TestFieldRemovalBlockedByFormulaReference:
+    """save_form_draft_fields soft-deletes any field omitted from a draft-save
+    payload with no check for whether a published Formula's tokens still
+    reference it -- FormulaVersion.tokens has no FK to Field (raw JSON), so
+    this can't be caught by the database. Must block outright, same as every
+    other entity in this delete work (Site, Period, Sheet, Value Set), not
+    just warn and let the removal through anyway."""
+
+    def _draft_version_id(self, form, user, created_objects):
+        # make_form() returns a Published version -- save_form_draft_fields
+        # only accepts a Draft one, so give each test a real draft version to
+        # save against (create_new_form_version_draft is the same helper
+        # "Edit as Draft" in the Sheet Builder uses).
+        from app.modules.FORMBLD.service import create_new_form_version_draft
+
+        draft_version = create_new_form_version_draft(form.id, user.id)
+        created_objects.append(draft_version)
+        return draft_version.id
+
+    def _publish_formula(self, make_user, created_objects, form, expression, tokens, name, code_suffix):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+
+        user = make_user()
+        formula = create_formula(
+            name, f"test-field-delete-{code_suffix}", expression,
+            tokens, user.id, form_id=form.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+        publish_formula_version(version.id, user.id)
+        return formula, version
+
+    def test_field_removal_blocked_when_an_active_formula_references_it(
+        self, make_form, make_field, make_user, created_objects,
+    ):
+        from app.modules.FORMBLD.model import Field
+        from app.modules.FORMBLD.service import save_form_draft_fields
+
+        form, form_version = make_form()
+        field_a, _fva = make_field(form, form_version, "field_a")
+        formula, _version = self._publish_formula(
+            make_user, created_objects, form, "field_a + 1", {"field_a": {}},
+            "Diesel Emissions", "a",
+        )
+        actor = make_user()
+        draft_version_id = self._draft_version_id(form, actor, created_objects)
+
+        with pytest.raises(ValueError, match=formula.name):
+            save_form_draft_fields(draft_version_id, [], actor.id)
+
+        assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is not None
+
+    def test_field_removal_succeeds_when_no_formula_references_it(
+        self, make_form, make_field, make_user, created_objects,
+    ):
+        from app.modules.FORMBLD.model import Field
+        from app.modules.FORMBLD.service import save_form_draft_fields
+
+        form, form_version = make_form()
+        field_a, _fva = make_field(form, form_version, "field_a")
+        actor = make_user()
+        draft_version_id = self._draft_version_id(form, actor, created_objects)
+
+        save_form_draft_fields(draft_version_id, [], actor.id)
+
+        assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is None
+
+    def test_batch_draft_save_blocks_and_reports_every_referenced_field(
+        self, make_form, make_field, make_user, created_objects,
+    ):
+        """Two fields, each referenced by a different published formula, both
+        omitted in the same save -- the error must name both formulas, and
+        neither field (nor an unrelated third, harmlessly-omitted field) may
+        end up partially deleted -- the whole batch fails together."""
+        from app.modules.FORMBLD.model import Field
+        from app.modules.FORMBLD.service import save_form_draft_fields
+
+        form, form_version = make_form()
+        field_a, _fva = make_field(form, form_version, "field_a")
+        field_b, _fvb = make_field(form, form_version, "field_b")
+        field_c, _fvc = make_field(form, form_version, "field_c")
+        formula_1, _v1 = self._publish_formula(
+            make_user, created_objects, form, "field_a + 1", {"field_a": {}},
+            "Diesel Emissions", "b1",
+        )
+        formula_2, _v2 = self._publish_formula(
+            make_user, created_objects, form, "field_b + 1", {"field_b": {}},
+            "Grid Emissions", "b2",
+        )
+        actor = make_user()
+        draft_version_id = self._draft_version_id(form, actor, created_objects)
+
+        with pytest.raises(ValueError) as exc_info:
+            save_form_draft_fields(draft_version_id, [], actor.id)
+
+        message = str(exc_info.value)
+        assert formula_1.name in message
+        assert formula_2.name in message
+        assert "field_a" in message
+        assert "field_b" in message
+
+        assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is not None
+        assert Field.query.filter_by(id=field_b.id, is_deleted=False).first() is not None
+        assert Field.query.filter_by(id=field_c.id, is_deleted=False).first() is not None
+
+
 class TestNotificationDeliveryFailureRecorded:
     """
     Priority 3 continued: send_mock_email/send_mock_whatsapp used to only
