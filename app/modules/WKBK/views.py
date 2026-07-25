@@ -11,11 +11,8 @@ from app.modules.WKBK.service import (
     create_workbook,
     get_workbook,
     get_workbook_with_sheets,
-    add_sheet_to_workbook,
-    remove_sheet_from_workbook,
     reorder_sheets,
     deactivate_workbook,
-    get_addable_forms,
     get_workbook_sites,
     get_assignable_sites,
     add_site_to_workbook,
@@ -98,35 +95,6 @@ def api_detail(workbook_id):
     })
 
 
-@bp.route("/api/<int:workbook_id>/sheets/add", methods=["POST"])
-@require_permission("form", "manage_forms")
-def api_add_sheet(workbook_id):
-    data = request.get_json() or {}
-    try:
-        add_sheet_to_workbook(
-            workbook_id=workbook_id,
-            form_id=data.get("form_id"),
-            sheet_label=data.get("sheet_label"),
-        )
-        db.session.commit()
-        _, sheets = get_workbook_with_sheets(workbook_id)
-        return success_response(data={"sheets": sheets}, message="Sheet added.")
-    except ValueError as e:
-        return error_response(str(e), 400)
-
-
-@bp.route("/api/<int:workbook_id>/sheets/remove", methods=["POST"])
-@require_permission("form", "manage_forms")
-def api_remove_sheet(workbook_id):
-    data = request.get_json() or {}
-    try:
-        remove_sheet_from_workbook(workbook_id=workbook_id, form_id=data.get("form_id"))
-        db.session.commit()
-        return success_response(message="Sheet removed.")
-    except ValueError as e:
-        return error_response(str(e), 400)
-
-
 @bp.route("/api/<int:workbook_id>/sheets/reorder", methods=["POST"])
 @require_permission("form", "manage_forms")
 def api_reorder_sheets(workbook_id):
@@ -184,12 +152,6 @@ def api_rename_sheet(workbook_id, form_id):
         )
     except ValueError as e:
         return error_response(str(e), 400)
-
-
-@bp.route("/api/<int:workbook_id>/addable-forms", methods=["GET"])
-@require_permission("form", "manage_forms")
-def api_addable_forms(workbook_id):
-    return jsonify(get_addable_forms(workbook_id))
 
 
 @bp.route("/api/<int:workbook_id>/workflow", methods=["GET"])

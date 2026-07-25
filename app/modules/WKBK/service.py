@@ -134,31 +134,6 @@ def add_sheet_to_workbook(workbook_id, form_id, sheet_label=None, display_order=
     return wf
 
 
-def remove_sheet_from_workbook(workbook_id, form_id):
-    wf = WorkbookForm.query.filter_by(workbook_id=workbook_id, form_id=form_id).first()
-    if not wf:
-        raise ValueError("Sheet not found in this workbook.")
-
-    from app.modules.SUBMIT.model import Submission
-
-    site_ids = [row.site_id for row in WorkbookSite.query.filter_by(workbook_id=workbook_id).all()]
-    if site_ids:
-        in_progress_count = Submission.query.filter(
-            Submission.form_id == form_id,
-            Submission.site_id.in_(site_ids),
-            Submission.status.in_(IN_PROGRESS_SUBMISSION_STATUSES),
-            Submission.is_deleted == False,
-        ).count()
-        if in_progress_count > 0:
-            raise ValueError(
-                f"Cannot remove sheet: {in_progress_count} in-progress submission(s) "
-                "still depend on it."
-            )
-
-    db.session.delete(wf)
-    db.session.flush()
-
-
 def reorder_sheets(workbook_id, ordered_form_ids):
     for idx, form_id in enumerate(ordered_form_ids):
         wf = WorkbookForm.query.filter_by(workbook_id=workbook_id, form_id=form_id).first()
@@ -219,31 +194,6 @@ def rename_workbook_sheet(workbook_id, form_id, sheet_label):
     wf.sheet_label = sheet_label.strip() if sheet_label and sheet_label.strip() else None
     db.session.flush()
     return wf
-
-
-def get_addable_forms(workbook_id):
-    """Return forms not already in this workbook."""
-    existing_ids = {
-        wf.form_id
-        for wf in WorkbookForm.query.filter_by(workbook_id=workbook_id).all()
-    }
-    forms = Form.query.filter_by(is_deleted=False).order_by(Form.name.asc()).all()
-    result = []
-    for f in forms:
-        if f.id in existing_ids:
-            continue
-        latest = (
-            FormVersion.query.filter_by(form_id=f.id)
-            .order_by(FormVersion.version_number.desc())
-            .first()
-        )
-        result.append({
-            "id": f.id,
-            "name": f.name,
-            "code": f.code,
-            "latest_version_status": latest.status if latest else None,
-        })
-    return result
 
 
 def get_workbook_sites(workbook_id):

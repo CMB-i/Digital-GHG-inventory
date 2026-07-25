@@ -240,11 +240,16 @@ class TestWildcardGrantIncludedInScoping:
 
 
 class TestWorkbookChildRemovalChecks:
-    """remove_sheet_from_workbook/remove_site_from_workbook used to hard-delete
-    the WorkbookForm/WorkbookSite row with no dependency check at all, even
-    though deactivate_workbook (same dependency graph, whole-workbook scope)
-    already blocks on in-progress submissions. These narrower removals must
-    get the same guard, scoped to the specific sheet/site being removed."""
+    """remove_site_from_workbook used to hard-delete the WorkbookSite row with
+    no dependency check at all, even though deactivate_workbook (same
+    dependency graph, whole-workbook scope) already blocks on in-progress
+    submissions. This narrower removal must get the same guard, scoped to the
+    specific site being removed.
+
+    (remove_sheet_from_workbook, formerly tested alongside this, was removed
+    when "Reuse existing sheet" and standalone sheet detachment were retired
+    -- a sheet can no longer be detached from a workbook without deleting it
+    outright; see delete_sheet in FORMBLD/service.py and its own tests.)"""
 
     def _setup(self, make_form, make_site, make_reporting_period, make_workflow, make_workbook):
         form, form_version = make_form()
@@ -253,37 +258,6 @@ class TestWorkbookChildRemovalChecks:
         workflow_version = make_workflow([])
         workbook = make_workbook(form, site)
         return form, form_version, site, period, workflow_version, workbook
-
-    def test_remove_sheet_blocked_when_in_progress_submission_exists(
-        self, make_form, make_site, make_reporting_period, make_workflow, make_workbook, make_submission,
-    ):
-        from app.modules.WKBK.model import WorkbookForm
-        from app.modules.WKBK.service import remove_sheet_from_workbook
-
-        form, form_version, site, period, workflow_version, workbook = self._setup(
-            make_form, make_site, make_reporting_period, make_workflow, make_workbook
-        )
-        make_submission(site, form, form_version, period, workflow_version, status="Submitted")
-
-        with pytest.raises(ValueError, match="Cannot remove sheet"):
-            remove_sheet_from_workbook(workbook.id, form.id)
-
-        assert WorkbookForm.query.filter_by(workbook_id=workbook.id, form_id=form.id).first() is not None
-
-    def test_remove_sheet_succeeds_when_no_in_progress_submission(
-        self, make_form, make_site, make_reporting_period, make_workflow, make_workbook, make_submission,
-    ):
-        from app.modules.WKBK.model import WorkbookForm
-        from app.modules.WKBK.service import remove_sheet_from_workbook
-
-        form, form_version, site, period, workflow_version, workbook = self._setup(
-            make_form, make_site, make_reporting_period, make_workflow, make_workbook
-        )
-        make_submission(site, form, form_version, period, workflow_version, status="Approved")
-
-        remove_sheet_from_workbook(workbook.id, form.id)
-
-        assert WorkbookForm.query.filter_by(workbook_id=workbook.id, form_id=form.id).first() is None
 
     def test_remove_site_blocked_when_in_progress_submission_exists(
         self, make_form, make_site, make_reporting_period, make_workflow, make_workbook, make_submission,
