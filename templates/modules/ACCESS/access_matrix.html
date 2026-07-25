@@ -103,19 +103,19 @@
           </td>
           <td class="whitespace-nowrap px-3 py-3 text-sm text-slate-600">{{ user.last_login_at | compact_local_datetime if user.last_login_at else "—" }}</td>
           <td class="whitespace-nowrap px-3 py-3 text-right">
-            {% if perm_manage_users or perm_edit or perm_delete %}
+            {% if perm_manage_users %}
             <div class="relative inline-flex items-center justify-end gap-2">
               {% if perm_manage_users %}
               <a class="action-button" href="{{ url_for('access.index', user_id=user.id, drawer='details') }}">Edit details</a>
               <a class="action-button action-button-primary" href="{{ url_for('access.index', user_id=user.id, drawer='permissions') }}">Edit permissions</a>
               {% endif %}
-              {% if perm_edit or perm_delete or perm_manage_users %}
+              {% if perm_manage_users %}
               <button class="action-menu-toggle action-menu-button" type="button" aria-expanded="false" aria-label="More actions for {{ user.full_name }}">...</button>
               <div class="action-menu hidden" role="menu">
-                {% if perm_edit or perm_manage_users %}
+                {% if perm_manage_users %}
                 <button class="reset-password-button action-menu-item" data-password-url="{{ url_for('access.password', user_id=user.id) }}" data-user-name="{{ user.full_name }}" type="button" role="menuitem">Reset password</button>
                 {% endif %}
-                {% if perm_edit or perm_delete %}
+                {% if perm_manage_users %}
                 <form class="user-status-form" data-confirm="{{ 'Deactivate' if user.is_active else 'Activate' }} {{ user.full_name }}?" method="post" action="{{ url_for('access.toggle_active', user_id=user.id) }}">
                   <input type="hidden" name="is_active" value="{{ 'false' if user.is_active else 'true' }}">
                   <button class="action-menu-item" type="submit" role="menuitem">{{ "Deactivate" if user.is_active else "Activate" }}</button>
