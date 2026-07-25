@@ -32,7 +32,10 @@ from app.modules.FORMBLD.service import (
     compose_preview_workbook_context,
     save_form_draft_fields,
     publish_form_version,
-    create_new_form_version_draft
+    create_new_form_version_draft,
+    list_sheets_for_picker,
+    copy_fields_to_sheet,
+    copy_sheet_to_workbook,
 )
 from app.modules.FORMBLD.model import FormVersion
 from app.modules.USRMGMT.model import User
@@ -427,4 +430,66 @@ def create_new_version(form_id):
             message="Draft version ready."
         )
     except ValueError as e:
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/sheets-picker", methods=["GET"])
+@require_permission("form", "manage_forms")
+def sheets_picker():
+    return jsonify(list_sheets_for_picker())
+
+
+@bp.route("/api/version/<int:version_id>/fields/copy", methods=["POST"])
+@require_permission("form", "manage_forms")
+def copy_fields(version_id):
+    data = request.get_json() or {}
+    field_codes = data.get("field_codes")
+    destination_form_id = data.get("destination_form_id")
+    if not isinstance(field_codes, list):
+        return error_response("field_codes must be a list.", 400)
+
+    user = current_user()
+    try:
+        destination_form, destination_version, new_fields = copy_fields_to_sheet(
+            version_id, field_codes, destination_form_id, user.id,
+        )
+        db.session.commit()
+        return success_response(
+            data={
+                "destination_form_id": destination_form.id,
+                "destination_version_id": destination_version.id,
+                "copied_count": len(new_fields),
+                "new_field_codes": [f.field_code for f in new_fields],
+            },
+            message=f"Copied {len(new_fields)} field(s) to '{destination_form.name}'.",
+        )
+    except ValueError as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/<int:form_id>/copy-sheet", methods=["POST"])
+@require_permission("form", "manage_forms")
+def copy_sheet(form_id):
+    data = request.get_json() or {}
+    destination_workbook_id = data.get("destination_workbook_id")
+
+    user = current_user()
+    try:
+        new_form, new_version, workbook_form = copy_sheet_to_workbook(
+            form_id, destination_workbook_id, user.id,
+        )
+        db.session.commit()
+        return success_response(
+            data={
+                "form_id": new_form.id,
+                "version_id": new_version.id,
+                "code": new_form.code,
+                "name": new_form.name,
+                "workbook_id": workbook_form.workbook_id,
+            },
+            message=f"Sheet copied as '{new_form.name}'.",
+        )
+    except ValueError as e:
+        db.session.rollback()
         return error_response(str(e), 400)

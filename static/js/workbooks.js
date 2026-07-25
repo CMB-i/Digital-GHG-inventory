@@ -85,17 +85,24 @@ document.addEventListener("DOMContentLoaded", function () {
     if (btnCancelRename) btnCancelRename.onclick = () => renameModal.classList.add("hidden");
 
     if (formRW) {
+      // Guarded synchronously, before any other work -- submitBtn.disabled
+      // alone can lag behind a very fast double-click/double-submit and let
+      // a second, redundant request fire before the first one's response
+      // (and its disabling of the button) ever lands.
+      let renameWorkbookInFlight = false;
       formRW.onsubmit = async (e) => {
         e.preventDefault();
-        const id = renameWbId && renameWbId.value ? renameWbId.value : (typeof WORKBOOK_ID !== "undefined" ? WORKBOOK_ID : null);
-        const name = renameWbName ? renameWbName.value.trim() : "";
-        if (!id || !name) return;
+        if (renameWorkbookInFlight) return;
+        renameWorkbookInFlight = true;
         const submitBtn = document.getElementById("btn-submit-rename-wb");
-        if (submitBtn) {
-          submitBtn.disabled = true;
-          submitBtn.textContent = "Saving…";
-        }
         try {
+          const id = renameWbId && renameWbId.value ? renameWbId.value : (typeof WORKBOOK_ID !== "undefined" ? WORKBOOK_ID : null);
+          const name = renameWbName ? renameWbName.value.trim() : "";
+          if (!id || !name) return;
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Saving…";
+          }
           const res = await fetch(`/workbooks/api/${id}/rename`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -119,6 +126,7 @@ document.addEventListener("DOMContentLoaded", function () {
         } catch {
           toast("Failed to rename workbook.", "error");
         } finally {
+          renameWorkbookInFlight = false;
           if (submitBtn) {
             submitBtn.disabled = false;
             submitBtn.textContent = "Save Changes";
@@ -153,18 +161,24 @@ document.addEventListener("DOMContentLoaded", function () {
     if (btnCancelRS) btnCancelRS.onclick = () => renameSheetModal.classList.add("hidden");
 
     if (formRS) {
+      // Guarded synchronously, before any other work -- same double-submit
+      // race as form-rename-wb above (submitBtn.disabled alone can lag
+      // behind a very fast double-click/double-submit).
+      let renameSheetInFlight = false;
       formRS.onsubmit = async (e) => {
         e.preventDefault();
-        const formId = renameSheetFormId ? renameSheetFormId.value : null;
-        const sheetLabelVal = renameSheetLabel ? renameSheetLabel.value.trim() : "";
-        if (!formId) return;
-
+        if (renameSheetInFlight) return;
+        renameSheetInFlight = true;
         const submitBtn = document.getElementById("btn-submit-rename-sheet");
-        if (submitBtn) {
-          submitBtn.disabled = true;
-          submitBtn.textContent = "Saving…";
-        }
         try {
+          const formId = renameSheetFormId ? renameSheetFormId.value : null;
+          const sheetLabelVal = renameSheetLabel ? renameSheetLabel.value.trim() : "";
+          if (!formId) return;
+
+          if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Saving…";
+          }
           const res = await fetch(`/workbooks/api/${WORKBOOK_ID}/sheets/${formId}/rename`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -177,11 +191,21 @@ document.addEventListener("DOMContentLoaded", function () {
             renameSheetModal.classList.add("hidden");
             toast("Sheet renamed.");
             renderSheets(d.data.sheets);
-            loadReadiness();
+            // Not loadReadiness() -- that's declared inside the sibling
+            // `if (sheetsGrid && ...)` block below as an async function, which
+            // (unlike a plain function) never gets Annex-B hoisted to this
+            // block's scope. Calling it here always threw a genuine
+            // ReferenceError, silently caught by the catch below -- which is
+            // exactly why a real, successful rename still showed a misleading
+            // "Failed to rename sheet." toast right after "Sheet renamed."
+            // Renaming a sheet's label doesn't change workbook readiness
+            // (published-sheet count/sites/submitters/approval path) anyway,
+            // so there's nothing to refresh here.
           }
         } catch {
           toast("Failed to rename sheet.", "error");
         } finally {
+          renameSheetInFlight = false;
           if (submitBtn) {
             submitBtn.disabled = false;
             submitBtn.textContent = "Save Changes";
