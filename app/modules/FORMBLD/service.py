@@ -136,6 +136,43 @@ def create_form(name, code, description, user_id):
 
     return form
 
+def _formulas_referencing_field(field):
+    """
+    Returns every Formula whose currently-published FormulaVersion references
+    field.field_code in its tokens. tokens is a raw JSON dict with no FK to
+    Field (see FRMULA.model.FormulaVersion), so this has to be an
+    application-level scan rather than something the database can enforce.
+
+    Scoped to formulas built for the same form as the field (or legacy
+    formulas with no form_id recorded), mirroring publish_formula_version's
+    own scoping in FRMULA/service.py -- field_code is only unique per-form,
+    so an unscoped check could false-positive on an unrelated field
+    elsewhere that happens to share the same code.
+    """
+    from app.modules.FRMULA.model import Formula, FormulaVersion
+
+    referencing = []
+    formulas = Formula.query.filter(
+        Formula.is_deleted == False,
+        Formula.current_version_id.isnot(None),
+    ).filter(
+        db.or_(Formula.form_id == field.form_id, Formula.form_id.is_(None))
+    ).all()
+    for formula in formulas:
+        # FormulaVersion has no is_deleted column (unlike Formula) -- only
+        # id lookup applies here.
+        version = FormulaVersion.query.filter_by(id=formula.current_version_id).one_or_none()
+        if version and field.field_code in (version.tokens or {}):
+            referencing.append(formula)
+    return referencing
+
+def _blocked_field_removal_message(prefix, blocked_fields_with_formulas):
+    parts = []
+    for field_code, formulas in blocked_fields_with_formulas:
+        names = ", ".join(f"'{formula.name}' ({formula.code})" for formula in formulas)
+        parts.append(f"'{field_code}' is referenced by formula(s) {names}")
+    return f"{prefix}: " + "; ".join(parts) + ". Unpublish or edit the formula(s) first."
+
 def delete_sheet(form_id, user_id, reason):
     """
     A sheet can now only ever be attached to the workbook it was created in
@@ -168,6 +205,19 @@ def delete_sheet(form_id, user_id, reason):
             "status still reference it."
         )
 
+    # This cascades to soft-delete every active field on the sheet below, via
+    # a code path completely separate from save_form_draft_fields (no draft
+    # payload involved) -- so it needs the same published-formula-reference
+    # guard, checked up front before any mutation, same as that path.
+    active_fields = Field.query.filter_by(form_id=form_id, is_deleted=False).all()
+    blocked = []
+    for f in active_fields:
+        referencing_formulas = _formulas_referencing_field(f)
+        if referencing_formulas:
+            blocked.append((f.field_code, referencing_formulas))
+    if blocked:
+        raise ValueError(_blocked_field_removal_message("Cannot delete sheet", blocked))
+
     now = datetime.now(timezone.utc)
 
     # Detach from every workbook that currently references it -- normally at
@@ -184,10 +234,7 @@ def delete_sheet(form_id, user_id, reason):
 
     # Cascade to this sheet's own fields, same soft-delete pattern
     # save_form_draft_fields already uses -- just applied to every active
-    # field at once instead of one draft-save payload at a time. Known,
-    # documented gap left as-is (out of scope here): this does not check
-    # whether a published Formula still references any of these fields.
-    active_fields = Field.query.filter_by(form_id=form_id, is_deleted=False).all()
+    # field at once instead of one draft-save payload at a time.
     for f in active_fields:
         f.is_deleted = True
         f.deleted_by = user_id
@@ -510,6 +557,22 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
                 raise ValueError(f"Duplicate field code '{code_strip}' found in form fields.")
             seen_codes.add(code_strip)
 
+    # Fields omitted from this payload are about to be soft-deleted below --
+    # block up front, before any mutation, if a published Formula still
+    # references any of them. Checked as one pass over every omitted field so
+    # a batch save is all-or-nothing: either the whole draft saves, or it
+    # fails with every blocked field listed, never a silent partial save.
+    present_codes = {f.get("field_code") for f in fields_list if f.get("field_code")}
+    all_fields = Field.query.filter_by(form_id=form_version.form_id, is_deleted=False).all()
+    fields_to_remove = [f for f in all_fields if f.field_code not in present_codes]
+    blocked = []
+    for f in fields_to_remove:
+        referencing_formulas = _formulas_referencing_field(f)
+        if referencing_formulas:
+            blocked.append((f.field_code, referencing_formulas))
+    if blocked:
+        raise ValueError(_blocked_field_removal_message("Cannot save draft", blocked))
+
     # Soft-delete existing field_versions for this form_version_id instead of hard-deleting
     existing_fvs = FieldVersion.query.filter_by(form_version_id=form_version_id, is_deleted=False).all()
     for fv in existing_fvs:
@@ -517,17 +580,14 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
         fv.deleted_by = user_id
         fv.deleted_at = datetime.now(timezone.utc)
         fv.delete_reason = "Overwritten by new draft save"
-        
+
     # Soft-delete fields that are no longer present
-    present_codes = {f.get("field_code") for f in fields_list if f.get("field_code")}
-    all_fields = Field.query.filter_by(form_id=form_version.form_id, is_deleted=False).all()
-    for f in all_fields:
-        if f.field_code not in present_codes:
-            f.is_deleted = True
-            f.deleted_by = user_id
-            f.deleted_at = datetime.now(timezone.utc)
-            f.delete_reason = "Removed from form draft"
-            
+    for f in fields_to_remove:
+        f.is_deleted = True
+        f.deleted_by = user_id
+        f.deleted_at = datetime.now(timezone.utc)
+        f.delete_reason = "Removed from form draft"
+
     db.session.flush()
     
     # Insert new field versions

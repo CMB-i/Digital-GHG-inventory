@@ -160,3 +160,42 @@ class TestDeleteSheetRoute:
         assert "submission" in resp.get_json()["error"]
 
         assert Form.query.filter_by(id=form.id, is_deleted=False).first() is not None
+
+
+# See TestDeleteSheetDependencyChecks above for submission/workbook-detach
+# checks; this class covers only the published-Formula-reference check on
+# delete_sheet's field cascade -- reachable because a calculated field's
+# formula can be published referencing a raw field on the same sheet before
+# that sheet is ever deleted.
+class TestDeleteSheetBlockedByFormulaReference:
+    def test_delete_blocked_when_a_field_is_referenced_by_an_active_formula(
+        self, make_form, make_field, make_user, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+        form, form_version = make_form()
+        field_a, _fva = make_field(form, form_version, "field_a")
+        publisher = make_user()
+        formula = create_formula(
+            "Diesel Emissions", f"test-sheet-delete-{publisher.id}", "field_a + 1",
+            {"field_a": {}}, publisher.id, form_id=form.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+        publish_formula_version(version.id, publisher.id)
+        actor = make_user()
+        with pytest.raises(ValueError, match=formula.name):
+            delete_sheet(form.id, actor.id, "cleanup")
+        assert Form.query.filter_by(id=form.id, is_deleted=False).first() is not None
+        assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is not None
+
+    def test_delete_succeeds_when_no_field_is_referenced_by_a_formula(
+        self, make_form, make_field, make_user,
+    ):
+        form, form_version = make_form()
+        field_a, _fva = make_field(form, form_version, "field_a")
+        actor = make_user()
+        deleted = delete_sheet(form.id, actor.id, "No longer needed")
+        assert deleted.is_deleted is True
+        assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is None
