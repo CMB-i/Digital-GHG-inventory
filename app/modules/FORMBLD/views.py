@@ -25,6 +25,7 @@ from app.modules.FORMBLD.service import (
     get_form,
     get_form_by_code,
     create_form,
+    delete_sheet,
     get_form_sections,
     get_form_version,
     get_form_version_fields,
@@ -193,6 +194,19 @@ def update_details(form_id):
         return success_response(message="Form details updated successfully.")
     except Exception as e:
         db.session.rollback()
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/<int:form_id>", methods=["DELETE"])
+@require_permission("form", "manage_forms")
+def delete(form_id):
+    data = request.get_json() or {}
+    user = current_user()
+    try:
+        delete_sheet(form_id, user.id, data.get("reason"))
+        db.session.commit()
+        return success_response(message="Sheet deleted.")
+    except ValueError as e:
         return error_response(str(e), 400)
 
 
