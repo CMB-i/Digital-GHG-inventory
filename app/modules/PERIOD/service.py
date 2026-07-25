@@ -199,6 +199,61 @@ def transition_period(period_id, target_status, actor_id, reopen_reason=None):
     return period
 
 
+def delete_period(period_id, actor_id, reason):
+    """
+    Hard rule, unlike Site/Workbook's in-progress-only checks: a period must
+    block on a submission of ANY status, including Approved/Locked -- RPTBLD
+    reads historical approved+locked submissions by period, so deleting the
+    period out from under them would silently break past reports rather than
+    just an active workflow.
+    """
+    period = ReportingPeriod.query.filter_by(id=period_id, is_deleted=False).one_or_none()
+    if not period:
+        raise ValidationError("Reporting period not found.")
+
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValidationError("A delete reason is required.")
+
+    from app.modules.SUBMIT.model import Submission, SubmissionPackage
+
+    submission_count = Submission.query.filter_by(
+        reporting_period_id=period_id, is_deleted=False
+    ).count()
+    if submission_count > 0:
+        raise ValidationError(
+            f"Cannot delete period: {submission_count} submission(s) of any "
+            "status still reference it."
+        )
+
+    # SubmissionPackage.period_id is a real, independent FK -- not merely
+    # derived from its member Submissions -- so it needs its own check.
+    package_count = SubmissionPackage.query.filter_by(
+        period_id=period_id, is_deleted=False
+    ).count()
+    if package_count > 0:
+        raise ValidationError(
+            f"Cannot delete period: {package_count} submission package(s) "
+            "still reference it."
+        )
+
+    old_status = period.status
+    period.is_deleted = True
+    period.deleted_at = _utc_now()
+    period.deleted_by = actor_id
+    period.delete_reason = reason
+    period.updated_by = actor_id
+    log_audit(
+        actor_id,
+        "period",
+        period.id,
+        "PERIOD_DELETED",
+        old_values={"is_deleted": False, "status": old_status},
+        new_values={"is_deleted": True},
+    )
+    return period
+
+
 def _run_in_savepoint(fn):
     """
     Runs fn() inside a SAVEPOINT so a failure for one period doesn't undo

@@ -170,35 +170,45 @@
               {{ period.updated_at.strftime("%d %b %Y") if period.updated_at else "—" }}
             </td>
             <td class="whitespace-nowrap px-3 py-2.5 text-right">
-              {% if next_status %}
-                {% if period.status == "LOCKED" %}
-                  {% if perm_reopen %}
-                  <button class="action-button action-button-secondary reopen-button"
-                          data-period-id="{{ period.id }}"
-                          data-transition-url="{{ url_for('period.transition', period_id=period.id, **period_filter_args) }}"
-                          data-period-label="{{ group.month_name }} {{ group.year }}{% if site %} — {{ site.name }}{% endif %}"
-                          type="button">Reopen</button>
+              {% set ns = namespace(shown=false) %}
+              <div class="inline-flex items-center justify-end gap-2">
+                {% if next_status %}
+                  {% if period.status == "LOCKED" %}
+                    {% if perm_reopen %}
+                    {% set ns.shown = true %}
+                    <button class="action-button action-button-secondary reopen-button"
+                            data-period-id="{{ period.id }}"
+                            data-transition-url="{{ url_for('period.transition', period_id=period.id, **period_filter_args) }}"
+                            data-period-label="{{ group.month_name }} {{ group.year }}{% if site %} — {{ site.name }}{% endif %}"
+                            type="button">Reopen</button>
+                    {% endif %}
                   {% else %}
-                  <span class="text-xs text-slate-400">—</span>
-                  {% endif %}
-                {% else %}
-                  {% if perm_edit %}
-                  <form class="period-transition-form inline"
-                        data-confirm="Move {{ site.name if site else 'this site' }} ({{ group.month_name }} {{ group.year }}) to '{{ status_labels.get(next_status, next_status) }}'?"
-                        method="post"
-                        action="{{ url_for('period.transition', period_id=period.id, **period_filter_args) }}">
-                    <input type="hidden" name="target_status" value="{{ next_status }}">
-                    <button class="action-button {% if period.status == 'REOPENED' %}btn-outline{% else %}btn-neutral{% endif %}" type="submit">
-                      {{ transition_labels.get(period.status, "Advance") }}
-                    </button>
-                  </form>
-                  {% else %}
-                  <span class="text-xs text-slate-400">—</span>
+                    {% if perm_edit %}
+                    {% set ns.shown = true %}
+                    <form class="period-transition-form inline"
+                          data-confirm="Move {{ site.name if site else 'this site' }} ({{ group.month_name }} {{ group.year }}) to '{{ status_labels.get(next_status, next_status) }}'?"
+                          method="post"
+                          action="{{ url_for('period.transition', period_id=period.id, **period_filter_args) }}">
+                      <input type="hidden" name="target_status" value="{{ next_status }}">
+                      <button class="action-button {% if period.status == 'REOPENED' %}btn-outline{% else %}btn-neutral{% endif %}" type="submit">
+                        {{ transition_labels.get(period.status, "Advance") }}
+                      </button>
+                    </form>
+                    {% endif %}
                   {% endif %}
                 {% endif %}
-              {% else %}
-              <span class="text-xs text-slate-400">—</span>
-              {% endif %}
+                {% if perm_delete %}
+                {% set ns.shown = true %}
+                <button class="action-button action-button-secondary delete-period-button"
+                        data-period-id="{{ period.id }}"
+                        data-delete-url="{{ url_for('period.delete', period_id=period.id, **period_filter_args) }}"
+                        data-period-label="{{ group.month_name }} {{ group.year }}{% if site %} — {{ site.name }}{% endif %}"
+                        type="button">Delete</button>
+                {% endif %}
+                {% if not ns.shown %}
+                <span class="text-xs text-slate-400">—</span>
+                {% endif %}
+              </div>
             </td>
           </tr>
           {% endfor %}
@@ -277,6 +287,31 @@
       <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
         <button class="reopen-cancel action-button action-button-secondary" type="button">Cancel</button>
         <button class="action-button action-button-primary" type="submit">Reopen Period</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/40 px-4" id="delete_period_modal">
+  <div class="w-full max-w-md bg-white shadow-xl" role="dialog" aria-modal="true" aria-labelledby="delete_period_modal_title">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="text-lg font-semibold" id="delete_period_modal_title">Delete Reporting Period</h2>
+      <p class="mt-1 text-sm text-slate-600" id="delete_period_modal_period"></p>
+    </div>
+    <form class="space-y-4 px-5 py-5" id="delete_period_form" method="post">
+      <p class="text-xs text-slate-500">
+        This permanently removes the reporting period. Only periods with no submissions
+        of any status (including Approved and Locked) can be deleted.
+      </p>
+      <div>
+        <label class="text-xs font-medium text-slate-600" for="delete_period_reason_input">Reason for deletion</label>
+        <textarea class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
+                  id="delete_period_reason_input" name="delete_reason" rows="3" required
+                  placeholder="Describe why this reporting period is being deleted…"></textarea>
+      </div>
+      <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
+        <button class="delete-period-cancel action-button action-button-secondary" type="button">Cancel</button>
+        <button class="action-button action-button-primary" type="submit">Delete Period</button>
       </div>
     </form>
   </div>
@@ -402,8 +437,45 @@
       });
     }
 
+    var deleteModal = document.getElementById("delete_period_modal");
+    var deleteForm = document.getElementById("delete_period_form");
+    var deleteModalPeriod = document.getElementById("delete_period_modal_period");
+    var deleteReasonInput = document.getElementById("delete_period_reason_input");
+
+    function closeDeleteModal() {
+      if (!deleteModal) { return; }
+      deleteModal.classList.add("hidden");
+      deleteModal.classList.remove("flex");
+      if (deleteForm) { deleteForm.reset(); }
+    }
+
+    document.querySelectorAll(".delete-period-button").forEach(function (button) {
+      button.addEventListener("click", function () {
+        if (deleteForm) { deleteForm.action = button.dataset.deleteUrl; }
+        if (deleteModalPeriod) { deleteModalPeriod.textContent = button.dataset.periodLabel; }
+        if (deleteModal) {
+          deleteModal.classList.remove("hidden");
+          deleteModal.classList.add("flex");
+        }
+        if (deleteReasonInput) { deleteReasonInput.focus(); }
+      });
+    });
+
+    document.querySelectorAll(".delete-period-cancel").forEach(function (button) {
+      button.addEventListener("click", closeDeleteModal);
+    });
+
+    if (deleteModal) {
+      deleteModal.addEventListener("click", function (event) {
+        if (event.target === deleteModal) { closeDeleteModal(); }
+      });
+    }
+
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") { closeModal(); }
+      if (event.key === "Escape") {
+        closeModal();
+        closeDeleteModal();
+      }
     });
   })();
 </script>

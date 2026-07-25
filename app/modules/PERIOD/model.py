@@ -16,6 +16,11 @@ class ReportingPeriod(FullLifecycleMixin, db.Model):
     reopened_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
 
     __table_args__ = (
-        db.UniqueConstraint("site_id", "year", "month", name="uq_period_site_year_month"),
+        db.Index(
+            "uq_period_site_year_month",
+            "site_id", "year", "month",
+            unique=True,
+            postgresql_where=db.text("is_deleted = false"),
+        ),
         db.Index("idx_periods_site_status", "site_id", "status"),
     )
