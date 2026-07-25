@@ -155,6 +155,31 @@
             </div>
           </div>
           
+          <div id="bulk-actions-bar" class="hidden flex-wrap items-center justify-between gap-3 border-b border-indigo-100 bg-indigo-50/70 px-5 py-2.5">
+            <div class="flex items-center gap-2">
+              <span id="bulk-selected-count" class="text-xs font-bold text-indigo-800">0 fields selected</span>
+              <button type="button" id="btn-bulk-clear-selection" class="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800 underline">Clear selection</button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <label class="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-600">
+                <input type="checkbox" id="bulk-required-checkbox" class="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+                Required
+              </label>
+              <button type="button" id="btn-bulk-apply-required" class="btn btn-outline btn-sm">Apply</button>
+
+              <select id="bulk-section-select" class="rounded-lg border-slate-300 text-[11px] py-1.5 px-2 border bg-white">
+                <option value="">No section</option>
+              </select>
+              <button type="button" id="btn-bulk-apply-section" class="btn btn-outline btn-sm">Move to section</button>
+
+              <input type="text" id="bulk-unit-input" placeholder="Unit label" class="w-24 rounded-lg border-slate-300 text-[11px] py-1.5 px-2 border">
+              <button type="button" id="btn-bulk-apply-unit" class="btn btn-outline btn-sm">Apply unit</button>
+
+              <button type="button" id="btn-bulk-move-top" class="btn btn-outline btn-sm">Move to top</button>
+              <button type="button" id="btn-bulk-move-bottom" class="btn btn-outline btn-sm">Move to bottom</button>
+            </div>
+          </div>
+
           <div id="form-workspace" class="p-6 min-h-[400px] border-b border-slate-100 space-y-4">
             <div class="text-center py-16 text-slate-400 italic text-sm">
               Loading sheet preview...

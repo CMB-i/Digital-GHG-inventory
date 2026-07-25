@@ -64,8 +64,25 @@ document.addEventListener("DOMContentLoaded", function () {
   const propSection = document.getElementById("prop-section");
   const propFrequency = document.getElementById("prop-frequency");
   const propCalcPlacement = document.getElementById("prop-calc-placement");
+  const propFormulaSelect = document.getElementById("prop-formula");
   const dropdownOptionsList = document.getElementById("dropdown-options-list");
   const btnAddDropdownOption = document.getElementById("btn-add-dropdown-option");
+
+  // Bulk field actions (multi-select in the workspace list)
+  const bulkActionsBar = document.getElementById("bulk-actions-bar");
+  const bulkSelectedCount = document.getElementById("bulk-selected-count");
+  const btnBulkClearSelection = document.getElementById("btn-bulk-clear-selection");
+  const bulkRequiredCheckbox = document.getElementById("bulk-required-checkbox");
+  const btnBulkApplyRequired = document.getElementById("btn-bulk-apply-required");
+  const bulkSectionSelect = document.getElementById("bulk-section-select");
+  const btnBulkApplySection = document.getElementById("btn-bulk-apply-section");
+  const bulkUnitInput = document.getElementById("bulk-unit-input");
+  const btnBulkApplyUnit = document.getElementById("btn-bulk-apply-unit");
+  const btnBulkMoveTop = document.getElementById("btn-bulk-move-top");
+  const btnBulkMoveBottom = document.getElementById("btn-bulk-move-bottom");
+  // Persists across renderWorkspace() re-renders during a bulk-edit session;
+  // cleared only where isUnsaved also resets (see loadVersionDetails).
+  let selectedFieldCodes = new Set();
 
   // Step 1 Details elements
   const formDetailsSubmit = document.getElementById("form-details-submit");
@@ -974,6 +991,10 @@ document.addEventListener("DOMContentLoaded", function () {
           activeSectionCode = "";
         }
         isUnsaved = false;
+        // Bulk selection is a scratch, session-local concept -- reset it
+        // wherever isUnsaved also resets (covers both a fresh navigation
+        // load and the reload saveDraftLayout() triggers on save success).
+        selectedFieldCodes.clear();
 
         // Set status badge and name
         builderFormTitle.textContent = data.form.display_name || data.form.name;
@@ -1048,10 +1069,10 @@ document.addEventListener("DOMContentLoaded", function () {
     populateSectionDropdown();
   }
 
-  function populateSectionDropdown() {
-    if (!propSection) return;
-    const selected = propSection.value;
-    propSection.innerHTML = '<option value="">No section</option>';
+  function populateSectionOptions(selectEl) {
+    if (!selectEl) return;
+    const selected = selectEl.value;
+    selectEl.innerHTML = '<option value="">No section</option>';
     currentSections
       .slice()
       .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
@@ -1059,9 +1080,17 @@ document.addEventListener("DOMContentLoaded", function () {
         const opt = document.createElement("option");
         opt.value = section.code;
         opt.textContent = `${section.name} (${section.layout_type || "monthly_table"})`;
-        propSection.appendChild(opt);
+        selectEl.appendChild(opt);
       });
-    propSection.value = selected;
+    selectEl.value = selected;
+  }
+
+  function populateSectionDropdown() {
+    populateSectionOptions(propSection);
+  }
+
+  function populateBulkSectionSelect() {
+    populateSectionOptions(bulkSectionSelect);
   }
 
   function renderSections() {
@@ -1214,6 +1243,9 @@ document.addEventListener("DOMContentLoaded", function () {
           <p class="mt-2 max-w-sm text-xs text-slate-400">Use the field palette on the left to add the next data entry row.</p>
         </div>
       `;
+      // Fields selected in another section are still selected -- keep the
+      // bulk bar in sync even when the active section's own view is empty.
+      updateBulkActionBar();
       return;
     }
 
@@ -1237,6 +1269,7 @@ document.addEventListener("DOMContentLoaded", function () {
           }
           return `
             <div class="field-row flex w-full min-h-[52px] items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition ${selectedClass}" data-field-code="${escapeHtml(field.field_code)}">
+              <input type="checkbox" class="field-bulk-checkbox h-3.5 w-3.5 flex-shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" data-field-code="${escapeHtml(field.field_code)}" ${selectedFieldCodes.has(field.field_code) ? "checked" : ""} aria-label="Select ${escapeHtml(field.field_name || field.field_code)} for bulk actions">
               <button type="button" class="field-select min-w-0 flex-1 text-left" data-field-code="${escapeHtml(field.field_code)}">
                 <div class="truncate text-sm font-semibold text-slate-900">${escapeHtml(field.field_name || field.field_code)}</div>
                 <div class="mt-0.5 flex flex-wrap items-center gap-1.5">
@@ -1283,6 +1316,251 @@ document.addEventListener("DOMContentLoaded", function () {
         moveFieldWithinActiveSection(button.dataset.fieldCode, 1);
       };
     });
+    formWorkspace.querySelectorAll(".field-bulk-checkbox").forEach(checkbox => {
+      checkbox.onclick = function (e) {
+        e.stopPropagation();
+      };
+      checkbox.onchange = function () {
+        const code = checkbox.dataset.fieldCode;
+        if (checkbox.checked) {
+          selectedFieldCodes.add(code);
+        } else {
+          selectedFieldCodes.delete(code);
+        }
+        updateBulkActionBar();
+      };
+      checkbox.disabled = !builderIsEditable;
+    });
+
+    updateBulkActionBar();
+  }
+
+  function updateBulkActionBar() {
+    if (!bulkActionsBar) return;
+    // Fields can be deleted/renamed away while still marked selected --
+    // drop any code that no longer exists in currentFields.
+    const existingCodes = new Set(currentFields.map(f => f.field_code));
+    Array.from(selectedFieldCodes).forEach(code => {
+      if (!existingCodes.has(code)) selectedFieldCodes.delete(code);
+    });
+
+    const count = selectedFieldCodes.size;
+    if (count === 0) {
+      bulkActionsBar.classList.add("hidden");
+      bulkActionsBar.classList.remove("flex");
+      return;
+    }
+    bulkActionsBar.classList.remove("hidden");
+    bulkActionsBar.classList.add("flex");
+    if (bulkSelectedCount) {
+      bulkSelectedCount.textContent = `${count} field${count === 1 ? "" : "s"} selected`;
+    }
+    populateBulkSectionSelect();
+  }
+
+  function selectedFieldCodesArray() {
+    return Array.from(selectedFieldCodes);
+  }
+
+  // --- Bulk field mutators ---------------------------------------------
+  // Each wraps the exact same mutation applySelectedFieldChanges applies for
+  // that one attribute, so the single-field inspector path and the bulk path
+  // can never quietly diverge in behavior.
+
+  function applyRequiredToField(field, isRequired) {
+    field.field_config = field.field_config || {};
+    field.field_config.is_required = !!isRequired;
+  }
+
+  function applySectionToField(field, sectionCode) {
+    const previousSectionCode = field.section_code || "";
+    field.section_code = sectionCode || "";
+    const section = currentSections.find(item => item.code === field.section_code);
+    field.section_id = section && section.id ? section.id : null;
+    if (field.section_code !== previousSectionCode) {
+      const targetSectionFields = fieldsForSection(field.section_code).filter(item => item.field_code !== field.field_code);
+      field.display_order = targetSectionFields.length
+        ? Math.max(...targetSectionFields.map(item => item.display_order || 0)) + 1
+        : currentFields.length + 1;
+      return true;
+    }
+    return false;
+  }
+
+  function applyUnitToField(field, unit) {
+    field.field_config = field.field_config || {};
+    field.field_config.unit = (unit || "").trim();
+  }
+
+  // Applies `changes` (any of { is_required, section_code, unit }) to every
+  // field in `fieldCodes`. Fields whose type doesn't support a given
+  // attribute are skipped for that attribute (never silently written) and
+  // reported back so the caller can surface why. Does not touch backend or
+  // currentFields entries outside fieldCodes.
+  function applyBulkFieldChanges(fieldCodes, changes) {
+    const codes = new Set(fieldCodes);
+    const targetFields = currentFields.filter(field => codes.has(field.field_code));
+    const skipped = [];
+    let appliedCount = 0;
+
+    targetFields.forEach(field => {
+      const reasons = [];
+      let fieldChanged = false;
+
+      if (Object.prototype.hasOwnProperty.call(changes, "is_required")) {
+        if (changes.is_required === true && field.field_type === "calculated" && isSheetResultField(field)) {
+          reasons.push("Sheet/FY result fields cannot be marked Required");
+        } else {
+          applyRequiredToField(field, changes.is_required);
+          fieldChanged = true;
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(changes, "section_code")) {
+        applySectionToField(field, changes.section_code);
+        fieldChanged = true;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(changes, "unit")) {
+        if (field.field_type !== "number" && field.field_type !== "integer") {
+          reasons.push("not a numeric field");
+        } else {
+          applyUnitToField(field, changes.unit);
+          fieldChanged = true;
+        }
+      }
+
+      if (reasons.length) {
+        skipped.push({ field, reason: reasons.join("; ") });
+      }
+      if (fieldChanged) appliedCount += 1;
+    });
+
+    if (appliedCount > 0) {
+      normalizeFieldDisplayOrder();
+      isUnsaved = true;
+      updateSaveStatusText();
+    }
+
+    return { appliedCount, skipped };
+  }
+
+  // Reuses normalizeFieldDisplayOrder() for the actual global renumbering --
+  // this only computes each affected section's own internal ordering
+  // (selected fields moved to the front/back of their own section), which is
+  // what fieldsForSection()'s existing display_order-based sort picks up.
+  function moveFieldsWithinTheirSections(fieldCodes, position) {
+    const codes = new Set(fieldCodes);
+    const affectedSectionCodes = new Set();
+    currentFields.forEach(field => {
+      if (codes.has(field.field_code)) {
+        affectedSectionCodes.add(field.section_code || "");
+      }
+    });
+
+    affectedSectionCodes.forEach(sectionCode => {
+      const sectionFields = fieldsForSection(sectionCode);
+      const selectedInSection = sectionFields.filter(f => codes.has(f.field_code));
+      const othersInSection = sectionFields.filter(f => !codes.has(f.field_code));
+      const reordered = position === "top"
+        ? [...selectedInSection, ...othersInSection]
+        : [...othersInSection, ...selectedInSection];
+      reordered.forEach((field, idx) => {
+        field.display_order = idx + 1;
+      });
+    });
+
+    normalizeFieldDisplayOrder();
+  }
+
+  function describeBulkResult(actionLabel, result) {
+    const parts = [];
+    if (result.appliedCount > 0) {
+      parts.push(`${actionLabel} applied to ${result.appliedCount} field${result.appliedCount === 1 ? "" : "s"}.`);
+    }
+    if (result.skipped.length > 0) {
+      const detail = result.skipped
+        .map(item => `${item.field.field_name || item.field.field_code} (${item.reason})`)
+        .join("; ");
+      parts.push(`Skipped ${result.skipped.length}: ${detail}.`);
+    }
+    return parts.join(" ");
+  }
+
+  function afterBulkApply(actionLabel, result) {
+    renderSections();
+    renderWorkspace();
+    if (selectedFieldCode) openInspector(selectedFieldCode);
+    if (result.appliedCount === 0 && result.skipped.length === 0) {
+      showToast("No fields selected.", "error");
+      return;
+    }
+    showToast(describeBulkResult(actionLabel, result), result.appliedCount > 0 ? undefined : "error");
+    if (result.appliedCount > 0) {
+      saveDraftLayout().catch(() => {});
+    }
+  }
+
+  if (btnBulkApplyRequired) {
+    btnBulkApplyRequired.onclick = function () {
+      const isRequired = !!(bulkRequiredCheckbox && bulkRequiredCheckbox.checked);
+      const result = applyBulkFieldChanges(selectedFieldCodesArray(), { is_required: isRequired });
+      afterBulkApply(isRequired ? "Required" : "Not required", result);
+    };
+  }
+
+  if (btnBulkApplySection) {
+    btnBulkApplySection.onclick = function () {
+      const sectionCode = bulkSectionSelect ? bulkSectionSelect.value : "";
+      const result = applyBulkFieldChanges(selectedFieldCodesArray(), { section_code: sectionCode });
+      if (result.appliedCount > 0) {
+        activeSectionCode = sectionCode || "";
+      }
+      afterBulkApply("Section", result);
+    };
+  }
+
+  if (btnBulkApplyUnit) {
+    btnBulkApplyUnit.onclick = function () {
+      const unitVal = bulkUnitInput ? bulkUnitInput.value : "";
+      const result = applyBulkFieldChanges(selectedFieldCodesArray(), { unit: unitVal });
+      afterBulkApply("Unit", result);
+    };
+  }
+
+  if (btnBulkMoveTop) {
+    btnBulkMoveTop.onclick = function () {
+      const codes = selectedFieldCodesArray();
+      if (!codes.length) { showToast("No fields selected.", "error"); return; }
+      moveFieldsWithinTheirSections(codes, "top");
+      isUnsaved = true;
+      updateSaveStatusText();
+      renderSections();
+      renderWorkspace();
+      showToast(`Moved ${codes.length} field${codes.length === 1 ? "" : "s"} to the top of their section.`);
+      saveDraftLayout().catch(() => {});
+    };
+  }
+
+  if (btnBulkMoveBottom) {
+    btnBulkMoveBottom.onclick = function () {
+      const codes = selectedFieldCodesArray();
+      if (!codes.length) { showToast("No fields selected.", "error"); return; }
+      moveFieldsWithinTheirSections(codes, "bottom");
+      isUnsaved = true;
+      updateSaveStatusText();
+      renderSections();
+      renderWorkspace();
+      showToast(`Moved ${codes.length} field${codes.length === 1 ? "" : "s"} to the bottom of their section.`);
+      saveDraftLayout().catch(() => {});
+    };
+  }
+
+  if (btnBulkClearSelection) {
+    btnBulkClearSelection.onclick = function () {
+      selectedFieldCodes.clear();
+      renderWorkspace();
+    };
   }
 
   function highlightRow(rowElement) {
@@ -1296,6 +1574,48 @@ document.addEventListener("DOMContentLoaded", function () {
     rowElement.classList.remove("border-slate-200", "bg-white");
     rowElement.classList.add("border-indigo-300", "bg-indigo-50/50", "ring-1", "ring-indigo-200");
     rowElement.style.borderStyle = "solid";
+  }
+
+  // A field can be genuinely attached to an older, non-current FormulaVersion
+  // (that's the point of formula versioning) -- populateInspectorDropdowns()
+  // only ever lists each formula's *current* version, so #prop-formula has no
+  // matching <option> for a stale one. Without this, formulaSelect.value reads
+  // back as "" for a field that IS attached, which is what let a keystroke in
+  // an unrelated inspector field silently wipe the real attachment. Injects a
+  // placeholder option immediately (so the select never reads blank while the
+  // owning formula's name is fetched), then relabels it once the name is known.
+  const formulaVersionLabelCache = {};
+
+  function ensureFormulaOptionPresent(selectEl, versionId) {
+    if (!selectEl || !versionId) return;
+    const valueStr = String(versionId);
+    for (let i = 0; i < selectEl.options.length; i++) {
+      if (selectEl.options[i].value === valueStr) return;
+    }
+
+    const opt = document.createElement("option");
+    opt.value = valueStr;
+    opt.textContent = formulaVersionLabelCache[valueStr] || `Formula version #${valueStr} (older version)`;
+    selectEl.appendChild(opt);
+
+    if (formulaVersionLabelCache[valueStr]) return;
+
+    fetch(`/module/FRMULA/api/version/${valueStr}`)
+      .then(res => res.json())
+      .then(resData => {
+        if (!resData || !resData.formula) return;
+        const label = `${resData.formula.name} (${resData.formula.code}) — older version`;
+        formulaVersionLabelCache[valueStr] = label;
+        // The inspector may have moved to a different field by the time this
+        // resolves -- only relabel the option if it's still present.
+        for (let i = 0; i < selectEl.options.length; i++) {
+          if (selectEl.options[i].value === valueStr) {
+            selectEl.options[i].textContent = label;
+            break;
+          }
+        }
+      })
+      .catch(() => {});
   }
 
   function openInspector(fieldCode) {
@@ -1447,6 +1767,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
       }
       if (formulaSelect && config.formula_version_id) {
+        ensureFormulaOptionPresent(formulaSelect, config.formula_version_id);
         formulaSelect.value = config.formula_version_id;
         if (formulaHint) formulaHint.classList.add("hidden");
         if (formulaOk)   formulaOk.classList.remove("hidden");
@@ -1489,7 +1810,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const field = currentFields[fieldIdx];
     field.field_config = field.field_config || {};
-    const previousSectionCode = field.section_code || "";
     const newCode = document.getElementById("prop-code").value.trim().toLowerCase().replace(/\s+/g, "_");
 
     // Validate code duplicate
@@ -1501,24 +1821,17 @@ document.addEventListener("DOMContentLoaded", function () {
 
     field.field_code = newCode;
     field.field_name = document.getElementById("prop-name").value.trim();
-    field.section_code = propSection.value || "";
-    const section = currentSections.find(item => item.code === field.section_code);
-    field.section_id = section && section.id ? section.id : null;
-    if ((field.section_code || "") !== previousSectionCode) {
-      const targetSectionFields = fieldsForSection(field.section_code).filter(item => item.field_code !== field.field_code);
-      field.display_order = targetSectionFields.length
-        ? Math.max(...targetSectionFields.map(item => item.display_order || 0)) + 1
-        : currentFields.length + 1;
+    if (applySectionToField(field, propSection.value)) {
       activeSectionCode = field.section_code || "";
     }
     field.frequency = propFrequency.value || "monthly";
-    field.field_config.is_required = document.getElementById("prop-required").checked;
+    applyRequiredToField(field, document.getElementById("prop-required").checked);
     field.field_config.remarks_required = document.getElementById("prop-remarks-req").checked;
     field.field_config.proof_required = document.getElementById("prop-proof-req").checked;
     field.field_config.help_text = document.getElementById("prop-help").value.trim();
 
     if (field.field_type === "number" || field.field_type === "integer") {
-      field.field_config.unit = document.getElementById("prop-unit").value.trim();
+      applyUnitToField(field, document.getElementById("prop-unit").value);
 
       const minVal = document.getElementById("prop-min").value;
       field.field_config.min = minVal !== "" ? parseFloat(minVal) : undefined;
@@ -1535,8 +1848,6 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (field.field_type === "calculated") {
-      const formulaSelect = document.getElementById("prop-formula");
-      const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
       const calcUnitInput = document.getElementById("prop-calc-unit");
       const placement = propCalcPlacement ? propCalcPlacement.value : "monthly";
       const isAnnualResult = placement === "annual_result" || placement === "annual_result_below";
@@ -1580,33 +1891,17 @@ document.addEventListener("DOMContentLoaded", function () {
         field.field_config.round_off_decimals = field.field_config.round_off_decimals !== undefined ? field.field_config.round_off_decimals : 3;
       }
 
-      if (formulaSelect) {
-        const formulaVal = formulaSelect.value;
-        const prevFormulaId = field.field_config.formula_version_id;
-        field.field_config.formula_version_id = formulaVal ? parseInt(formulaVal) : undefined;
-        field.field_config.unit = calcUnitInput ? calcUnitInput.value.trim() : "";
-
-        if (formulaVal) {
-          const formulaChanged = parseInt(formulaVal) !== prevFormulaId;
-          if (formulaChanged) {
-            field.field_config.unit = "";
-            if (calcUnitInput) calcUnitInput.value = "";
-            if (calcUnitWrap) calcUnitWrap.classList.remove("hidden");
-            fetch(`/module/FRMULA/api/version/${formulaVal}`)
-              .then(res => res.json())
-              .then(resData => {
-                field.field_config.expression = resData.version.expression;
-                field.field_config.tokens = resData.version.tokens;
-                renderWorkspace();
-              });
-          }
-        } else {
-          field.field_config.expression = "";
-          field.field_config.tokens = [];
-          if (calcUnitInput) calcUnitInput.value = "";
-          if (calcUnitWrap) calcUnitWrap.classList.add("hidden");
-        }
-      }
+      // field_config.formula_version_id (and expression/tokens) is NOT
+      // re-derived here from #prop-formula's .value -- this whole function
+      // re-runs on every keystroke anywhere in the inspector form (see the
+      // formFieldProperties "input"/"change" listeners below), and the
+      // select's .value can read "" for a field genuinely attached to an
+      // older, non-current formula version if no matching <option> exists.
+      // Re-deriving it here on every unrelated keystroke used to silently
+      // wipe a real attachment. It's owned instead by a dedicated "change"
+      // listener attached directly to #prop-formula (see below), which only
+      // runs when the user actually picks a different formula.
+      field.field_config.unit = calcUnitInput ? calcUnitInput.value.trim() : "";
     }
 
     if (field.field_type === "file") {
@@ -1646,6 +1941,55 @@ document.addEventListener("DOMContentLoaded", function () {
   formFieldProperties.addEventListener("change", function () {
     applySelectedFieldChanges({ render: true });
   });
+
+  // The formula attachment is only ever recomputed in reaction to this
+  // select's own "change" event -- not as a side effect of the blanket
+  // listeners above firing on every keystroke elsewhere in the form (see
+  // applySelectedFieldChanges's calculated-field branch). stopPropagation()
+  // keeps the bubbled blanket "change" handler from redundantly re-running
+  // right after; this handler already does its own full re-render.
+  if (propFormulaSelect) {
+    propFormulaSelect.addEventListener("change", function (e) {
+      e.stopPropagation();
+      if (!selectedFieldCode) return;
+      const field = currentFields.find(x => x.field_code === selectedFieldCode);
+      if (!field || field.field_type !== "calculated") return;
+
+      field.field_config = field.field_config || {};
+      const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
+      const calcUnitInput = document.getElementById("prop-calc-unit");
+      const formulaVal = propFormulaSelect.value;
+      const prevFormulaId = field.field_config.formula_version_id;
+      field.field_config.formula_version_id = formulaVal ? parseInt(formulaVal, 10) : undefined;
+
+      if (formulaVal) {
+        const formulaChanged = parseInt(formulaVal, 10) !== prevFormulaId;
+        if (formulaChanged) {
+          field.field_config.unit = "";
+          if (calcUnitInput) calcUnitInput.value = "";
+          if (calcUnitWrap) calcUnitWrap.classList.remove("hidden");
+          fetch(`/module/FRMULA/api/version/${formulaVal}`)
+            .then(res => res.json())
+            .then(resData => {
+              field.field_config.expression = resData.version.expression;
+              field.field_config.tokens = resData.version.tokens;
+              renderWorkspace();
+            });
+        }
+      } else {
+        field.field_config.expression = "";
+        field.field_config.tokens = [];
+        if (calcUnitInput) calcUnitInput.value = "";
+        if (calcUnitWrap) calcUnitWrap.classList.add("hidden");
+      }
+
+      isUnsaved = true;
+      updateSaveStatusText();
+      renderSections();
+      renderWorkspace();
+      openInspector(selectedFieldCode);
+    });
+  }
 
   // Palette item clicks
   document.querySelectorAll(".palette-btn").forEach(btn => {
@@ -1910,6 +2254,10 @@ document.addEventListener("DOMContentLoaded", function () {
       sectionsList.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = !isEditable; });
       sectionsList.querySelectorAll(".section-move-up, .section-move-down, .section-delete").forEach(btn => { btn.disabled = !isEditable; });
     }
+    if (bulkActionsBar) {
+      bulkActionsBar.querySelectorAll("input, select, button").forEach(el => { el.disabled = !isEditable; });
+    }
+    formWorkspace.querySelectorAll(".field-bulk-checkbox").forEach(cb => { cb.disabled = !isEditable; });
   }
 
   if (btnEditAsDraft) {
