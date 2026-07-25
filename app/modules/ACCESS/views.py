@@ -177,7 +177,7 @@ def password(user_id):
 
 
 @bp.route("/users/<int:user_id>/toggle-active", methods=["POST"])
-@require_permission("user", ("edit", "delete"))
+@require_permission("user", "manage_users")
 def toggle_active(user_id):
     actor = current_user()
     user, error = set_user_active(
