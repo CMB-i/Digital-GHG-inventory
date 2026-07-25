@@ -132,6 +132,28 @@ SUPPORTED_PERMISSION_FLAGS = {
 }
 
 
+def count_global_user_managers(exclude_user_id=None):
+    """
+    Counts active, non-deleted Users who currently resolve
+    can_manage_users == True for the global "user" scope, via
+    get_user_permissions() rather than a raw AccessMatrix column scan --
+    so entity_type == "all" wildcard grants are correctly counted (see
+    Consistency Guideline #3: never reimplement AccessMatrix scoping logic).
+    """
+    from app.modules.USRMGMT.model import User
+
+    query = User.query.filter_by(is_deleted=False, is_active=True)
+    if exclude_user_id is not None:
+        query = query.filter(User.id != exclude_user_id)
+
+    count = 0
+    for user in query.all():
+        permissions = get_user_permissions(user.id, scope_type="global", entity_type="user")
+        if permissions.get("can_manage_users"):
+            count += 1
+    return count
+
+
 def sanitize_permission_values(entity_type, submitted_values):
     if entity_type not in ENTITY_TYPES:
         raise ValidationError("Invalid entity type.")
@@ -252,6 +274,26 @@ def upsert_access_row(
     if validated_entity_type not in ENTITY_TYPES:
         raise ValidationError("Invalid entity type.")
     permission_values = sanitize_permission_values(validated_entity_type, permission_values)
+
+    # A permission-matrix save can reach the same "zero global admins" end
+    # state as deactivating the last admin user (see USRMGMT.can_deactivate_user)
+    # by simply revoking their can_manage_users flag instead -- block that here,
+    # the one place both /assign and /assign-matrix (via save_permission_matrix)
+    # funnel through, rather than forking this check per route.
+    if scope_type == "global" and validated_entity_type in ("user", "all"):
+        currently_has_manage_users = get_user_permissions(
+            user_id, scope_type="global", entity_type="user"
+        ).get("can_manage_users")
+        would_revoke_manage_users = not permission_values.get("can_manage_users")
+        if (
+            currently_has_manage_users
+            and would_revoke_manage_users
+            and count_global_user_managers(exclude_user_id=user_id) == 0
+        ):
+            raise ValidationError(
+                "Cannot remove Manage Users permission: this is the last "
+                "active user with global user-management access."
+            )
 
     normalized_scope_site_id = scope_site_id if scope_type == "site" else None
     row = AccessMatrix.query.filter_by(
