@@ -46,6 +46,11 @@ document.addEventListener("DOMContentLoaded", function () {
   const editorStatusBadge = document.getElementById("editor-status-badge");
   const btnSaveFormula = document.getElementById("btn-save-formula");
   const btnPublishFormula = document.getElementById("btn-publish-formula");
+  const btnDeleteFormula = document.getElementById("btn-delete-formula");
+  const modalDeleteFormula = document.getElementById("modal-delete-formula");
+  const deleteFormulaReason = document.getElementById("delete-formula-reason");
+  const btnCancelDeleteFormula = document.getElementById("btn-cancel-delete-formula");
+  const btnConfirmDeleteFormula = document.getElementById("btn-confirm-delete-formula");
   const dfName = document.getElementById("df-name");
   const dfCodeDisplay = document.getElementById("df-code-display");
   const expressionDisplay = document.getElementById("expression-display");
@@ -531,6 +536,7 @@ document.addEventListener("DOMContentLoaded", function () {
     btnSaveFormula.classList.remove("hidden");
     btnSaveFormula.textContent = "Save Draft";
     btnPublishFormula.classList.remove("hidden");
+    if (btnDeleteFormula) btnDeleteFormula.classList.add("hidden");
 
     validationResultContainer.classList.add("hidden");
 
@@ -617,6 +623,8 @@ document.addEventListener("DOMContentLoaded", function () {
         const badgeClass = isPublished ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800";
         editorStatusBadge.textContent = `v${data.version.version_number} (${statusLabel})`;
         editorStatusBadge.className = `px-2 py-0.5 rounded-full font-bold uppercase text-[9px] ${badgeClass}`;
+
+        if (btnDeleteFormula) btnDeleteFormula.classList.remove("hidden");
 
         if (isPublished) {
           expressionDisplay.contentEditable = "false";
@@ -1009,6 +1017,64 @@ document.addEventListener("DOMContentLoaded", function () {
       btnPublishFormula.textContent = originalText;
     }
   };
+
+  // ── Delete Formula ────────────────────────────────────────────────────
+  if (btnDeleteFormula) {
+    btnDeleteFormula.onclick = function () {
+      if (!selectedFormulaId) return;
+      deleteFormulaReason.value = "";
+      btnConfirmDeleteFormula.disabled = true;
+      modalDeleteFormula.classList.remove("hidden");
+      setTimeout(() => deleteFormulaReason.focus(), 50);
+    };
+  }
+
+  if (deleteFormulaReason) {
+    deleteFormulaReason.addEventListener("input", function () {
+      btnConfirmDeleteFormula.disabled = !deleteFormulaReason.value.trim();
+    });
+  }
+
+  if (btnCancelDeleteFormula) {
+    btnCancelDeleteFormula.onclick = function () {
+      modalDeleteFormula.classList.add("hidden");
+    };
+  }
+
+  if (btnConfirmDeleteFormula) {
+    btnConfirmDeleteFormula.onclick = async function () {
+      const reason = deleteFormulaReason.value.trim();
+      if (!reason || !selectedFormulaId) return;
+
+      btnConfirmDeleteFormula.disabled = true;
+      const originalText = btnConfirmDeleteFormula.textContent;
+      btnConfirmDeleteFormula.textContent = "Deleting…";
+
+      try {
+        const res = await fetch(`/module/FRMULA/api/${selectedFormulaId}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason }),
+        });
+        const resData = await res.json();
+        if (resData.error) {
+          showToast(resData.error, "error");
+        } else {
+          showToast("Formula deleted successfully!");
+          modalDeleteFormula.classList.add("hidden");
+          selectedFormulaId = null;
+          selectedVersionId = null;
+          showList();
+        }
+      } catch (err) {
+        console.error("Error deleting formula:", err);
+        showToast("Failed to delete formula.", "error");
+      } finally {
+        btnConfirmDeleteFormula.disabled = !deleteFormulaReason.value.trim();
+        btnConfirmDeleteFormula.textContent = originalText;
+      }
+    };
+  }
 
   // ── Modal ─────────────────────────────────────────────────────────────
   window.startNewFormula = function () {

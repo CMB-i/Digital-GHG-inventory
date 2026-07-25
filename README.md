@@ -227,7 +227,7 @@ Fields (`Field`/`FieldVersion`) are properly versioned — publishing a new draf
 
 **`FormSection` is now versioned**, the same way fields are — it carries a `form_version_id` (unique per `code` within a version), so editing sections while drafting a new version (rename, reorder, remove) is isolated to the draft and no longer retroactively mutates what's currently live for the *published* version.
 
-Publish readiness for a sheet requires non-empty fields, dropdown fields to have options, and calculated fields to reference a *published* formula version. There is no check, at field-deletion time, for whether a formula still references the field being deleted — a formula can be published against a field, and that field can later be soft-deleted with no warning, breaking the formula silently at evaluation time.
+Publish readiness for a sheet requires non-empty fields, dropdown fields to have options, and calculated fields to reference a *published* formula version. Field deletion — whether one field omitted from a re-saved draft (`save_form_draft_fields`), or the whole cascade from deleting a sheet (`delete_sheet`) — is blocked up front if any formula still references the field being removed, via `_formulas_referencing_field`'s scan of published formula tokens; the caller gets a clear error naming the blocking formula(s) instead of the field silently disappearing out from under them.
 
 ### WFLWBLD — approval path builder (multi-level workflows, versioning)
 
@@ -242,6 +242,8 @@ The real, validated writer for workflow levels/approvers (`save_workflow_draft_l
 `delete_workflow` now refuses to delete a `Workflow` that an active `Workbook` still points to via `workflow_id`, raising a clear error instead of silently stranding that workbook.
 
 ### FRMULA — formula definitions and evaluation
+
+Formula delete (`delete_formula`) mirrors the Field-delete guard in the other direction: it blocks if any live calculated field's `field_config["formula_version_id"]` still points at one of the formula's versions, scanning every version a field could hold (not just its current one), and asks the caller to repoint or edit those fields first.
 
 Formulas are versioned and validated against currently-active field/value-set codes at publish time, using `simpleeval`. There is no re-validation when a field a published formula references is later renamed or soft-deleted, and FORMBLD's own "delete fields not present in a re-saved sheet" logic (this is literally what a field rename looks like under the hood) does not check formula references before deleting. How this manifests, once it happens, is inconsistent — SUBMIT alone has four different behaviors ranging from fully silent to a specific error message, depending on which of its five calculated-field code paths hits it first (see [Consistency Guidelines](#consistency-guidelines)).
 

@@ -226,6 +226,71 @@ def create_new_formula_draft(formula_id, expression, tokens, user_id):
     return new_version
 
 
+def _fields_referencing_formula(formula):
+    """
+    Inverse of FORMBLD's _formulas_referencing_field: that one scans a
+    published FormulaVersion's tokens for a field code, since tokens has no
+    FK to Field. This direction is a direct field_config pointer lookup
+    (field_config["formula_version_id"]), so no code-matching or per-form
+    scoping is needed -- a formula_version_id is globally unique.
+
+    Scans every live FieldVersion, not just each Field's current_version_id --
+    a draft (unpublished) FieldVersion can hold a formula_version_id that was
+    never promoted to current, and that still has to block this formula's
+    deletion the same as a published reference would.
+    """
+    from app.modules.FORMBLD.model import Field, FieldVersion
+
+    version_ids = {
+        v.id for v in FormulaVersion.query.filter_by(formula_id=formula.id).all()
+    }
+    if not version_ids:
+        return []
+
+    rows = (
+        FieldVersion.query.with_entities(FieldVersion, Field)
+        .join(Field, Field.id == FieldVersion.field_id)
+        .filter(
+            FieldVersion.is_deleted.is_(False),
+            Field.is_deleted.is_(False),
+            FieldVersion.field_type == "calculated",
+        )
+        .all()
+    )
+    referencing_fields = []
+    seen_field_ids = set()
+    for fv, field in rows:
+        if (fv.field_config or {}).get("formula_version_id") in version_ids and field.id not in seen_field_ids:
+            seen_field_ids.add(field.id)
+            referencing_fields.append(field)
+    return referencing_fields
+
+
+def delete_formula(formula_id, user_id, reason):
+    formula = get_formula(formula_id)
+    if not formula:
+        raise ValueError("Formula not found.")
+
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError("A delete reason is required.")
+
+    referencing_fields = _fields_referencing_formula(formula)
+    if referencing_fields:
+        codes = ", ".join(f"'{field.field_code}'" for field in referencing_fields)
+        raise ValueError(
+            f"Cannot delete formula: it is still referenced by field(s) {codes}. "
+            "Repoint or edit those fields first."
+        )
+
+    formula.is_deleted = True
+    formula.deleted_by = user_id
+    formula.deleted_at = datetime.now(timezone.utc)
+    formula.delete_reason = reason
+
+    return formula
+
+
 def publish_formula_version(version_id, user_id):
     version = FormulaVersion.query.get(version_id)
     if not version:
