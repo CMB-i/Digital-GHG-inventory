@@ -280,7 +280,6 @@ document.addEventListener("DOMContentLoaded", function () {
   // ══════════════════════════════════════════════════════════════════════════
   const sheetsGrid  = document.getElementById("sheets-grid");
   const btnAddSheet = document.getElementById("btn-add-sheet");
-  const btnReuseExistingSheet = document.getElementById("btn-reuse-existing-sheet");
 
   if (sheetsGrid && typeof WORKBOOK_ID !== "undefined") {
     let activeTab = "sheets";
@@ -485,16 +484,9 @@ document.addEventListener("DOMContentLoaded", function () {
       });
     }
 
-    // ── Add Sheet panel ───────────────────────────────────────────────────
-    const panel         = document.getElementById("panel-add-sheet");
-    const backdrop      = document.getElementById("panel-backdrop");
-    const btnClosePanel = document.getElementById("btn-close-add-sheet");
-    const sheetLabel    = document.getElementById("add-sheet-label");
-    const sheetSearch   = document.getElementById("add-sheet-search");
-    const formsList     = document.getElementById("addable-forms-list");
-
-    let allAddable = [];
-
+    // ── Add Sheet ─────────────────────────────────────────────────────────
+    // A sheet can now only ever be created directly into this workbook --
+    // no picker for attaching an already-existing sheet from elsewhere.
     function goToCreateSheet() {
       const params = new URLSearchParams();
       params.set("workbook_id", WORKBOOK_ID);
@@ -502,82 +494,7 @@ document.addEventListener("DOMContentLoaded", function () {
       window.location.href = "/module/FORMBLD/?" + params.toString();
     }
 
-    function openPanel() {
-      panel.classList.remove("hidden");
-      if (sheetLabel) sheetLabel.value = "";
-      if (sheetSearch) sheetSearch.value = "";
-
-      fetch(`/workbooks/api/${WORKBOOK_ID}/addable-forms`)
-        .then(r => r.json())
-        .then(data => {
-          allAddable = data;
-          renderAddable(data);
-        })
-        .catch(() => { formsList.innerHTML = '<p class="text-xs text-rose-500 text-center py-6">Failed to load sheets.</p>'; });
-    }
-
-    function closePanel() { panel.classList.add("hidden"); }
-
-    btnAddSheet.onclick    = goToCreateSheet;
-    if (btnReuseExistingSheet) btnReuseExistingSheet.onclick = openPanel;
-    backdrop.onclick       = closePanel;
-    btnClosePanel.onclick  = closePanel;
-
-    if (sheetSearch) {
-      sheetSearch.addEventListener("input", () => {
-        const q = sheetSearch.value.toLowerCase();
-        renderAddable(allAddable.filter(f => f.name.toLowerCase().includes(q) || f.code.toLowerCase().includes(q)));
-      });
-    }
-
-    function renderAddable(forms) {
-      formsList.innerHTML = "";
-      if (!forms.length) {
-        if (!sheetSearch.value.trim()) {
-          formsList.innerHTML =
-            '<p class="text-xs text-slate-400 italic text-center py-4">' +
-            'All published sheets are already in this workbook.<br>' +
-            '<span class="text-[#1a3a6b] font-semibold">' +
-            'Use "Add Sheet" to create a new one.</span>' +
-            '</p>';
-        } else {
-          formsList.innerHTML =
-            '<p class="text-xs text-slate-400 italic text-center py-4">' +
-            'No matching sheets found.' +
-            '</p>';
-        }
-        return;
-      }
-      forms.forEach(f => {
-        const statusColor =
-          f.latest_version_status === "Published" ? "bg-emerald-100 text-emerald-700"
-            : "bg-amber-100 text-amber-700";
-        const btn = document.createElement("button");
-        btn.className = "w-full text-left px-4 py-3 rounded-lg hover:bg-indigo-50 border border-transparent hover:border-indigo-200 transition-colors";
-        btn.innerHTML = `
-          <div class="flex items-center justify-between">
-            <span class="font-semibold text-sm text-slate-800">${esc(f.name)}</span>
-            ${f.latest_version_status ? `<span class="shrink-0 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${statusColor}">${esc(f.latest_version_status)}</span>` : ""}
-          </div>
-          <span class="text-[10px] font-mono text-slate-400">${esc(f.code)}</span>`;
-        btn.onclick = async () => {
-          btn.disabled = true;
-          btn.classList.add("opacity-50");
-          try {
-            const label = sheetLabel ? sheetLabel.value.trim() : "";
-            const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/sheets/add`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ form_id: f.id, sheet_label: label || null }),
-            });
-            const d = await r.json();
-            if (d.error) { toast(d.error, "error"); btn.disabled = false; btn.classList.remove("opacity-50"); }
-            else { toast("Sheet added."); closePanel(); renderSheets(d.data.sheets); loadReadiness(); }
-          } catch { toast("Failed to add sheet.", "error"); btn.disabled = false; btn.classList.remove("opacity-50"); }
-        };
-        formsList.appendChild(btn);
-      });
-    }
+    btnAddSheet.onclick = goToCreateSheet;
 
     // ── Sheets grid ───────────────────────────────────────────────────────
     function loadSheets() {
@@ -596,7 +513,7 @@ document.addEventListener("DOMContentLoaded", function () {
         sheetsGrid.innerHTML = `
           <div class="md:col-span-2 xl:col-span-3 rounded-xl border border-dashed border-slate-300 bg-white shadow-sm p-12 text-center space-y-3">
             <p class="text-sm font-semibold text-slate-600">No sheets yet.</p>
-            <p class="text-xs text-slate-400">Create a sheet or reuse an existing published sheet.</p>
+            <p class="text-xs text-slate-400">Create a sheet to get started.</p>
             <button class="inline-flex items-center px-3.5 py-1.5 bg-[#1a3a6b] hover:bg-[#1e4280] text-white text-xs font-semibold rounded-lg shadow transition"
               onclick="document.getElementById('btn-add-sheet').click()">
               + Add First Sheet
@@ -651,7 +568,11 @@ document.addEventListener("DOMContentLoaded", function () {
             <div class="flex items-center space-x-1">
               <button class="move-up-btn text-slate-400 hover:text-[#1a3a6b] text-sm font-bold px-1.5 py-0.5 rounded transition disabled:opacity-30" title="Move up" ${isFirst ? "disabled" : ""}>↑</button>
               <button class="move-down-btn text-slate-400 hover:text-[#1a3a6b] text-sm font-bold px-1.5 py-0.5 rounded transition disabled:opacity-30" title="Move down" ${isLast ? "disabled" : ""}>↓</button>
-              <button class="remove-sheet-btn text-slate-300 hover:text-rose-500 text-lg font-bold px-1.5 py-0.5 rounded transition" title="Remove sheet">×</button>
+              <button class="delete-sheet-btn text-slate-400 hover:text-rose-600 px-1 py-0.5 rounded transition" title="Delete sheet">
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
             </div>
           </div>`;
 
@@ -663,7 +584,7 @@ document.addEventListener("DOMContentLoaded", function () {
         };
         card.querySelector(".move-up-btn").onclick   = () => moveSheet(sheet.form_id, -1, sheets);
         card.querySelector(".move-down-btn").onclick  = () => moveSheet(sheet.form_id, 1, sheets);
-        card.querySelector(".remove-sheet-btn").onclick = () => removeSheet(sheet.form_id, sheet.sheet_label);
+        card.querySelector(".delete-sheet-btn").onclick = () => deleteSheet(sheet.form_id, sheet.sheet_label);
 
         sheetsGrid.appendChild(card);
       });
@@ -702,18 +623,26 @@ document.addEventListener("DOMContentLoaded", function () {
       } catch { toast("Failed to save order.", "error"); loadSheets(); }
     }
 
-    async function removeSheet(formId, label) {
-      if (!confirm(`Remove "${label}" from this workbook?\n\nThe sheet definition itself will not be deleted.`)) return;
+    // Delete sheet -- irreversible: detaches it (a sheet only ever belongs to
+    // the one workbook it was created in now, so this always fully removes
+    // it, never just this workbook's copy), soft-deletes the Form and its
+    // Fields. A reason is required server-side, so a plain browser prompt()
+    // rather than confirm() -- same pattern as FORMBLD's Sheet Builder used
+    // before this action moved here.
+    async function deleteSheet(formId, label) {
+      const reason = prompt(`Delete sheet "${label}"? This cannot be undone. Please give a reason:`);
+      if (reason === null) return;
+      if (!reason.trim()) { toast("A delete reason is required.", "error"); return; }
       try {
-        const r = await fetch(`/workbooks/api/${WORKBOOK_ID}/sheets/remove`, {
-          method: "POST",
+        const r = await fetch(`/module/FORMBLD/api/${formId}`, {
+          method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ form_id: formId }),
+          body: JSON.stringify({ reason: reason.trim() }),
         });
         const d = await r.json();
         if (d.error) toast(d.error, "error");
-        else { toast("Sheet removed.", "warn"); loadSheets(); }
-      } catch { toast("Failed to remove sheet.", "error"); }
+        else { toast("Sheet deleted."); loadSheets(); loadReadiness(); }
+      } catch { toast("Failed to delete sheet.", "error"); }
     }
 
     // ── Workbook readiness ────────────────────────────────────────────────
