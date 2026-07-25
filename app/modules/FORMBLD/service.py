@@ -49,6 +49,7 @@ def get_formula_compatible_fields(form_version_id):
     ]
 
 
+import re
 from datetime import datetime, timezone
 from app.database import db
 from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion, FormSection
@@ -870,3 +871,468 @@ def create_new_form_version_draft(form_id, user_id):
 
     db.session.flush()
     return new_version
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Sheet/field replication: bulk field copy (Feature 1) and full sheet copy
+# (Feature 2) share the same clone_fields_with_formulas() core -- every copy
+# here is a fully independent, one-time snapshot (new Field/FieldVersion/
+# Formula/FormulaVersion rows), never a linked/synced reference back to the
+# original. Neither feature touches submitted data (SubmissionValue/
+# WorkbookFieldValue) -- copying only ever creates new configuration rows.
+# ─────────────────────────────────────────────────────────────────────────
+
+def list_sheets_for_picker():
+    """
+    Lightweight sheet list for the cross-sheet/cross-workbook copy pickers --
+    one row per (Form, Workbook) attachment, plus a row for any form with no
+    workbook attachment at all (workbook_id/workbook_name null), so every
+    possible copy destination is selectable. Excludes soft-deleted forms.
+    Deliberately separate from FORMBLD's own "/api" list endpoint (which
+    returns a much heavier payload per sheet and has no workbook join at
+    all) rather than overloading that endpoint's existing contract.
+    """
+    import json as _json
+    from app.modules.WKBK.model import Workbook, WorkbookForm
+
+    forms = Form.query.filter_by(is_deleted=False).order_by(Form.name.asc()).all()
+
+    attachments = {}
+    rows = (
+        WorkbookForm.query.with_entities(WorkbookForm, Workbook)
+        .join(Workbook, Workbook.id == WorkbookForm.workbook_id)
+        .filter(Workbook.is_active.is_(True))
+        .all()
+    )
+    for wf, wb in rows:
+        attachments.setdefault(wf.form_id, []).append({"id": wb.id, "name": wb.name})
+
+    result = []
+    for form in forms:
+        display_name = form.name
+        if form.description and form.description.startswith("{"):
+            try:
+                display_name = _json.loads(form.description).get("display_name") or form.name
+            except Exception:
+                pass
+
+        workbooks = attachments.get(form.id, [])
+        if not workbooks:
+            result.append({
+                "form_id": form.id,
+                "name": display_name,
+                "code": form.code,
+                "workbook_id": None,
+                "workbook_name": None,
+            })
+        else:
+            for wb in workbooks:
+                result.append({
+                    "form_id": form.id,
+                    "name": display_name,
+                    "code": form.code,
+                    "workbook_id": wb["id"],
+                    "workbook_name": wb["name"],
+                })
+    return result
+
+
+def _next_available_field_code(base_code, used_codes):
+    """Generates a `<base>_copy`, `<base>_copy_2`, ... field_code not already
+    in `used_codes` (mutated in place to reserve it, so a caller allocating
+    several codes in one batch never hands out the same one twice)."""
+    base = re.sub(r"[^a-z0-9_]+", "_", (base_code or "field").strip().lower()).strip("_") or "field"
+    candidate = f"{base}_copy"
+    suffix = 2
+    while candidate in used_codes:
+        candidate = f"{base}_copy_{suffix}"
+        suffix += 1
+    used_codes.add(candidate)
+    return candidate
+
+
+def _next_available_formula_code(base_code):
+    """Formula.code is globally unique (uq_formula_code) -- never reuse the
+    original code, generate a fresh `<base>_copy` variant instead."""
+    from app.modules.FRMULA.model import Formula
+
+    base = re.sub(r"[^a-z0-9_-]+", "_", (base_code or "formula").strip().lower()).strip("_") or "formula"
+    candidate = f"{base}_copy"
+    suffix = 2
+    while Formula.query.filter_by(code=candidate).first() is not None:
+        candidate = f"{base}_copy_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _next_available_form_code(base_code):
+    base = (base_code or "SHEET").strip() or "SHEET"
+    candidate = f"{base}_COPY"
+    suffix = 2
+    while get_form_by_code(candidate) is not None:
+        candidate = f"{base}_COPY{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _remap_formula_tokens(source_form_id, tokens, code_map):
+    """
+    Remaps every token key that is itself a field_code belonging to
+    source_form_id, via code_map (old field_code -> new field_code). Tokens
+    that aren't a field_code on the source sheet at all (value-set entry
+    codes -- global constants, not sheet-scoped, see FRMULA.publish_formula_
+    version's own tokens cross-check) pass through unchanged. A token that
+    IS a field_code on the source sheet but has no entry in code_map means
+    that field wasn't part of this copy batch -- that's an error, not
+    something to silently drop, since the copied formula would otherwise
+    reference a field_code that doesn't exist on the destination sheet.
+    """
+    if not tokens:
+        return {}
+
+    source_field_codes = {
+        f.field_code for f in Field.query.filter_by(form_id=source_form_id, is_deleted=False).all()
+    }
+    remapped = {}
+    for token_key, token_value in tokens.items():
+        if token_key in source_field_codes:
+            if token_key not in code_map:
+                raise ValueError(
+                    f"Cannot copy: formula references field '{token_key}', which "
+                    "is not part of this copy. Include it in the selection or "
+                    "copy the whole sheet instead."
+                )
+            remapped[code_map[token_key]] = token_value
+        else:
+            remapped[token_key] = token_value
+    return remapped
+
+
+def _remap_formula_expression(expression, code_map):
+    """
+    Textually substitutes every old field_code referenced in `expression`
+    with its new counterpart, in a single regex pass over the original
+    string (not a sequential per-code substitution loop) so a freshly
+    generated new_code can never itself be re-matched by a different old_code
+    later in the same operation. \\b word-boundary matching means a code is
+    never partially matched inside a longer identifier that happens to share
+    a prefix/suffix (e.g. "kwh" inside "kwh_total").
+    """
+    if not expression or not code_map:
+        return expression
+    pattern = re.compile(
+        r"\b(" + "|".join(re.escape(code) for code in sorted(code_map.keys(), key=len, reverse=True)) + r")\b"
+    )
+    return pattern.sub(lambda m: code_map[m.group(0)], expression)
+
+
+def _clone_sections(source_form_version_id, destination_form, destination_form_version, user_id):
+    """
+    Clones every active FormSection from source_form_version_id onto
+    destination_form_version, same field-by-field copy create_new_form_
+    version_draft already uses to carry sections into a new version of the
+    *same* form -- just re-parented onto a different destination form.
+    Returns {old_section_id: new_section_id}.
+    """
+    source_sections = (
+        FormSection.query.filter_by(form_version_id=source_form_version_id, is_deleted=False)
+        .order_by(FormSection.display_order.asc(), FormSection.id.asc())
+        .all()
+    )
+    section_id_map = {}
+    for section in source_sections:
+        new_section = FormSection(
+            form_id=destination_form.id,
+            form_version_id=destination_form_version.id,
+            name=section.name,
+            code=section.code,
+            layout_type=section.layout_type,
+            display_order=section.display_order,
+            description=section.description,
+            created_by=user_id,
+            updated_by=user_id,
+        )
+        db.session.add(new_section)
+        db.session.flush()
+        section_id_map[section.id] = new_section.id
+    return section_id_map
+
+
+def clone_fields_with_formulas(source_form_id, field_rows, destination_form, destination_form_version, user_id):
+    """
+    Shared clone core for both bulk field copy and full sheet copy.
+
+    field_rows: list of (FieldVersion, Field) tuples for the source fields to
+    clone -- either a hand-picked subset (bulk field copy) or every active
+    field on a version (full sheet copy).
+
+    Clones each into a brand-new Field + FieldVersion on
+    destination_form_version, with a freshly generated field_code unique
+    within destination_form (existing uq_fields_code_per_form constraint),
+    appended after any fields the destination sheet already has. If a cloned
+    field is calculated and its field_config["formula_version_id"] belongs to
+    a Formula owned by source_form_id, clones that Formula too (new unique
+    code, form_id = destination_form.id) with expression/tokens remapped to
+    the new field_codes via the mapping built in this same call, and
+    publishes the new FormulaVersion immediately (never left as a draft).
+    Two cloned fields that both reference the same source FormulaVersion
+    share one cloned destination Formula, same as the source relationship.
+
+    Formula.form_id is nullable -- formulas created before that column
+    existed have no reliable owning-sheet attribution (see the model's own
+    comment) and simply have form_id = None. Mirroring publish_formula_
+    version's own "fall back to the old unscoped check" reasoning for these:
+    a null-form_id formula is treated as a legacy same-sheet formula and its
+    tokens are remapped the same as an explicitly-scoped one, raising the
+    same "token doesn't resolve" error if it genuinely isn't. A formula whose
+    form_id IS set but doesn't match source_form_id is a genuine cross-sheet
+    reference -- which shouldn't be possible under the current formula-
+    scoping rules -- and raises rather than silently copying a broken
+    reference forward onto the destination sheet.
+
+    Section resolution mirrors save_form_draft_fields's own lookup-by-code
+    against the destination version's sections, except a source field whose
+    section has no code match on the destination sheet is dropped to "no
+    section" here instead of raising -- there's no interactive step in an
+    automated copy to fix a missing section first. Full sheet copy avoids
+    this path in practice by cloning every section (see _clone_sections)
+    before calling this function, so a code match always exists there.
+
+    Returns the list of newly created Field rows, in the same order as
+    field_rows.
+    """
+    from app.modules.FRMULA.model import Formula, FormulaVersion
+
+    used_codes = {
+        f.field_code for f in Field.query.filter_by(form_id=destination_form.id, is_deleted=False).all()
+    }
+
+    code_map = {}
+    plan = []
+    for fv, f in field_rows:
+        new_code = _next_available_field_code(f.field_code, used_codes)
+        code_map[f.field_code] = new_code
+        plan.append((f, fv, new_code))
+
+    next_display_order = (
+        db.session.query(db.func.max(Field.display_order))
+        .filter(Field.form_id == destination_form.id, Field.is_deleted.is_(False))
+        .scalar()
+    ) or 0
+
+    formula_clone_cache = {}
+    new_fields = []
+
+    for f, fv, new_code in plan:
+        section_id = None
+        if fv.section_id:
+            source_section = FormSection.query.filter_by(id=fv.section_id, is_deleted=False).one_or_none()
+            if source_section:
+                dest_section = FormSection.query.filter_by(
+                    form_version_id=destination_form_version.id,
+                    code=source_section.code,
+                    is_deleted=False,
+                ).one_or_none()
+                section_id = dest_section.id if dest_section else None
+
+        field_config = dict(fv.field_config or {})
+
+        if fv.field_type == "calculated" and field_config.get("formula_version_id"):
+            old_version_id = field_config["formula_version_id"]
+            if old_version_id in formula_clone_cache:
+                new_version = formula_clone_cache[old_version_id]
+                field_config["formula_version_id"] = new_version.id
+                field_config["expression"] = new_version.expression
+                field_config["tokens"] = new_version.tokens
+            else:
+                old_version = FormulaVersion.query.get(old_version_id)
+                old_formula = (
+                    Formula.query.filter_by(id=old_version.formula_id, is_deleted=False).one_or_none()
+                    if old_version else None
+                )
+                if old_formula and old_formula.form_id is not None and old_formula.form_id != source_form_id:
+                    raise ValueError(
+                        f"Cannot copy: field '{f.field_code}' is calculated from "
+                        f"formula '{old_formula.code}', which belongs to a "
+                        "different sheet. Formulas are never shared across "
+                        "sheets -- this points to a data integrity issue outside "
+                        "the scope of this copy."
+                    )
+                if old_version and old_formula:
+                    new_tokens = _remap_formula_tokens(source_form_id, old_version.tokens, code_map)
+                    new_expression = _remap_formula_expression(old_version.expression, code_map)
+                    new_formula_code = _next_available_formula_code(old_formula.code)
+
+                    new_formula = Formula(
+                        name=old_formula.name,
+                        code=new_formula_code,
+                        form_id=destination_form.id,
+                        created_by=user_id,
+                        updated_by=user_id,
+                    )
+                    db.session.add(new_formula)
+                    db.session.flush()
+
+                    new_version = FormulaVersion(
+                        formula_id=new_formula.id,
+                        version_number=1,
+                        expression=new_expression,
+                        tokens=new_tokens,
+                        published_at=datetime.now(timezone.utc),
+                        published_by=user_id,
+                        created_by=user_id,
+                    )
+                    db.session.add(new_version)
+                    db.session.flush()
+
+                    new_formula.current_version_id = new_version.id
+                    new_formula.updated_by = user_id
+
+                    formula_clone_cache[old_version_id] = new_version
+                    field_config["formula_version_id"] = new_version.id
+                    field_config["expression"] = new_expression
+                    field_config["tokens"] = new_tokens
+                # else: formula_version_id points at a Formula/FormulaVersion
+                # that no longer exists (or was soft-deleted) -- field_config's
+                # formula_version_id/expression/tokens are left exactly as
+                # copied from the source field below, same as before.
+
+        next_display_order += 1
+        new_field = Field(
+            form_id=destination_form.id,
+            field_code=new_code,
+            display_order=next_display_order,
+            created_by=user_id,
+            updated_by=user_id,
+        )
+        db.session.add(new_field)
+        db.session.flush()
+
+        new_field_version = FieldVersion(
+            field_id=new_field.id,
+            version_number=1,
+            field_name=fv.field_name,
+            field_type=fv.field_type,
+            field_config=field_config,
+            form_version_id=destination_form_version.id,
+            section_id=section_id,
+            frequency=fv.frequency or "monthly",
+            created_by=user_id,
+        )
+        db.session.add(new_field_version)
+        db.session.flush()
+
+        new_field.current_version_id = new_field_version.id
+        new_fields.append(new_field)
+
+    db.session.flush()
+    return new_fields
+
+
+def copy_fields_to_sheet(source_version_id, field_codes, destination_form_id, user_id):
+    """
+    Feature 1: bulk field copy. Clones the given field_codes from
+    source_version_id onto destination_form_id's current draft version --
+    creating one via create_new_form_version_draft (reused, not
+    reimplemented) if the destination's current version isn't already a
+    Draft. See clone_fields_with_formulas for the clone + formula-remap
+    logic shared with copy_sheet_to_workbook (Feature 2).
+    """
+    source_version = FormVersion.query.get(source_version_id)
+    if not source_version:
+        raise ValueError("Source sheet version not found.")
+
+    if not field_codes:
+        raise ValueError("Select at least one field to copy.")
+
+    destination_form = get_form(destination_form_id)
+    if not destination_form:
+        raise ValueError("Destination sheet not found.")
+
+    all_source_fields = get_form_version_fields(source_version_id)
+    by_code = {f.field_code: (fv, f) for fv, f in all_source_fields}
+    missing = [code for code in field_codes if code not in by_code]
+    if missing:
+        raise ValueError(f"Field(s) not found on the source sheet: {', '.join(missing)}.")
+
+    # Preserve the fields' own relative order in the destination sheet,
+    # regardless of the order field_codes were passed in (e.g. Set-insertion
+    # order from a multi-select UI).
+    field_rows = sorted((by_code[code] for code in field_codes), key=lambda pair: pair[1].display_order or 0)
+
+    destination_version = create_new_form_version_draft(destination_form.id, user_id)
+
+    new_fields = clone_fields_with_formulas(
+        source_version.form_id, field_rows, destination_form, destination_version, user_id,
+    )
+    return destination_form, destination_version, new_fields
+
+
+def copy_sheet_to_workbook(source_form_id, destination_workbook_id, user_id):
+    """
+    Feature 2: full sheet copy. Creates an entirely independent new Form (new
+    unique code) + FormVersion (status always Draft, regardless of the
+    source's current status -- a deliberate product decision, not
+    configurable or inherited), clones every Section (see _clone_sections)
+    and every active Field/FieldVersion (with formulas remapped, see
+    clone_fields_with_formulas) from the source form's most recent version,
+    and attaches the new Form to destination_workbook_id via one new
+    WorkbookForm row (add_sheet_to_workbook, reused). The source Form's own
+    WorkbookForm rows are never touched.
+    """
+    import json as _json
+    from app.modules.WKBK.service import add_sheet_to_workbook
+
+    source_form = get_form(source_form_id)
+    if not source_form:
+        raise ValueError("Sheet not found.")
+
+    source_version = (
+        FormVersion.query.filter_by(form_id=source_form.id)
+        .order_by(FormVersion.version_number.desc())
+        .first()
+    )
+    if not source_version:
+        raise ValueError("Sheet has no version to copy.")
+
+    new_code = _next_available_form_code(source_form.code)
+    new_name = f"{source_form.name} (Copy)"
+
+    new_description = source_form.description
+    if source_form.description and source_form.description.startswith("{"):
+        try:
+            parsed = _json.loads(source_form.description)
+            parsed["display_name"] = f"{parsed.get('display_name') or source_form.name} (Copy)"
+            new_description = _json.dumps(parsed)
+        except Exception:
+            pass
+
+    new_form = Form(
+        name=new_name,
+        code=new_code,
+        description=new_description,
+        created_by=user_id,
+        updated_by=user_id,
+    )
+    db.session.add(new_form)
+    db.session.flush()
+
+    new_version = FormVersion(
+        form_id=new_form.id,
+        version_number=1,
+        status="Draft",
+        created_by=user_id,
+    )
+    db.session.add(new_version)
+    db.session.flush()
+
+    _clone_sections(source_version.id, new_form, new_version, user_id)
+
+    source_fields = get_form_version_fields(source_version.id)
+    clone_fields_with_formulas(source_form.id, source_fields, new_form, new_version, user_id)
+
+    workbook_form = add_sheet_to_workbook(
+        workbook_id=destination_workbook_id, form_id=new_form.id, sheet_label=None,
+    )
+
+    return new_form, new_version, workbook_form

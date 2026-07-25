@@ -17,6 +17,12 @@ document.addEventListener("DOMContentLoaded", function () {
   let workspaceMode = "fields";
   let isWorkbookContext = false;
   let builderIsEditable = true;
+  // Set from the "workbook_id" URL param in checkUrlPrefill(), used only to
+  // surface "same workbook first" in the bulk field-copy destination picker.
+  let currentWorkbookId = null;
+  // Cached response from /api/sheets-picker, shared by the bulk field-copy
+  // destination select; invalidated after a full sheet copy creates a new one.
+  let sheetsPickerCache = null;
 
   // View containers
   const listView = document.getElementById("list-view");
@@ -34,6 +40,11 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnSaveLayout = document.getElementById("btn-save-layout");
   const btnPublishForm = document.getElementById("btn-publish-form");
   const btnEditAsDraft = document.getElementById("btn-edit-as-draft");
+  const btnCopySheet = document.getElementById("btn-copy-sheet");
+  const copySheetModal = document.getElementById("copy-sheet-modal");
+  const copySheetWorkbookSelect = document.getElementById("copy-sheet-workbook-select");
+  const copySheetBtnCancel = document.getElementById("copy-sheet-btn-cancel");
+  const copySheetBtnConfirm = document.getElementById("copy-sheet-btn-confirm");
   const publishErrors = document.getElementById("publish-errors");
   const publishErrorsList = document.getElementById("publish-errors-list");
   const btnAddSection = document.getElementById("btn-add-section");
@@ -80,6 +91,8 @@ document.addEventListener("DOMContentLoaded", function () {
   const btnBulkApplyUnit = document.getElementById("btn-bulk-apply-unit");
   const btnBulkMoveTop = document.getElementById("btn-bulk-move-top");
   const btnBulkMoveBottom = document.getElementById("btn-bulk-move-bottom");
+  const bulkCopyDestinationSelect = document.getElementById("bulk-copy-destination-select");
+  const btnBulkCopyToSheet = document.getElementById("btn-bulk-copy-to-sheet");
   // Persists across renderWorkspace() re-renders during a bulk-edit session;
   // cleared only where isUnsaved also resets (see loadVersionDetails).
   let selectedFieldCodes = new Set();
@@ -1356,6 +1369,52 @@ document.addEventListener("DOMContentLoaded", function () {
       bulkSelectedCount.textContent = `${count} field${count === 1 ? "" : "s"} selected`;
     }
     populateBulkSectionSelect();
+    populateBulkCopyDestinationSelect();
+  }
+
+  // Fetched once and cached across the whole session -- invalidated after a
+  // full sheet copy creates a new sheet the picker should then include.
+  function ensureSheetsPickerLoaded() {
+    if (sheetsPickerCache) return Promise.resolve(sheetsPickerCache);
+    return fetch("/module/FORMBLD/api/sheets-picker")
+      .then(res => res.json())
+      .then(data => {
+        sheetsPickerCache = Array.isArray(data) ? data : [];
+        return sheetsPickerCache;
+      })
+      .catch(err => {
+        console.error("Error loading sheets picker:", err);
+        sheetsPickerCache = [];
+        return sheetsPickerCache;
+      });
+  }
+
+  function populateBulkCopyDestinationSelect() {
+    if (!bulkCopyDestinationSelect) return;
+    ensureSheetsPickerLoaded().then(rows => {
+      const selected = bulkCopyDestinationSelect.value;
+      const sameWorkbook = [];
+      const others = [];
+      rows.forEach(row => {
+        if (currentWorkbookId && row.workbook_id === currentWorkbookId) {
+          sameWorkbook.push(row);
+        } else {
+          others.push(row);
+        }
+      });
+
+      const optionHtml = row => `<option value="${row.form_id}">${escapeHtml(row.name)} — ${escapeHtml(row.workbook_name || "no workbook")}</option>`;
+
+      let html = '<option value="">Select destination sheet…</option>';
+      if (sameWorkbook.length) {
+        html += `<optgroup label="This workbook">${sameWorkbook.map(optionHtml).join("")}</optgroup>`;
+      }
+      if (others.length) {
+        html += `<optgroup label="${sameWorkbook.length ? "Other sheets" : "All sheets"}">${others.map(optionHtml).join("")}</optgroup>`;
+      }
+      bulkCopyDestinationSelect.innerHTML = html;
+      bulkCopyDestinationSelect.value = rows.some(row => String(row.form_id) === selected) ? selected : "";
+    });
   }
 
   function selectedFieldCodesArray() {
@@ -1560,6 +1619,52 @@ document.addEventListener("DOMContentLoaded", function () {
     btnBulkClearSelection.onclick = function () {
       selectedFieldCodes.clear();
       renderWorkspace();
+    };
+  }
+
+  // Feature 1: bulk field copy -- saves any pending edits first (the copy
+  // endpoint reads the source sheet's persisted FieldVersion rows, not
+  // in-memory currentFields), then clones the selected fields onto the
+  // destination sheet's current draft version.
+  if (btnBulkCopyToSheet) {
+    btnBulkCopyToSheet.onclick = function () {
+      const codes = selectedFieldCodesArray();
+      if (!codes.length) { showToast("No fields selected.", "error"); return; }
+      const destinationFormId = bulkCopyDestinationSelect ? bulkCopyDestinationSelect.value : "";
+      if (!destinationFormId) { showToast("Select a destination sheet first.", "error"); return; }
+      if (!selectedVersionId) return;
+
+      btnBulkCopyToSheet.disabled = true;
+      const originalText = btnBulkCopyToSheet.textContent;
+      btnBulkCopyToSheet.textContent = "Copying…";
+
+      saveDraftLayout()
+        .then(() => fetch(`/module/FORMBLD/api/version/${selectedVersionId}/fields/copy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            field_codes: codes,
+            destination_form_id: parseInt(destinationFormId, 10),
+          }),
+        }))
+        .then(res => res.json())
+        .then(resData => {
+          if (resData.error) {
+            showToast(resData.error, "error");
+          } else {
+            showToast(resData.message || "Fields copied.");
+            selectedFieldCodes.clear();
+            renderWorkspace();
+          }
+        })
+        .catch(err => {
+          console.error("Error copying fields:", err);
+          showToast("Failed to copy fields.", "error");
+        })
+        .finally(() => {
+          btnBulkCopyToSheet.disabled = false;
+          btnBulkCopyToSheet.textContent = originalText;
+        });
     };
   }
 
@@ -2266,6 +2371,81 @@ document.addEventListener("DOMContentLoaded", function () {
     };
   }
 
+  // Feature 2: full sheet copy -- available regardless of the source
+  // sheet's Draft/Published status (unlike the bulk field-copy controls
+  // above, this never mutates the source, only reads from it), so it's
+  // intentionally not gated by setBuilderEditable()/builderIsEditable.
+  if (btnCopySheet) {
+    btnCopySheet.onclick = function () {
+      if (!selectedFormId) return;
+      copySheetWorkbookSelect.innerHTML = '<option value="">Loading workbooks…</option>';
+      copySheetBtnConfirm.disabled = true;
+      copySheetModal.classList.remove("hidden");
+
+      fetch("/workbooks/api")
+        .then(res => res.json())
+        .then(workbooks => {
+          if (!Array.isArray(workbooks) || !workbooks.length) {
+            copySheetWorkbookSelect.innerHTML = '<option value="">No workbooks available</option>';
+            return;
+          }
+          copySheetWorkbookSelect.innerHTML = '<option value="">Select a workbook…</option>' +
+            workbooks.map(wb => `<option value="${wb.id}">${escapeHtml(wb.name)}</option>`).join("");
+        })
+        .catch(err => {
+          console.error("Error loading workbooks:", err);
+          copySheetWorkbookSelect.innerHTML = '<option value="">Error loading workbooks</option>';
+        });
+    };
+  }
+
+  if (copySheetWorkbookSelect) {
+    copySheetWorkbookSelect.addEventListener("change", function () {
+      copySheetBtnConfirm.disabled = !copySheetWorkbookSelect.value;
+    });
+  }
+
+  if (copySheetBtnCancel) {
+    copySheetBtnCancel.onclick = function () {
+      copySheetModal.classList.add("hidden");
+    };
+  }
+
+  if (copySheetBtnConfirm) {
+    copySheetBtnConfirm.onclick = function () {
+      const destinationWorkbookId = copySheetWorkbookSelect.value;
+      if (!destinationWorkbookId || !selectedFormId) return;
+
+      copySheetBtnConfirm.disabled = true;
+      const originalText = copySheetBtnConfirm.textContent;
+      copySheetBtnConfirm.textContent = "Copying…";
+
+      fetch(`/module/FORMBLD/api/${selectedFormId}/copy-sheet`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ destination_workbook_id: parseInt(destinationWorkbookId, 10) }),
+      })
+        .then(res => res.json())
+        .then(resData => {
+          if (resData.error) {
+            showToast(resData.error, "error");
+          } else {
+            showToast(resData.message || "Sheet copied.");
+            sheetsPickerCache = null;
+            copySheetModal.classList.add("hidden");
+          }
+        })
+        .catch(err => {
+          console.error("Error copying sheet:", err);
+          showToast("Failed to copy sheet.", "error");
+        })
+        .finally(() => {
+          copySheetBtnConfirm.disabled = !copySheetWorkbookSelect.value;
+          copySheetBtnConfirm.textContent = originalText;
+        });
+    };
+  }
+
   function saveDraftLayout() {
     if (!selectedVersionId) return;
     if (!applySelectedFieldChanges({ render: false })) {
@@ -2611,6 +2791,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const formId = params.get("form_id");
     const versionId = params.get("version_id");
     const workbookId = params.get("workbook_id");
+    currentWorkbookId = workbookId ? parseInt(workbookId, 10) : null;
 
     const formsBackBtn    = document.getElementById("btn-builder-forms-back");
     const tabFieldsLabel  = document.getElementById("tab-fields-label");

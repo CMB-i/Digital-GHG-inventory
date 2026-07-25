@@ -95,6 +95,9 @@
         <span id="builder-version-badge" class="px-2 py-0.5 rounded-full font-semibold uppercase text-[9px] bg-amber-100 text-amber-800">Draft</span>
       </div>
       <div class="flex items-center space-x-2">
+        <button id="btn-copy-sheet" class="btn btn-outline btn-sm">
+          Copy Sheet
+        </button>
         <button id="btn-edit-as-draft" class="btn btn-outline btn-sm hidden">
           Edit as Draft
         </button>
@@ -177,6 +180,11 @@
 
               <button type="button" id="btn-bulk-move-top" class="btn btn-outline btn-sm">Move to top</button>
               <button type="button" id="btn-bulk-move-bottom" class="btn btn-outline btn-sm">Move to bottom</button>
+
+              <select id="bulk-copy-destination-select" class="rounded-lg border-slate-300 text-[11px] py-1.5 px-2 border bg-white max-w-[220px]">
+                <option value="">Select destination sheet…</option>
+              </select>
+              <button type="button" id="btn-bulk-copy-to-sheet" class="btn btn-outline btn-sm">Copy to sheet</button>
             </div>
           </div>
 
@@ -587,6 +595,26 @@
     <div class="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
       <button type="button" id="fsi-btn-cancel" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
       <button type="button" id="fsi-btn-confirm" disabled class="px-4 py-2 rounded-lg text-xs font-bold text-white bg-[#c8102e] hover:bg-[#a80d26] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#c8102e]">Publish anyway</button>
+    </div>
+  </div>
+</div>
+
+<!-- Copy Sheet modal (Feature 2: full sheet copy → destination workbook) -->
+<div id="copy-sheet-modal" class="fixed inset-0 bg-navy/50 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+  <div class="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-[440px] overflow-hidden">
+    <div class="px-6 py-4 bg-slate-50 border-b border-slate-200">
+      <h3 class="text-sm font-bold text-slate-800">Copy Sheet</h3>
+      <p class="mt-1 text-xs text-slate-500">Creates a fully independent copy of this sheet — new fields, new formulas, no link back to the original.</p>
+    </div>
+    <div class="p-6 space-y-3">
+      <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Destination workbook</label>
+      <select id="copy-sheet-workbook-select" class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-3 border bg-white">
+        <option value="">Loading workbooks…</option>
+      </select>
+    </div>
+    <div class="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
+      <button type="button" id="copy-sheet-btn-cancel" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
+      <button type="button" id="copy-sheet-btn-confirm" disabled class="px-4 py-2 rounded-lg text-xs font-bold text-white bg-[#1a3a6b] hover:bg-[#142d56] disabled:opacity-40 disabled:cursor-not-allowed">Copy Sheet</button>
     </div>
   </div>
 </div>
