@@ -133,7 +133,67 @@ def create_form(name, code, description, user_id):
     )
     db.session.add(version)
     db.session.flush()
-    
+
+    return form
+
+def delete_sheet(form_id, user_id, reason):
+    """
+    A sheet can now only ever be attached to the workbook it was created in
+    -- "Reuse existing sheet" (which let one sheet be attached to more than
+    one Workbook via WorkbookForm) has been removed. Sheets reused before
+    that removal may still have more than one live WorkbookForm row, so
+    deletion detaches from every one of them, not just one.
+
+    Like Period's delete, this blocks on a Submission of ANY status, not just
+    in-progress -- RPTBLD may read historical Approved/Locked submissions by
+    form, so old approved data still isn't safe to remove out from under it.
+    Submission has no workbook_id column at all (uq_active_submission scopes
+    it only by site_id/form_id/reporting_period_id), so this one check is
+    already sufficient regardless of how many workbooks reference the sheet
+    -- no separate per-workbook submission check is needed.
+    """
+    form = Form.query.filter_by(id=form_id, is_deleted=False).one_or_none()
+    if not form:
+        raise ValueError("Sheet not found.")
+
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError("A delete reason is required.")
+
+    from app.modules.SUBMIT.model import Submission
+    submission_count = Submission.query.filter_by(form_id=form_id, is_deleted=False).count()
+    if submission_count > 0:
+        raise ValueError(
+            f"Cannot delete sheet: {submission_count} submission(s) of any "
+            "status still reference it."
+        )
+
+    now = datetime.now(timezone.utc)
+
+    # Detach from every workbook that currently references it -- normally at
+    # most one now, but legacy sheets attached via the removed reuse flow may
+    # still have more than one live WorkbookForm row.
+    from app.modules.WKBK.model import WorkbookForm
+    for wf in WorkbookForm.query.filter_by(form_id=form_id).all():
+        db.session.delete(wf)
+
+    form.is_deleted = True
+    form.deleted_by = user_id
+    form.deleted_at = now
+    form.delete_reason = reason
+
+    # Cascade to this sheet's own fields, same soft-delete pattern
+    # save_form_draft_fields already uses -- just applied to every active
+    # field at once instead of one draft-save payload at a time. Known,
+    # documented gap left as-is (out of scope here): this does not check
+    # whether a published Formula still references any of these fields.
+    active_fields = Field.query.filter_by(form_id=form_id, is_deleted=False).all()
+    for f in active_fields:
+        f.is_deleted = True
+        f.deleted_by = user_id
+        f.deleted_at = now
+        f.delete_reason = "Sheet deleted"
+
     return form
 
 def get_form_version(version_id):
