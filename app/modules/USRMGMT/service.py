@@ -10,7 +10,7 @@ from app.common.validators import (
 )
 from app.database import db
 from app.modules.AUDITL.service import log_audit
-from app.modules.ACCESS.model import AccessMatrix
+from app.modules.ACCESS.service import count_global_user_managers, get_user_permissions
 from app.modules.USRMGMT.model import User
 
 
@@ -111,35 +111,28 @@ def set_temporary_password(user_id, temporary_password, actor_id):
 
 
 def can_deactivate_user(user_id):
+    """
+    Resolved through ACCESS's get_user_permissions()/count_global_user_managers()
+    instead of a raw AccessMatrix scan, so this can never quietly disagree with
+    the equivalent guard on the permission-matrix side (upsert_access_row) --
+    see Consistency Guideline #3.
+    """
     user = User.query.filter_by(id=user_id, is_deleted=False).one_or_none()
     if not user or not user.is_active:
         return True
 
-    manager_count = (
-        User.query.join(AccessMatrix, AccessMatrix.user_id == User.id)
-        .filter(
-            User.is_deleted.is_(False),
-            User.is_active.is_(True),
-            AccessMatrix.is_deleted.is_(False),
-            AccessMatrix.scope_type == "global",
-            AccessMatrix.can_manage_users.is_(True),
-        )
-        .distinct(User.id)
-        .count()
-    )
-    has_manage_users = (
-        AccessMatrix.query.filter_by(
-            user_id=user_id,
-            scope_type="global",
-            can_manage_users=True,
-            is_deleted=False,
-        ).first()
-        is not None
-    )
-    return not (has_manage_users and manager_count <= 1)
+    has_manage_users = get_user_permissions(
+        user_id, scope_type="global", entity_type="user"
+    ).get("can_manage_users")
+    if not has_manage_users:
+        return True
+
+    return count_global_user_managers(exclude_user_id=user_id) > 0
 
 
 def set_user_active(user_id, is_active, actor_id):
+    if not is_active and user_id == actor_id:
+        return None, "You cannot deactivate your own account."
     user = User.query.filter_by(id=user_id, is_deleted=False).one_or_none()
     if not user:
         return None, "User not found."
