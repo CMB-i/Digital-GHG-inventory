@@ -15,6 +15,7 @@ from app.modules.FRMULA.service import (
     create_formula,
     publish_formula_version,
     create_new_formula_draft,
+    delete_formula,
 )
 from app.modules.USRMGMT.model import User
 from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
@@ -184,6 +185,20 @@ def update_details(formula_id):
         db.session.commit()
         return success_response(message="Formula details updated successfully.")
     except Exception as e:
+        db.session.rollback()
+        return error_response(str(e), 400)
+
+
+@bp.route("/api/<int:formula_id>", methods=["DELETE"])
+@require_permission("formula", "manage_forms")
+def delete(formula_id):
+    data = request.get_json() or {}
+    user = current_user()
+    try:
+        delete_formula(formula_id, user.id, data.get("reason"))
+        db.session.commit()
+        return success_response(message="Formula deleted successfully.")
+    except ValueError as e:
         db.session.rollback()
         return error_response(str(e), 400)
 
