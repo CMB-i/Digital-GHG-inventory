@@ -16,7 +16,12 @@ class ValueSet(FullLifecycleMixin, db.Model):
     )
 
     __table_args__ = (
-        db.UniqueConstraint("code", name="uq_value_set_code"),
+        db.Index(
+            "uq_value_set_code",
+            "code",
+            unique=True,
+            postgresql_where=db.text("is_deleted = false"),
+        ),
     )
 
 
