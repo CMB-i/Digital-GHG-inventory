@@ -208,12 +208,28 @@ def delete_sheet(form_id, user_id, reason):
 
     # This cascades to soft-delete every active field on the sheet below, via
     # a code path completely separate from save_form_draft_fields (no draft
-    # payload involved) -- so it needs the same published-formula-reference
-    # guard, checked up front before any mutation, same as that path.
+    # payload involved) -- so it needs a published-formula-reference guard
+    # up front, checked before any mutation, same as that path. But unlike
+    # save_form_draft_fields (where the sheet survives and a sibling
+    # formula's need for the field is a real external dependency),
+    # _formulas_referencing_field's Formula.form_id == field.form_id branch
+    # can only ever return formulas that belong to THIS sheet -- formulas
+    # are strictly sheet-scoped (see publish_formula_version's own
+    # per-form field-code cross-check), so a same-sheet formula is being
+    # deleted along with everything else here, not a genuine dependency,
+    # and must never block the sheet's own deletion. Only the legacy
+    # form_id-is-None case is excluded from that filtering: those formulas
+    # validate against every active field system-wide (see
+    # publish_formula_version's unscoped fallback), so one could still be
+    # the live formula for a same-named field on a different, still-existing
+    # sheet -- that ambiguity means it must keep blocking, same as before.
     active_fields = Field.query.filter_by(form_id=form_id, is_deleted=False).all()
     blocked = []
     for f in active_fields:
-        referencing_formulas = _formulas_referencing_field(f)
+        referencing_formulas = [
+            formula for formula in _formulas_referencing_field(f)
+            if formula.form_id != form_id
+        ]
         if referencing_formulas:
             blocked.append((f.field_code, referencing_formulas))
     if blocked:
