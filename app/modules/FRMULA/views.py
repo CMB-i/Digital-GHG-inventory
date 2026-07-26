@@ -142,6 +142,7 @@ def create():
     expression = data.get("expression")
     tokens = data.get("tokens", {})
     form_id = data.get("form_id")
+    context = data.get("context") or "field"
 
     user = current_user()
     try:
@@ -149,7 +150,7 @@ def create():
         allowed_names = set(tokens.keys()) | _get_active_valset_codes()
         validate_formula(expression, allowed_names)
 
-        formula = create_formula(name, code, expression, tokens, user.id, form_id=form_id)
+        formula = create_formula(name, code, expression, tokens, user.id, form_id=form_id, context=context)
         latest_version = FormulaVersion.query.filter_by(
             formula_id=formula.id
         ).order_by(FormulaVersion.version_number.desc()).first()

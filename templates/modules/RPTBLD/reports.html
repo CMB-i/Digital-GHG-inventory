@@ -57,6 +57,11 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                   </svg>
                 </button>
+                <button class="edit-template-btn text-slate-500 hover:text-slate-800 p-1 rounded hover:bg-slate-100 transition" title="Edit Template" data-template-id="{{ t.id }}">
+                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
                 <a href="/module/RPTBLD/api/templates/{{ t.id }}/export" class="export-template-btn text-slate-500 hover:text-emerald-600 p-1 rounded hover:bg-emerald-50 transition" title="Export Excel" data-template-id="{{ t.id }}">
                   <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -153,7 +158,7 @@
             <p class="mt-3 text-sm text-slate-600">Querying and aggregating approved data...</p>
           </div>
 
-          <!-- Data Grid -->
+          <!-- Data Grid (flat mode -- templates without row_groups) -->
           <div class="hidden overflow-x-auto" id="preview_table_wrapper">
             <table class="w-full text-left text-sm text-slate-600" id="preview_table">
               <thead>
@@ -172,18 +177,29 @@
               </tbody>
             </table>
           </div>
+
+          <!-- Pivot Data Grid (row_groups mode -- structure built dynamically since
+               columns depend on the template's configured metrics/computed columns) -->
+          <div class="hidden overflow-x-auto" id="preview_pivot_wrapper">
+            <table class="w-full text-left text-sm text-slate-600" id="preview_pivot_table">
+              <thead id="preview_pivot_thead"></thead>
+              <tbody class="divide-y divide-slate-100" id="preview_pivot_tbody">
+                <!-- Rendered dynamically -->
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Slide-over Drawer for Create Template -->
+<!-- Slide-over Wizard for Create/Edit Report Template -->
 <div id="drawer_backdrop" class="fixed inset-0 z-40 bg-slate-900/30 hidden transition-opacity duration-300" aria-hidden="true"></div>
-<aside id="create_drawer" class="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-xl translate-x-full transition-transform duration-300">
+<aside id="create_drawer" class="fixed inset-y-0 right-0 z-50 flex w-full max-w-3xl flex-col border-l border-slate-200 bg-white shadow-xl translate-x-full transition-transform duration-300">
   <div class="flex items-start justify-between border-b border-slate-200 px-6 py-5">
     <div>
-      <h2 class="text-lg font-bold text-slate-900">Create Report Template</h2>
+      <h2 id="drawer_title" class="text-lg font-bold text-slate-900">Create Report Template</h2>
       <p class="mt-1 text-xs text-slate-500">Establish reusable report logic based on sites, forms and periods.</p>
     </div>
     <button id="close_create_drawer_btn" class="rounded-md text-slate-400 hover:text-slate-500 focus:outline-none transition">
@@ -194,136 +210,305 @@
     </button>
   </div>
 
-  <form id="create_template_form" class="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-    <!-- General Settings -->
-    <div class="space-y-4">
-      <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">General Information</h3>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="text-xs font-semibold text-slate-700" for="template_name">Report Name *</label>
-          <input class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
-                 id="template_name" name="name" type="text" required placeholder="e.g. Scope 1 Summary">
-        </div>
-        <div>
-          <label class="text-xs font-semibold text-slate-700" for="template_code">Unique Code *</label>
-          <input class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
-                 id="template_code" name="code" type="text" required placeholder="e.g. scope1_rpt">
-        </div>
-      </div>
-      <div>
-        <label class="text-xs font-semibold text-slate-700" for="template_description">Description</label>
-        <textarea class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
-                  id="template_description" name="description" rows="2" placeholder="Briefly describe what data this template gathers..."></textarea>
-      </div>
-    </div>
+  <div class="flex-1 flex min-h-0">
+    <!-- Wizard rail -->
+    <nav id="wizard_rail" class="w-48 shrink-0 border-r border-slate-100 bg-slate-50/60 overflow-y-auto py-5 px-3 space-y-1">
+      <button type="button" class="wizard-rail-item flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-semibold transition" data-step-index="0">
+        <span class="wizard-rail-badge flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold">1</span>
+        <span>Basics</span>
+      </button>
+      <button type="button" class="wizard-rail-item flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-semibold transition" data-step-index="1">
+        <span class="wizard-rail-badge flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold">2</span>
+        <span>Scope &amp; Entities</span>
+      </button>
+      <button type="button" class="wizard-rail-item flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-semibold transition" data-step-index="2">
+        <span class="wizard-rail-badge flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold">3</span>
+        <span>Row Groups</span>
+      </button>
+      <button type="button" class="wizard-rail-item flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-semibold transition" data-step-index="3">
+        <span class="wizard-rail-badge flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold">4</span>
+        <span>Metric Aliasing</span>
+      </button>
+      <button type="button" class="wizard-rail-item flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-semibold transition" data-step-index="4">
+        <span class="wizard-rail-badge flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold">5</span>
+        <span>Computed Columns</span>
+      </button>
+      <button type="button" class="wizard-rail-item flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-semibold transition" data-step-index="5">
+        <span class="wizard-rail-badge flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold">6</span>
+        <span>Date Range</span>
+      </button>
+      <button type="button" class="wizard-rail-item flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-semibold transition" data-step-index="6">
+        <span class="wizard-rail-badge flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold">7</span>
+        <span>Review</span>
+      </button>
+    </nav>
 
-    <!-- Scoping Settings -->
-    <div class="space-y-4 border-t border-slate-100 pt-5">
-      <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Scoping</h3>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="text-xs font-semibold text-slate-700" for="template_scope_type">Scope Type</label>
-          <select class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
-                  id="template_scope_type" name="scope_type">
-            <option value="global">Global (All Allowed Sites)</option>
-            <option value="site">Site Specific</option>
-          </select>
+    <!-- Step content -->
+    <form id="create_template_form" class="flex-1 overflow-y-auto px-6 py-6" onsubmit="return false;">
+
+      <!-- Step 1: Basics -->
+      <div class="wizard-step space-y-4" data-step-index="0">
+        <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Basics</h3>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="text-xs font-semibold text-slate-700" for="template_name">Report Name *</label>
+            <input class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                   id="template_name" name="name" type="text" required placeholder="e.g. Scope 1 Summary">
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-slate-700" for="template_code">Unique Code *</label>
+            <input class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                   id="template_code" name="code" type="text" required placeholder="e.g. scope1_rpt">
+          </div>
         </div>
-        <div id="scope_site_container" class="hidden">
-          <label class="text-xs font-semibold text-slate-700" for="template_scope_site_id">Scope Site *</label>
-          <select class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
-                  id="template_scope_site_id" name="scope_site_id">
-            <option value="">Select a site...</option>
-            {% for site in sites %}
-            <option value="{{ site.id }}">{{ site.name }}</option>
+        <div>
+          <label class="text-xs font-semibold text-slate-700" for="template_description">Description</label>
+          <textarea class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                    id="template_description" name="description" rows="2" placeholder="Briefly describe what data this template gathers..."></textarea>
+        </div>
+        <p class="text-[10px] text-slate-500 italic">Saved as soon as you continue — every later step edits this same template.</p>
+      </div>
+
+      <!-- Step 2: Scope & Entities -->
+      <div class="wizard-step hidden space-y-4" data-step-index="1">
+        <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Scoping</h3>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="text-xs font-semibold text-slate-700" for="template_scope_type">Scope Type</label>
+            <select class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                    id="template_scope_type" name="scope_type">
+              <option value="global">Global (All Allowed Sites)</option>
+              <option value="site">Site Specific</option>
+            </select>
+          </div>
+          <div id="scope_site_container" class="hidden">
+            <label class="text-xs font-semibold text-slate-700" for="template_scope_site_id">Scope Site *</label>
+            <select class="mt-1.5 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                    id="template_scope_site_id" name="scope_site_id">
+              <option value="">Select a site...</option>
+              {% for site in sites %}
+              <option value="{{ site.id }}">{{ site.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400 pt-2">Applicable Entities</h3>
+
+        <!-- Forms Multi-Select Checkboxes -->
+        <div>
+          <label class="text-xs font-semibold text-slate-700">Select Applicable Forms (Leave empty for All)</label>
+          <div class="mt-2 max-h-36 overflow-y-auto border border-slate-200 rounded-md p-3 space-y-2 bg-slate-50">
+            {% for form in forms %}
+            <label class="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer">
+              <input type="checkbox" name="form_ids" value="{{ form.id }}" class="rounded text-slate-900 focus:ring-slate-900">
+              <span>{{ form.name }}</span>
+            </label>
             {% endfor %}
-          </select>
-        </div>
-      </div>
-    </div>
-
-    <!-- Filter Configuration -->
-    <div class="space-y-4 border-t border-slate-100 pt-5">
-      <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Applicable Entities</h3>
-
-      <!-- Forms Multi-Select Checkboxes -->
-      <div>
-        <label class="text-xs font-semibold text-slate-700">Select Applicable Forms (Leave empty for All)</label>
-        <div class="mt-2 max-h-36 overflow-y-auto border border-slate-200 rounded-md p-3 space-y-2 bg-slate-50">
-          {% for form in forms %}
-          <label class="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer">
-            <input type="checkbox" name="form_ids" value="{{ form.id }}" class="rounded text-slate-900 focus:ring-slate-900">
-            <span>{{ form.name }}</span>
-          </label>
-          {% endfor %}
-        </div>
-      </div>
-
-      <!-- Sites Multi-Select Checkboxes -->
-      <div>
-        <label class="text-xs font-semibold text-slate-700">Select Applicable Sites (Leave empty for All)</label>
-        <div class="mt-2 max-h-36 overflow-y-auto border border-slate-200 rounded-md p-3 space-y-2 bg-slate-50">
-          {% for site in sites %}
-          <label class="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer">
-            <input type="checkbox" name="site_ids" value="{{ site.id }}" class="rounded text-slate-900 focus:ring-slate-900">
-            <span>{{ site.name }}</span>
-          </label>
-          {% endfor %}
-        </div>
-      </div>
-    </div>
-
-    <!-- Date Range Configuration -->
-    <div class="space-y-4 border-t border-slate-100 pt-5 pb-4">
-      <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Dynamic Date Range</h3>
-
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="text-xs font-semibold text-slate-700">Start Month & Year</label>
-          <div class="grid grid-cols-2 gap-2 mt-1.5">
-            <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="start_month">
-              <option value="">Month...</option>
-              {% for m_num, m_name in months %}
-              <option value="{{ m_num }}">{{ m_name[:3] }}</option>
-              {% endfor %}
-            </select>
-            <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="start_year">
-              <option value="">Year...</option>
-              {% for y in years %}
-              <option value="{{ y }}">{{ y }}</option>
-              {% endfor %}
-            </select>
           </div>
         </div>
 
+        <!-- Sites Multi-Select Checkboxes -->
         <div>
-          <label class="text-xs font-semibold text-slate-700">End Month & Year</label>
-          <div class="grid grid-cols-2 gap-2 mt-1.5">
-            <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="end_month">
-              <option value="">Month...</option>
-              {% for m_num, m_name in months %}
-              <option value="{{ m_num }}">{{ m_name[:3] }}</option>
-              {% endfor %}
-            </select>
-            <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="end_year">
-              <option value="">Year...</option>
-              {% for y in years %}
-              <option value="{{ y }}">{{ y }}</option>
-              {% endfor %}
-            </select>
+          <label class="text-xs font-semibold text-slate-700">Select Applicable Sites (Leave empty for All)</label>
+          <div class="mt-2 max-h-36 overflow-y-auto border border-slate-200 rounded-md p-3 space-y-2 bg-slate-50">
+            {% for site in sites %}
+            <label class="flex items-center gap-2.5 text-xs text-slate-700 cursor-pointer">
+              <input type="checkbox" name="site_ids" value="{{ site.id }}" class="rounded text-slate-900 focus:ring-slate-900">
+              <span>{{ site.name }}</span>
+            </label>
+            {% endfor %}
           </div>
         </div>
       </div>
-      <p class="text-[10px] text-slate-500 italic mt-1">Leaves dates empty to include data across all reporting periods.</p>
-    </div>
 
-    <!-- Actions -->
-    <div class="flex justify-end gap-3 border-t border-slate-200 pt-5">
-      <button id="close_create_drawer_secondary" class="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition" type="button">Cancel</button>
-      <button class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 shadow transition" type="submit">Save Template</button>
+      <!-- Step 3: Row Groups -->
+      <div class="wizard-step hidden space-y-3" data-step-index="2">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Row Groups</h3>
+            <p class="text-[10px] text-slate-500 mt-0.5">Optional. Group sites into subtotal blocks (e.g. Core vs Extended) for the pivot preview/export. Leave empty for the flat report only.</p>
+          </div>
+          <button id="btn_add_row_group" type="button" class="inline-flex items-center rounded-md border border-slate-300 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition">
+            + Add row group
+          </button>
+        </div>
+        <div id="row_groups_list" class="space-y-3"></div>
+      </div>
+
+      <!-- Step 4: Metric Aliasing -->
+      <div class="wizard-step hidden space-y-3" data-step-index="3">
+        <div>
+          <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Metric Aliasing</h3>
+          <p class="text-[10px] text-slate-500 mt-0.5">Map each canonical metric to the sheet field(s) that supply it, per site. Only used when row groups are configured.</p>
+        </div>
+        <div id="metric_aliases_list" class="space-y-2">
+          <p class="text-xs text-slate-400 italic">Loading canonical metrics…</p>
+        </div>
+      </div>
+
+      <!-- Step 5: Computed Columns -->
+      <div class="wizard-step hidden space-y-3" data-step-index="4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Computed Columns</h3>
+            <p class="text-[10px] text-slate-500 mt-0.5">Each one is built and published on FRMULA's own page, then attached here by id.</p>
+          </div>
+          <button id="btn_add_computed_column" type="button" class="inline-flex items-center rounded-md border border-slate-300 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 transition">
+            + Add computed column
+          </button>
+        </div>
+        <div id="computed_columns_list" class="space-y-2"></div>
+      </div>
+
+      <!-- Step 6: Date Range -->
+      <div class="wizard-step hidden space-y-4" data-step-index="5">
+        <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Dynamic Date Range</h3>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="text-xs font-semibold text-slate-700">Start Month &amp; Year</label>
+            <div class="grid grid-cols-2 gap-2 mt-1.5">
+              <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="start_month">
+                <option value="">Month...</option>
+                {% for m_num, m_name in months %}
+                <option value="{{ m_num }}">{{ m_name[:3] }}</option>
+                {% endfor %}
+              </select>
+              <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="start_year">
+                <option value="">Year...</option>
+                {% for y in years %}
+                <option value="{{ y }}">{{ y }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="text-xs font-semibold text-slate-700">End Month &amp; Year</label>
+            <div class="grid grid-cols-2 gap-2 mt-1.5">
+              <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="end_month">
+                <option value="">Month...</option>
+                {% for m_num, m_name in months %}
+                <option value="{{ m_num }}">{{ m_name[:3] }}</option>
+                {% endfor %}
+              </select>
+              <select class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-slate-900" name="end_year">
+                <option value="">Year...</option>
+                {% for y in years %}
+                <option value="{{ y }}">{{ y }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+        </div>
+        <p class="text-[10px] text-slate-500 italic mt-1">Leaves dates empty to include data across all reporting periods.</p>
+      </div>
+
+      <!-- Step 7: Review -->
+      <div class="wizard-step hidden space-y-4" data-step-index="6">
+        <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Review</h3>
+        <p class="text-xs text-slate-500">The actual result this template currently produces, queried fresh against locked, approved submissions.</p>
+
+        <div class="hidden text-center py-10" id="review_loading_state">
+          <svg class="animate-spin mx-auto h-7 w-7 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <p class="mt-3 text-xs text-slate-500">Querying approved data...</p>
+        </div>
+
+        <div class="hidden overflow-x-auto" id="review_preview_table_wrapper">
+          <table class="w-full text-left text-sm text-slate-600">
+            <thead>
+              <tr class="border-b border-slate-200 text-xs font-bold uppercase text-slate-500">
+                <th class="pb-3 pr-3">Period</th>
+                <th class="pb-3 pr-3">Site Name</th>
+                <th class="pb-3 pr-3">Form Name</th>
+                <th class="pb-3 pr-3">Field Code</th>
+                <th class="pb-3 pr-3">Field Name</th>
+                <th class="pb-3 pr-3 text-right">Aggregated Value</th>
+                <th class="pb-3 pl-3">Unit</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100" id="review_preview_tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="hidden overflow-x-auto" id="review_preview_pivot_wrapper">
+          <table class="w-full text-left text-sm text-slate-600">
+            <thead id="review_preview_pivot_thead"></thead>
+            <tbody class="divide-y divide-slate-100" id="review_preview_pivot_tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- Wizard footer -->
+  <div class="flex items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+    <button id="wizard_back_btn" type="button" class="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition disabled:opacity-40 disabled:cursor-not-allowed">
+      ← Back
+    </button>
+    <div class="flex items-center gap-3">
+      <button id="close_create_drawer_secondary" type="button" class="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition">Cancel</button>
+      <button id="wizard_continue_btn" type="button" class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 shadow transition">Save &amp; Continue</button>
     </div>
-  </form>
+  </div>
 </aside>
+
+<!-- Row group block template, cloned by reports.js. Site checklist markup
+     mirrors the "Applicable Sites" checklist above rather than inventing new
+     markup. -->
+<template id="row_group_block_template">
+  <div class="row-group-block border border-slate-200 rounded-md p-3 space-y-3 bg-slate-50">
+    <div class="flex items-center justify-between">
+      <span class="text-[11px] font-bold text-slate-500 rg-heading">Row Group</span>
+      <button type="button" class="remove-row-group-btn text-rose-500 hover:text-rose-700 text-[11px] font-semibold">Remove</button>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="text-[11px] font-semibold text-slate-600">Label *</label>
+        <input type="text" class="rg-label mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-slate-900 focus:border-slate-900" placeholder="e.g. Core Sites" required>
+      </div>
+      <div>
+        <label class="text-[11px] font-semibold text-slate-600">Subtotal Label</label>
+        <input type="text" class="rg-subtotal-label mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-slate-900 focus:border-slate-900" placeholder="e.g. Total">
+      </div>
+    </div>
+    <div>
+      <label class="text-[11px] font-semibold text-slate-600">Sites</label>
+      <div class="rg-site-checklist mt-1.5 max-h-28 overflow-y-auto border border-slate-200 rounded-md p-2 space-y-1.5 bg-white">
+        {% for site in sites %}
+        <label class="flex items-center gap-2 text-[11px] text-slate-700 cursor-pointer">
+          <input type="checkbox" class="rg-site-checkbox rounded text-slate-900 focus:ring-slate-900" value="{{ site.id }}">
+          <span>{{ site.name }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="flex items-center justify-between pt-1">
+      <label class="flex items-center gap-2 text-[11px] text-slate-700 cursor-pointer">
+        <input type="checkbox" class="rg-include-grand-total rounded text-slate-900 focus:ring-slate-900" checked>
+        Include in grand total
+      </label>
+      <label class="flex items-center gap-2 text-[11px] text-slate-700 cursor-pointer">
+        <input type="radio" name="rg_reference_base" class="rg-reference-base">
+        Reference base
+      </label>
+    </div>
+  </div>
+</template>
+
+<script>
+  window.RPTBLD_SITES = [
+    {% for site in sites %}{ "id": {{ site.id }}, "name": {{ site.name | tojson }} }{% if not loop.last %},{% endif %}{% endfor %}
+  ];
+  window.RPTBLD_FORMS = [
+    {% for form in forms %}{ "id": {{ form.id }}, "name": {{ form.name | tojson }} }{% if not loop.last %},{% endif %}{% endfor %}
+  ];
+</script>
 {% endblock %}
 
 {% block scripts %}

@@ -499,6 +499,129 @@ class TestFormulaPublishFieldScopedToOwnForm:
         assert formula.current_version_id == version.id
 
 
+class TestFormulaReportContext:
+    """Formula.context lets the same Formula/FormulaVersion tables and the
+    same publish_formula_version/evaluate_formula functions serve RPTBLD's
+    report-level formulas, not just FORMBLD's field-level ones. A
+    context="report" formula's tokens validate against a fixed canonical
+    metric vocabulary (plus "{group_id}__{metric_key}" group-subtotal
+    references, checked by shape only -- confirming the group_id exists in a
+    given ReportTemplate's config_json is RPTBLD's job in a later phase, not
+    FRMULA's here) instead of Field.field_code/ValueSetEntry.entry_code."""
+
+    def test_create_formula_defaults_to_field_context(self, make_user, created_objects):
+        from app.modules.FRMULA.service import create_formula
+
+        user = make_user()
+        formula = create_formula(
+            "Default Context Formula", f"test-default-ctx-{user.id}", "1 + 1", {}, user.id,
+        )
+        created_objects.append(formula)
+
+        assert formula.context == "field"
+
+    def test_report_context_formula_publishes_with_canonical_metric_tokens(
+        self, make_user, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+
+        user = make_user()
+        formula = create_formula(
+            "Total GHG Ratio", f"test-report-ctx-ok-{user.id}", "scope1 + scope2",
+            {"scope1": {}, "scope2": {}}, user.id, context="report",
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        publish_formula_version(version.id, user.id)
+
+        assert version.published_at is not None
+        assert formula.current_version_id == version.id
+
+    def test_report_context_formula_publishes_with_group_subtotal_token(
+        self, make_user, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+
+        user = make_user()
+        formula = create_formula(
+            "Core Group GHG", f"test-report-ctx-group-{user.id}", "core__total_ghg + 1",
+            {"core__total_ghg": {}}, user.id, context="report",
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        publish_formula_version(version.id, user.id)
+
+        assert version.published_at is not None
+
+    def test_report_context_formula_publish_fails_on_unrecognized_token(
+        self, make_user, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+
+        user = make_user()
+        formula = create_formula(
+            "Bogus Metric", f"test-report-ctx-bad-{user.id}", "not_a_real_metric + 1",
+            {"not_a_real_metric": {}}, user.id, context="report",
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        with pytest.raises(ValueError, match="not a recognized report metric"):
+            publish_formula_version(version.id, user.id)
+
+    def test_field_context_publish_behavior_is_unchanged_by_report_context_addition(
+        self, make_form, make_field, make_user, created_objects,
+    ):
+        """Regression guard: a default (context="field") formula's create/
+        publish/evaluate roundtrip -- including the still-active field/value-set
+        token cross-check -- behaves identically to before the context column
+        existed."""
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version, evaluate_formula
+
+        own_form, own_form_version = make_form()
+        make_field(own_form, own_form_version, "field_ctx_code")
+
+        user = make_user()
+        formula = create_formula(
+            "Field Context Formula", f"test-field-ctx-{user.id}", "field_ctx_code + 1",
+            {"field_ctx_code": {}}, user.id, form_id=own_form.id,
+        )
+        created_objects.append(formula)
+        assert formula.context == "field"
+
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        publish_formula_version(version.id, user.id)
+        assert version.published_at is not None
+        assert formula.current_version_id == version.id
+
+        result = evaluate_formula(version.expression, {"field_ctx_code": 5})
+        assert result == 6
+
+        # A token that isn't a live field/value-set code still fails exactly
+        # like before, even though report-context tokens now exist.
+        bad_formula = create_formula(
+            "Field Context Bad Token", f"test-field-ctx-bad-{user.id}", "scope1 + 1",
+            {"scope1": {}}, user.id, form_id=own_form.id,
+        )
+        created_objects.append(bad_formula)
+        bad_version = FormulaVersion.query.filter_by(formula_id=bad_formula.id, version_number=1).one()
+        created_objects.append(bad_version)
+
+        with pytest.raises(ValueError, match="does not exist as an active field"):
+            publish_formula_version(bad_version.id, user.id)
+
+
 class TestFieldRemovalBlockedByFormulaReference:
     """save_form_draft_fields soft-deletes any field omitted from a draft-save
     payload with no check for whether a published Formula's tokens still

@@ -12,7 +12,9 @@ from app.modules.RPTBLD.service import (
     update_report_template,
     delete_report_template,
     generate_report_data,
+    pivot_report_data,
     export_report_to_excel,
+    METRIC_KEY_DISPLAY_ORDER,
     _get_user_allowed_sites,
 )
 from app.modules.SITEMST.model import Site
@@ -185,6 +187,25 @@ def api_preview_template(template_id):
         return jsonify({"status": "error", "message": str(e)}), 400
     except Exception as e:
         return jsonify({"status": "error", "message": "Failed to generate preview."}), 500
+
+
+@bp.route("/api/templates/<int:template_id>/pivot-preview")
+@require_permission("report", "view")
+def api_pivot_preview_template(template_id):
+    user = current_user()
+    try:
+        data = pivot_report_data(template_id, user.id)
+        return jsonify({"status": "success", "data": data})
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": "Failed to generate pivot preview."}), 500
+
+
+@bp.route("/api/canonical-metrics")
+@require_permission("report", "view")
+def api_canonical_metrics():
+    return jsonify({"metrics": list(METRIC_KEY_DISPLAY_ORDER)})
 
 
 @bp.route("/api/templates/<int:template_id>/export")
