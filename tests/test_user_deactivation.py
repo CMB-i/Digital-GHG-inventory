@@ -125,12 +125,12 @@ class TestPermissionMatrixLastAdminGuard:
             scope_type="global",
             scope_site_id=None,
             entity_type="user",
-            permission_values={"can_manage_users": True, "can_edit": True},
+            permission_values={"can_manage_users": True, "can_view": True},
             actor_id=actor.id,
         )
 
         assert row.can_manage_users is True
-        assert row.can_edit is True
+        assert row.can_view is True
 
     def test_row_that_never_had_manage_users_is_unaffected_regardless_of_admin_count(self, make_user):
         """No global admin exists anywhere in the system here (count is 0),

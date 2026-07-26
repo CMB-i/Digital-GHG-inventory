@@ -40,8 +40,6 @@ def index():
     actor = current_user()
     perm_manage_users = has_permission(actor.id, "user", "manage_users")
     perm_create = has_permission(actor.id, "user", "create")
-    perm_edit = has_permission(actor.id, "user", "edit")
-    perm_delete = has_permission(actor.id, "user", "delete")
 
     selected_user_id = request.args.get("user_id", type=int)
     # Gate drawer states: unauthorized users cannot open these even via URL manipulation.
@@ -97,8 +95,6 @@ def index():
         entity_rows=ENTITY_ROWS,
         perm_manage_users=perm_manage_users,
         perm_create=perm_create,
-        perm_edit=perm_edit,
-        perm_delete=perm_delete,
     )
 
 
