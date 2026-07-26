@@ -473,21 +473,6 @@ def user_has_any_submission_access(user_id):
     return bool(_user_submission_site_ids(user_id))
 
 
-def _published_forms_for_site(site_id):
-    forms = Form.query.filter(
-        Form.is_deleted == False,
-        Form.current_version_id.is_not(None),
-    ).order_by(Form.name.asc(), Form.id.asc()).all()
-
-    assigned = []
-    for form in forms:
-        metadata = _parse_form_metadata(form)
-        site_ids = metadata.get("sites") or []
-        if site_id in site_ids:
-            assigned.append((form, metadata))
-    return assigned
-
-
 def _published_forms_for_site_via_workbook(site_id):
     """
     Returns published forms assigned to this site via WorkbookSite.

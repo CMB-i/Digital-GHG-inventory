@@ -4,7 +4,6 @@ document.addEventListener("DOMContentLoaded", function () {
   let currentSections = [];
   let availableValueSets = [];
   let availableFormulas = [];
-  let activeSites = [];
   let sitesMap = {};
 
   let selectedFormId = null;
@@ -102,7 +101,6 @@ document.addEventListener("DOMContentLoaded", function () {
   const dfCode = document.getElementById("df-code");
   const dfName = document.getElementById("df-name");
   const dfGri = document.getElementById("df-gri");
-  const dfSitesList = document.getElementById("df-sites-list");
   const dfFrequency = document.getElementById("df-frequency");
   const dfDesc = document.getElementById("df-desc");
   const step1Title = document.getElementById("step1-title");
@@ -681,10 +679,6 @@ document.addEventListener("DOMContentLoaded", function () {
     dfGri.value = "";
     dfFrequency.value = "Monthly";
     dfDesc.value = "";
-
-    // Uncheck all sites
-    const checkboxes = dfSitesList.querySelectorAll("input[type='checkbox']");
-    checkboxes.forEach(cb => cb.checked = false);
   };
 
   window.editFormDetails = function (formId) {
@@ -706,13 +700,6 @@ document.addEventListener("DOMContentLoaded", function () {
     dfGri.value = form.gri_code || "";
     dfFrequency.value = form.frequency || "Monthly";
     dfDesc.value = form.description || "";
-
-    // Check sites
-    const checkboxes = dfSitesList.querySelectorAll("input[type='checkbox']");
-    checkboxes.forEach(cb => {
-      const siteId = parseInt(cb.value);
-      cb.checked = (form.sites || []).includes(siteId);
-    });
   };
 
   window.editFormLayout = function (formId, versionId) {
@@ -749,12 +736,10 @@ document.addEventListener("DOMContentLoaded", function () {
     fetch("/module/SITEMST/api")
       .then(res => res.json())
       .then(sites => {
-        activeSites = sites;
         sitesMap = {};
         sites.forEach(s => {
           sitesMap[s.id] = s.name;
         });
-        renderSitesCheckboxes();
         return loadForms();
       })
       .then(() => {
@@ -764,23 +749,6 @@ document.addEventListener("DOMContentLoaded", function () {
         console.error("Error initializing data:", err);
         showToast("Error loading startup data.", "error");
       });
-  }
-
-  function renderSitesCheckboxes() {
-    dfSitesList.innerHTML = "";
-    if (activeSites.length === 0) {
-      dfSitesList.innerHTML = '<span class="text-slate-400 italic">No active sites found.</span>';
-      return;
-    }
-    activeSites.forEach(s => {
-      const label = document.createElement("label");
-      label.className = "flex items-center space-x-2 text-xs font-semibold text-slate-700 cursor-pointer hover:bg-slate-100 p-1 rounded transition";
-      label.innerHTML = `
-        <input type="checkbox" name="df-sites" value="${s.id}" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
-        <span>${s.name} (${s.code})</span>
-      `;
-      dfSitesList.appendChild(label);
-    });
   }
 
   // Fetch all forms on load or refresh
@@ -897,24 +865,12 @@ document.addEventListener("DOMContentLoaded", function () {
     const frequency = dfFrequency.value;
     const description = dfDesc.value.trim();
 
-    // Collect checked sites
-    const sites = [];
-    dfSitesList.querySelectorAll("input[name='df-sites']:checked").forEach(cb => {
-      sites.push(parseInt(cb.value));
-    });
-
-    if (sites.length === 0) {
-      showToast("Please select at least one site applicability.", "error");
-      return;
-    }
-
     const payload = {
       name: name,
       code: code,
       display_name: name,
       gri_code: gri_code,
       frequency: frequency,
-      sites: sites,
       description: description,
       description_text: description
     };
@@ -2560,7 +2516,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // 1. Client-side validations — actionable language
     const errors = [];
-    const formObj = formsList.find(x => x.id === selectedFormId);
 
     if (currentFields.length === 0) {
       errors.push("Add at least one field before publishing.");
@@ -2574,10 +2529,6 @@ document.addEventListener("DOMContentLoaded", function () {
         errors.push(`"${escapeHtml(f.field_name)}" is a dropdown with no options — add at least one option before publishing.`);
       }
     });
-
-    if (!formObj || !formObj.sites || formObj.sites.length === 0) {
-      errors.push(`Assign this ${noun} to at least one site before publishing.`);
-    }
 
     if (errors.length > 0) {
       publishErrorsList.innerHTML = errors.map(e => `<li>${e}</li>`).join("");
@@ -2816,12 +2767,6 @@ document.addEventListener("DOMContentLoaded", function () {
       // Auto-trigger create flow when no existing form is being edited
       if (!formId) {
         startNew();
-
-        // WorkbookSite is the authoritative workbook-site assignment.
-        // Keep legacy site applicability populated so old save validation does not block sheet creation.
-        dfSitesList.querySelectorAll("input[type='checkbox']").forEach(cb => {
-          cb.checked = true;
-        });
       }
     } else if (formsBackBtn) {
       formsBackBtn.textContent = "← Workbooks";
