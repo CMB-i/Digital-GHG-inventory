@@ -14,6 +14,10 @@ class Formula(FullLifecycleMixin, db.Model):
     # at creation time. Nullable: formulas created before this column existed
     # have no reliable way to attribute a single owning sheet (see migration).
     form_id = db.Column(db.Integer, db.ForeignKey("forms.id"), nullable=True)
+    # "field" (default): tokens validate against Field.field_code scoped to form_id.
+    # "report": tokens validate against RPTBLD's canonical metric-key vocabulary
+    # instead -- see publish_formula_version in service.py.
+    context = db.Column(db.String(20), nullable=False, server_default="field")
     current_version_id = db.Column(
         db.Integer,
         db.ForeignKey("formula_versions.id", use_alter=True, name="fk_formulas_current_version_id"),

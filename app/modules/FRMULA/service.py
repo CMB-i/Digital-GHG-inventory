@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from simpleeval import FunctionNotDefined, NameNotDefined, SimpleEval
 
@@ -11,6 +12,25 @@ ALLOWED_FORMULA_FUNCTIONS = {
 }
 
 AGGREGATE_FORMULA_FUNCTIONS = {"SUM_MONTHS"}
+
+# Canonical metric keys a "report"-context formula's tokens may reference,
+# beyond a group-subtotal reference ("{group_id}__{metric_key}", validated by
+# shape only here -- confirming the group_id actually exists in a given
+# ReportTemplate's config_json is RPTBLD's job, not FRMULA's).
+REPORT_CONTEXT_METRIC_KEYS = {
+    "cargo",
+    "energy_elec",
+    "energy_fossil",
+    "scope1",
+    "scope2",
+    "total_ghg",
+    "power_specific",
+    "diesel_specific",
+    "petrol_specific",
+    "ifo_specific",
+}
+
+REPORT_CONTEXT_GROUP_TOKEN_PATTERN = re.compile(r"^[a-z0-9_]+__[a-z0-9_]+$")
 
 
 def sum_months(values):
@@ -49,8 +69,6 @@ ALLOWED_FORMULA_FUNCTIONS["SUM_MONTHS"] = sum_months
 
 
 def aggregate_operand_names(expression):
-    import re
-
     cleaned_expression = expression or ""
     names = set()
     for helper in AGGREGATE_FORMULA_FUNCTIONS:
@@ -154,7 +172,7 @@ def get_formula_by_code(code):
     return Formula.query.filter_by(code=code, is_deleted=False).one_or_none()
 
 
-def create_formula(name, code, expression, tokens, user_id, form_id=None):
+def create_formula(name, code, expression, tokens, user_id, form_id=None, context="field"):
     if not name or not name.strip():
         raise ValueError("Formula name is required.")
     if not code or not code.strip():
@@ -168,6 +186,7 @@ def create_formula(name, code, expression, tokens, user_id, form_id=None):
         name=name.strip(),
         code=code.strip(),
         form_id=form_id,
+        context=context,
         created_by=user_id,
         updated_by=user_id
     )
@@ -302,36 +321,51 @@ def publish_formula_version(version_id, user_id):
 
     formula = get_formula(version.formula_id)
 
-    # Cross-check tokens against actual live form field codes and current value set entry codes.
-    # field_code is only unique per-form (uq_fields_code_per_form), so this must be scoped to
-    # the formula's own sheet -- a global check would let a token silently match a field on a
-    # completely different sheet. Formulas created before form_id existed have no reliable sheet
-    # attribution, so they fall back to the old unscoped check.
-    from app.modules.FORMBLD.model import Field
-    field_query = Field.query.filter_by(is_deleted=False)
-    if formula is not None and formula.form_id is not None:
-        field_query = field_query.filter_by(form_id=formula.form_id)
-    active_field_codes = {f.field_code for f in field_query.all()}
+    if formula is not None and formula.context == "report":
+        # Report-context formulas don't reference form fields or value sets --
+        # they validate against RPTBLD's canonical metric-key vocabulary, plus
+        # group-subtotal references ("{group_id}__{metric_key}") by shape only.
+        # Confirming a group_id actually exists in a given ReportTemplate's
+        # config_json is RPTBLD's job in phase 2, not FRMULA's here.
+        for t_key in tokens_keys:
+            if t_key in REPORT_CONTEXT_METRIC_KEYS:
+                continue
+            if REPORT_CONTEXT_GROUP_TOKEN_PATTERN.match(t_key):
+                continue
+            raise FormulaValidationError(
+                f"Referenced token '{t_key}' is not a recognized report metric or group reference."
+            )
+    else:
+        # Cross-check tokens against actual live form field codes and current value set entry codes.
+        # field_code is only unique per-form (uq_fields_code_per_form), so this must be scoped to
+        # the formula's own sheet -- a global check would let a token silently match a field on a
+        # completely different sheet. Formulas created before form_id existed have no reliable sheet
+        # attribution, so they fall back to the old unscoped check.
+        from app.modules.FORMBLD.model import Field
+        field_query = Field.query.filter_by(is_deleted=False)
+        if formula is not None and formula.form_id is not None:
+            field_query = field_query.filter_by(form_id=formula.form_id)
+        active_field_codes = {f.field_code for f in field_query.all()}
 
-    from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
-    current_valsets = (
-        ValueSet.query.filter_by(is_deleted=False)
-        .join(ValueSetVersion, ValueSetVersion.id == ValueSet.current_version_id)
-        .all()
-    )
-    active_valset_codes = set()
-    for vs in current_valsets:
-        entries = ValueSetEntry.query.filter_by(
-            value_set_version_id=vs.current_version_id,
-            is_deleted=False,
-            is_active=True
-        ).all()
-        for entry in entries:
-            active_valset_codes.add(entry.entry_code)
-            
-    for t_key in tokens_keys:
-        if t_key not in active_field_codes and t_key not in active_valset_codes:
-            raise FormulaValidationError(f"Referenced field/constant '{t_key}' does not exist as an active field or value set entry in the system.")
+        from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
+        current_valsets = (
+            ValueSet.query.filter_by(is_deleted=False)
+            .join(ValueSetVersion, ValueSetVersion.id == ValueSet.current_version_id)
+            .all()
+        )
+        active_valset_codes = set()
+        for vs in current_valsets:
+            entries = ValueSetEntry.query.filter_by(
+                value_set_version_id=vs.current_version_id,
+                is_deleted=False,
+                is_active=True
+            ).all()
+            for entry in entries:
+                active_valset_codes.add(entry.entry_code)
+
+        for t_key in tokens_keys:
+            if t_key not in active_field_codes and t_key not in active_valset_codes:
+                raise FormulaValidationError(f"Referenced field/constant '{t_key}' does not exist as an active field or value set entry in the system.")
 
     # Validate it works (optional, but a great safeguard)
     validate_formula(version.expression, tokens_keys)
