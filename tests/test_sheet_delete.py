@@ -168,9 +168,17 @@ class TestDeleteSheetRoute:
 # formula can be published referencing a raw field on the same sheet before
 # that sheet is ever deleted.
 class TestDeleteSheetBlockedByFormulaReference:
-    def test_delete_blocked_when_a_field_is_referenced_by_an_active_formula(
+    def test_delete_succeeds_when_a_field_is_referenced_by_a_formula_on_the_same_sheet(
         self, make_form, make_field, make_user, created_objects,
     ):
+        """A calculated field ('Total') referencing a sibling field ('field_a')
+        via a formula scoped to their own sheet is an extremely common
+        pattern -- e.g. any "Total X" field. Since the whole sheet, including
+        every formula built for it, is deleted in this same operation, that
+        same-sheet reference is not a genuine external dependency and must
+        never block the sheet's own deletion (this used to raise, wrongly,
+        before the delete_sheet formula-reference check was scoped to
+        exclude the sheet's own formulas)."""
         from app.modules.FRMULA.model import FormulaVersion
         from app.modules.FRMULA.service import create_formula, publish_formula_version
         form, form_version = make_form()
@@ -185,8 +193,44 @@ class TestDeleteSheetBlockedByFormulaReference:
         created_objects.append(version)
         publish_formula_version(version.id, publisher.id)
         actor = make_user()
+
+        deleted = delete_sheet(form.id, actor.id, "cleanup")
+
+        assert deleted.is_deleted is True
+        assert Form.query.filter_by(id=form.id, is_deleted=False).first() is None
+        assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is None
+
+    def test_delete_blocked_when_a_field_is_referenced_by_a_legacy_unscoped_formula(
+        self, make_form, make_field, make_user, created_objects,
+    ):
+        """Formulas created before Formula.form_id existed have no reliable
+        owning-sheet attribution (form_id is None) and validate their tokens
+        against every active field system-wide at publish time (see
+        publish_formula_version's unscoped fallback) -- so field_code being
+        only unique per-form means a legacy formula could still genuinely be
+        the live formula for a same-named field on a different, still-
+        existing sheet. That ambiguity can't be ruled out from the Formula
+        row alone, so delete_sheet must keep blocking on this case even
+        though it no longer blocks on the sheet's own formulas."""
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+        form, form_version = make_form()
+        field_a, _fva = make_field(form, form_version, "field_a")
+        publisher = make_user()
+        formula = create_formula(
+            "Legacy Diesel Emissions", f"test-sheet-delete-legacy-{publisher.id}", "field_a + 1",
+            {"field_a": {}}, publisher.id,
+        )
+        created_objects.append(formula)
+        assert formula.form_id is None
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+        publish_formula_version(version.id, publisher.id)
+        actor = make_user()
+
         with pytest.raises(ValueError, match=formula.name):
             delete_sheet(form.id, actor.id, "cleanup")
+
         assert Form.query.filter_by(id=form.id, is_deleted=False).first() is not None
         assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is not None
 
