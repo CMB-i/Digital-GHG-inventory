@@ -27,6 +27,16 @@ document.addEventListener("DOMContentLoaded", function () {
   const _returnVersionId = _fbUrlParams.get("version_id");
   const _openFormulaId = parseInt(_fbUrlParams.get("open_formula_id")) || null;
   const _openVersionId = parseInt(_fbUrlParams.get("open_version_id")) || null;
+  // RPTBLD's computed-columns round trip (see RPTBLD/reports.js
+  // goBuildComputedColumnFormula()): context=report switches the palette
+  // this file draws from (see loadReportMetricsPalette()) instead of
+  // FORMBLD's field/valset palette. report_template_id/cc_id identify which
+  // template/computed-column entry to return the built formula_id to.
+  const _returnContext = _fbUrlParams.get("context");
+  const _returnReportTemplateId = _fbUrlParams.get("report_template_id");
+  const _returnCcId = _fbUrlParams.get("cc_id");
+  const _returnCcLabel = _fbUrlParams.get("cc_label");
+  const _isReportContext = _returnContext === "report";
 
   function returnToUrl() {
     if (!_returnTo) return "/module/FRMULA/";
@@ -34,6 +44,9 @@ document.addEventListener("DOMContentLoaded", function () {
     if (_returnFormId) backParams.set("form_id", _returnFormId);
     if (_returnVersionId) backParams.set("version_id", _returnVersionId);
     if (_returnFieldId) backParams.set("field_id", _returnFieldId);
+    if (_returnReportTemplateId) backParams.set("report_template_id", _returnReportTemplateId);
+    if (_isReportContext) backParams.set("context", _returnContext);
+    if (_returnCcId) backParams.set("cc_id", _returnCcId);
     return backParams.toString() ? _returnTo + "?" + backParams.toString() : _returnTo;
   }
 
@@ -91,6 +104,8 @@ document.addEventListener("DOMContentLoaded", function () {
     if (_returnTo) {
       btnEditorBack.textContent = _returnTo.includes("/module/FORMBLD/")
         ? "← Back to workbook"
+        : _returnTo.includes("/module/RPTBLD/")
+        ? "← Back to report template"
         : "← Formula Builder";
       btnEditorBack.onclick = function () {
         window.location.href = returnToUrl();
@@ -760,6 +775,80 @@ document.addEventListener("DOMContentLoaded", function () {
     loadFormFields(formVersionSelect.value);
   };
 
+  // ── Report-context palette: canonical metrics + per-group refs ────────
+  // context=report replaces the field/valset palette with RPTBLD's fixed
+  // metric vocabulary (same /api/canonical-metrics endpoint RPTBLD's own
+  // drawer uses) plus, if a report_template_id is present, a
+  // "{group_id}__{metric_key}" chip per metric for every row group
+  // currently configured on that template. The Value Sets tab is hidden --
+  // valset codes aren't valid report-context tokens (see
+  // publish_formula_version's "report" branch in FRMULA/service.py, which
+  // never checks against them).
+  function reportMetricLabel(key) {
+    return key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function loadReportMetricsPalette() {
+    const tabValsets = document.getElementById("tab-valsets");
+    const panelValsets = document.getElementById("panel-valsets");
+    const tabFields = document.getElementById("tab-fields");
+    if (tabValsets) tabValsets.classList.add("hidden");
+    if (panelValsets) panelValsets.classList.add("hidden");
+    if (tabFields) tabFields.textContent = "Report Metrics";
+    switchSidebarTab("fields");
+
+    const searchFieldsInput = document.getElementById("search-fields");
+    if (searchFieldsInput) searchFieldsInput.placeholder = "Search metrics...";
+
+    return fetch("/module/RPTBLD/api/canonical-metrics")
+      .then(res => res.json())
+      .then(data => {
+        const metrics = data.metrics || [];
+        const fieldsPalette = document.getElementById("fields-palette");
+        fieldsPalette.innerHTML = "";
+
+        function addPaletteButton(code, label) {
+          fieldNameMap[code] = label;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "palette-btn-field skeuo-chip skeuo-chip-field flex items-center justify-between w-full text-left";
+          btn.setAttribute("draggable", "true");
+          btn.dataset.code = code;
+          btn.innerHTML = `<span class="font-semibold text-slate-700 truncate flex-1 mr-1.5">${label}</span>`;
+          btn.onclick = () => insertToken(code);
+          fieldsPalette.appendChild(btn);
+        }
+
+        metrics.forEach(key => addPaletteButton(key, reportMetricLabel(key)));
+
+        if (!_returnReportTemplateId) {
+          refreshDisplay();
+          return;
+        }
+
+        return fetch(`/module/RPTBLD/api/templates/${_returnReportTemplateId}`)
+          .then(res => res.json())
+          .then(t => {
+            const rowGroups = (t.config_json && t.config_json.row_groups) || [];
+            rowGroups.forEach(group => {
+              metrics.forEach(key => {
+                const code = `${group.id}__${key}`;
+                addPaletteButton(code, `${group.label || group.id} · ${reportMetricLabel(key)}`);
+              });
+            });
+            refreshDisplay();
+          })
+          .catch(err => {
+            console.error("Error loading report template row groups:", err);
+            refreshDisplay();
+          });
+      })
+      .catch(err => {
+        console.error("Error loading canonical metrics:", err);
+        document.getElementById("fields-palette").innerHTML = '<p class="text-xs text-slate-400 italic">Error loading report metrics.</p>';
+      });
+  }
+
   // ── Live preview ──────────────────────────────────────────────────────
   function scanVariables() {
     const expr = expressionTextarea.value || "";
@@ -937,6 +1026,7 @@ document.addEventListener("DOMContentLoaded", function () {
           body: JSON.stringify({
             name, code, expression, tokens,
             form_id: _returnFormId ? parseInt(_returnFormId, 10) : null,
+            context: _isReportContext ? "report" : "field",
           })
         });
         const createData = await createRes.json();
@@ -1004,6 +1094,14 @@ document.addEventListener("DOMContentLoaded", function () {
           if (_returnFieldId) returnParams.set("field_id", _returnFieldId);
           if (_returnFormId) returnParams.set("form_id", _returnFormId);
           if (_returnVersionId) returnParams.set("version_id", _returnVersionId);
+          if (_isReportContext) {
+            returnParams.set("context", "report");
+            if (_returnReportTemplateId) returnParams.set("report_template_id", _returnReportTemplateId);
+            if (_returnCcId) returnParams.set("cc_id", _returnCcId);
+            // Formula's own id (not the FormulaVersion id above) -- RPTBLD's
+            // computed_columns entries store formula_id, not a version id.
+            returnParams.set("formula_id", selectedFormulaId);
+          }
           window.location.href = _returnTo + "?" + returnParams.toString();
         } else {
           showList();
@@ -1131,8 +1229,8 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   // ── Initial load ──────────────────────────────────────────────────────
-  const initialFormVerId = formVersionSelect.value;
-  loadFormFields(initialFormVerId).then(() => {
+  const initialPaletteLoad = _isReportContext ? loadReportMetricsPalette() : loadFormFields(formVersionSelect.value);
+  initialPaletteLoad.then(() => {
     if (_openVersionId) {
       if (landingView) landingView.classList.add("hidden");
       if (listView) listView.classList.add("hidden");
@@ -1140,6 +1238,8 @@ document.addEventListener("DOMContentLoaded", function () {
       loadVersionDetails(_openVersionId);
     } else if (_openFormulaId) {
       window.showList();
+    } else if (_isReportContext) {
+      openNewFormulaEditor(_returnCcLabel || "New Computed Column");
     } else if (_returnFieldId) {
       const friendlyName = fieldNameMap[_returnFieldId] || _returnFieldId;
       openNewFormulaEditor(friendlyName);
