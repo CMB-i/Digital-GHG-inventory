@@ -286,15 +286,7 @@
                     <div>
                       <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unit</label>
                       <select id="prop-unit" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-1 border bg-white">
-                        <option value="">None</option>
-                        <option value="MWh">MWh</option>
-                        <option value="KL">KL</option>
-                        <option value="kg">kg</option>
-                        <option value="MT">MT</option>
-                        <option value="GJ">GJ</option>
-                        <option value="tCO₂e">tCO₂e</option>
-                        <option value="TEUs">TEUs</option>
-                        <option value="%">%</option>
+                        {% include "partials/unit_options.html" %}
                       </select>
                     </div>
                   </div>
@@ -348,10 +340,11 @@
 
                   <!-- Unit & Round off in same line -->
                   <div class="grid grid-cols-2 gap-2 pt-1">
-                    <div id="prop-calc-unit-wrap" class="hidden space-y-1">
+                    <div id="prop-calc-unit-wrap" class="space-y-1">
                       <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unit</label>
-                      <input type="text" id="prop-calc-unit" placeholder="e.g. kg CO₂e" maxlength="30"
-                        class="block w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-2 border">
+                      <select id="prop-calc-unit" class="block w-full rounded-lg border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-xs h-9 px-1 border bg-white">
+                        {% include "partials/unit_options.html" %}
+                      </select>
                     </div>
                     <div class="space-y-1">
                       <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Round Off</label>

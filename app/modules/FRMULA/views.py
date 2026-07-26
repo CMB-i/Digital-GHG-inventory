@@ -80,7 +80,11 @@ def index():
             valset_options.append({
                 "value_set_name": vs.name,
                 "entry_code": entry.entry_code,
-                "entry_label": entry.entry_label
+                "entry_label": entry.entry_label,
+                # entry_label is where the Value Set editor actually stores the
+                # numeric "Value" (see VALSET/views.py's own entry_value alias) --
+                # aliased here too so the preview sandbox can use the real value.
+                "entry_value": entry.entry_label
             })
 
     expression = request.form.get("expression", "")

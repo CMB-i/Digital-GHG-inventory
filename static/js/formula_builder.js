@@ -8,6 +8,10 @@ document.addEventListener("DOMContentLoaded", function () {
   const fieldNameMap = {};
   const fieldConfigMap = {};
 
+  // valset code → real current entry value (entry_value/entry_label), used to
+  // default the preview sandbox instead of the generic "1.0" placeholder.
+  const valsetValueMap = {};
+
   // All valset codes (for chip type detection on refreshDisplay)
   const valsetCodeSet = new Set();
 
@@ -669,6 +673,9 @@ document.addEventListener("DOMContentLoaded", function () {
     const label = btn.dataset.label || code;
     valsetCodeSet.add(code);
     fieldNameMap[code] = label;
+    if (btn.dataset.value !== undefined && btn.dataset.value !== "") {
+      valsetValueMap[code] = btn.dataset.value;
+    }
 
     btn.onclick = () => {
       insertedValsetCodes.add(code);
@@ -885,7 +892,10 @@ document.addEventListener("DOMContentLoaded", function () {
     variables.forEach(v => {
       const wrapper = document.createElement("div");
       wrapper.className = "flex flex-col space-y-1";
-      const val = prevValues[v] !== undefined ? prevValues[v] : "1.0";
+      const defaultVal = valsetCodeSet.has(v) && valsetValueMap[v] !== undefined
+        ? valsetValueMap[v]
+        : "1.0";
+      const val = prevValues[v] !== undefined ? prevValues[v] : defaultVal;
       const friendlyName = fieldNameMap[v];
       const labelHtml = friendlyName
         ? `<span class="text-[11px] font-bold text-slate-700 truncate">${friendlyName}</span><span class="text-[9px] font-mono text-slate-400">${v}</span>`
