@@ -96,7 +96,6 @@ def create():
     metadata = {
         "display_name": data.get("display_name", name),
         "gri_code": data.get("gri_code", ""),
-        "sites": data.get("sites", []),
         "frequency": data.get("frequency", "Monthly"),
         "workflow_id": data.get("workflow_id"),
         "description_text": data.get("description", "")
@@ -186,7 +185,6 @@ def update_details(form_id):
         metadata = {
             "display_name": data.get("display_name", name),
             "gri_code": data.get("gri_code", ""),
-            "sites": data.get("sites", []),
             "frequency": data.get("frequency", "Monthly"),
             "workflow_id": data.get("workflow_id"),
             "description_text": data.get("description_text", "")
