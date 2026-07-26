@@ -108,7 +108,7 @@ ENTITY_CHIP_CATEGORIES = {
 }
 
 SUPPORTED_PERMISSION_FLAGS = {
-    "user": {"can_view", "can_create", "can_edit", "can_delete", "can_manage_users"},
+    "user": {"can_view", "can_create", "can_manage_users"},
     "site": {"can_view", "can_create", "can_edit", "can_delete", "can_export"},
     "form": {"can_view", "can_create", "can_edit", "can_delete", "can_export", "can_manage_forms"},
     "workflow": {"can_view", "can_create", "can_edit", "can_delete", "can_manage_forms"},
