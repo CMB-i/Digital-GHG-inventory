@@ -403,7 +403,7 @@
       <div class="w-64 shrink-0 space-y-4">
 
         <!-- Form context selector -->
-        <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm p-5 space-y-2 hidden" aria-hidden="true">
+        <div class="bg-white rounded-xl border border-slate-200/80 shadow-sm p-5 space-y-2">
           <label class="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Form context</label>
           <div class="skeuo-well">
             <select id="form-version-select" class="w-full text-xs py-1 px-2 border-none skeuo-select focus:ring-0 focus:outline-none bg-transparent">
@@ -418,6 +418,9 @@
               {% endfor %}
             </select>
           </div>
+          <p id="cross-sheet-hint" class="hidden text-[10px] font-semibold text-amber-700">
+            Cross-sheet formula — can reference fields from any sheet.
+          </p>
         </div>
 
         <!-- tabbed lists deck (Fields & Value Sets) -->

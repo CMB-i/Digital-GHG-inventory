@@ -47,14 +47,72 @@ def _get_active_valset_codes():
 @bp.route("/", methods=["GET", "POST"])
 @require_permission("formula", "view")
 def index():
-    form_versions = (
+    version_id_param = request.values.get("form_version_id", type=int) or request.values.get("version_id", type=int)
+
+    # "The sheet the builder was opened from" -- form_id is what FORMBLD's
+    # "Create New Formula" button sends; fall back to deriving it from
+    # version_id/form_version_id for older links that only pass that.
+    current_form_id = request.values.get("form_id", type=int)
+    if current_form_id is None and version_id_param is not None:
+        version_row = FormVersion.query.get(version_id_param)
+        if version_row is not None:
+            current_form_id = version_row.form_id
+
+    # display_order (per-form, within whichever workbook(s) matched) used as
+    # a secondary sort below -- empty when there's no current sheet or the
+    # sheet belongs to no workbook, in which case sort stays plain by name.
+    workbook_display_order_by_form_id = {}
+
+    if current_form_id is None:
+        # No identifiable "current sheet" (e.g. Formula Builder opened
+        # directly rather than from a field's "Create New Formula" button) --
+        # no workbook context to scope to, so this stays the original
+        # system-wide listing.
+        sibling_form_ids_filter = None
+    else:
+        from app.modules.WKBK.model import WorkbookForm
+
+        current_sheet_workbook_rows = WorkbookForm.query.filter_by(form_id=current_form_id).all()
+        workbook_ids = {row.workbook_id for row in current_sheet_workbook_rows}
+
+        if not workbook_ids:
+            # Draft sheet not yet added to any workbook -- nothing to expand
+            # into, so the dropdown falls back to just this sheet (today's
+            # single-sheet-only behavior), not every sheet system-wide.
+            sibling_form_ids_filter = {current_form_id}
+        else:
+            # A Form reused across more than one workbook (if that's even
+            # possible in current usage) unions the sibling sheets from every
+            # one of those workbooks rather than arbitrarily picking one --
+            # flagging this as a judgment call in case cross-workbook reuse
+            # turns out to matter here.
+            sibling_rows = WorkbookForm.query.filter(
+                WorkbookForm.workbook_id.in_(workbook_ids)
+            ).all()
+            sibling_form_ids_filter = {row.form_id for row in sibling_rows}
+            for row in sibling_rows:
+                if (
+                    row.form_id not in workbook_display_order_by_form_id
+                    or row.display_order < workbook_display_order_by_form_id[row.form_id]
+                ):
+                    workbook_display_order_by_form_id[row.form_id] = row.display_order
+
+    form_versions_query = (
         FormVersion.query.with_entities(FormVersion, Form)
         .join(Form, Form.id == FormVersion.form_id)
         .filter(Form.is_deleted.is_(False))
-        .order_by(Form.name.asc(), FormVersion.version_number.desc())
-        .all()
     )
-    selected_form_version_id = request.values.get("form_version_id", type=int) or request.values.get("version_id", type=int)
+    if sibling_form_ids_filter is not None:
+        form_versions_query = form_versions_query.filter(Form.id.in_(sibling_form_ids_filter))
+    form_versions = form_versions_query.order_by(
+        Form.name.asc(), FormVersion.version_number.desc()
+    ).all()
+    if workbook_display_order_by_form_id:
+        # Stable sort: only reorders by workbook position, ties (including
+        # any form missing from the map) keep the name/version ordering above.
+        form_versions.sort(key=lambda pair: workbook_display_order_by_form_id.get(pair[1].id, 0))
+
+    selected_form_version_id = version_id_param
     if selected_form_version_id is None and form_versions:
         selected_form_version_id = form_versions[0][0].id
 

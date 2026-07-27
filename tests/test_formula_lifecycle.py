@@ -4,12 +4,18 @@ changing its calculation logic means creating an entirely new Formula, never
 a new version of the published one. create_new_formula_draft is the one
 enforcement point for that rule.
 """
+import uuid
 from datetime import datetime, timezone
 
 import pytest
 
-from app.modules.FRMULA.model import Formula
-from app.modules.FRMULA.service import create_new_formula_draft, delete_formula, publish_formula_version
+from app.modules.FRMULA.model import Formula, FormulaVersion
+from app.modules.FRMULA.service import (
+    create_formula,
+    create_new_formula_draft,
+    delete_formula,
+    publish_formula_version,
+)
 
 
 class TestFormulaFreezeAfterPublish:
@@ -159,3 +165,132 @@ class TestFormulaDelete:
 
         with pytest.raises(ValueError, match="Formula not found."):
             delete_formula(formula.id, actor.id, "second delete")
+
+
+class TestFormulaFormIdScoping:
+    """form_id is decided once at formula-creation time by whether the Formula
+    Builder's "Form context" selector was left on the sheet it opened from (the
+    original sheet's form_id is sent) or changed away from it (form_id is sent
+    as None, signalling cross-sheet intent -- see the Save Draft handler in
+    static/js/formula_builder.js). This exercises what publish_formula_version
+    does with each of those two persisted states."""
+
+    def test_form_id_set_still_rejects_a_different_sheets_field_code(
+        self, make_form, make_field, make_user, created_objects,
+    ):
+        """Selector left untouched -> form_id is the original sheet's id ->
+        publish stays scoped to that sheet's fields, so a token that only
+        exists on a different sheet is still rejected (the per-form
+        uq_fields_code_per_form safety net this scoping exists for)."""
+        sheet_a, sheet_a_version = make_form()
+        sheet_b, sheet_b_version = make_form()
+        make_field(sheet_a, sheet_a_version, "diesel_liters", field_type="number")
+        make_field(sheet_b, sheet_b_version, "petrol_liters", field_type="number")
+
+        user = make_user()
+        code = f"same-sheet-{uuid.uuid4().hex[:10]}"
+        formula = create_formula(
+            "Same Sheet Formula", code, "petrol_liters + 1",
+            {"petrol_liters": "petrol_liters"}, user.id, form_id=sheet_a.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id).order_by(
+            FormulaVersion.version_number.desc()
+        ).first()
+        created_objects.append(version)
+
+        assert formula.form_id == sheet_a.id
+
+        with pytest.raises(ValueError, match="petrol_liters"):
+            publish_formula_version(version.id, user.id)
+
+    def test_form_id_null_after_selector_changed_publishes_across_sheets(
+        self, make_form, make_field, make_user, created_objects,
+    ):
+        """Selector changed away from the original sheet -> form_id is sent
+        as None -> publish falls back to the unscoped, system-wide field
+        check, so a formula referencing fields from two different sheets
+        publishes successfully."""
+        sheet_a, sheet_a_version = make_form()
+        sheet_b, sheet_b_version = make_form()
+        make_field(sheet_a, sheet_a_version, "diesel_liters", field_type="number")
+        make_field(sheet_b, sheet_b_version, "petrol_liters", field_type="number")
+
+        user = make_user()
+        code = f"cross-sheet-{uuid.uuid4().hex[:10]}"
+        formula = create_formula(
+            "Cross Sheet Formula", code, "diesel_liters + petrol_liters",
+            {"diesel_liters": "diesel_liters", "petrol_liters": "petrol_liters"},
+            user.id, form_id=None,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id).order_by(
+            FormulaVersion.version_number.desc()
+        ).first()
+        created_objects.append(version)
+
+        assert formula.form_id is None
+
+        publish_formula_version(version.id, user.id)
+
+        assert version.published_at is not None
+
+
+class TestFormulaBuilderFormVersionOptions:
+    """The "Form context" selector's option list (FRMULA/views.py's index(),
+    form_versions) is scoped to sheets in the SAME workbook as the sheet the
+    builder was opened from -- cross-sheet formulas are only ever meant to
+    span sheets within one workbook (cross-site aggregation is RPTBLD's job,
+    not FRMULA's). form.name is rendered exactly once in
+    formula_builder.html, inside this selector's <option> loop, so checking
+    for it in the response body is an unambiguous stand-in for "is this Form
+    an option in the dropdown"."""
+
+    def test_only_includes_sibling_sheets_from_the_same_workbook(
+        self, client, make_site, make_form, make_workbook, make_user,
+        make_access_grant, db_session, created_objects,
+    ):
+        from app.modules.WKBK.model import WorkbookForm
+
+        site = make_site()
+        form_a, form_a_version = make_form()
+        form_b, form_b_version = make_form()
+        form_c, _form_c_version = make_form()
+
+        workbook = make_workbook(form_a, site)
+        wf_b = WorkbookForm(workbook_id=workbook.id, form_id=form_b.id, display_order=20)
+        db_session.add(wf_b)
+        db_session.flush()
+        created_objects.append(wf_b)
+        # form_c is left unattached to this (or any) workbook -- an unrelated sheet.
+
+        user = make_user()
+        make_access_grant(user, "formula", scope_type="global", can_view=True)
+        with client.session_transaction() as sess:
+            sess["user_id"] = user.id
+
+        resp = client.get(f"/module/FRMULA/?form_id={form_a.id}&version_id={form_a_version.id}")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+
+        assert form_a.name in html
+        assert form_b.name in html
+        assert form_c.name not in html
+
+    def test_sheet_with_no_workbook_falls_back_to_itself_only(
+        self, client, make_form, make_user, make_access_grant,
+    ):
+        form_a, form_a_version = make_form()
+        form_b, _form_b_version = make_form()  # unrelated sheet, also no workbook
+
+        user = make_user()
+        make_access_grant(user, "formula", scope_type="global", can_view=True)
+        with client.session_transaction() as sess:
+            sess["user_id"] = user.id
+
+        resp = client.get(f"/module/FRMULA/?form_id={form_a.id}&version_id={form_a_version.id}")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+
+        assert form_a.name in html
+        assert form_b.name not in html
