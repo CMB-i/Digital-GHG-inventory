@@ -741,11 +741,23 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     if (!state.requestedWorkbookId) {
-      setEmpty(
-        "Missing workbook context.",
-        "Open this workbook from My Workbooks so the workbook link includes a workbook ID."
-      );
-      return;
+      // Some deep links (e.g. the "reporting period is open" notification)
+      // only carry a site_id. If this user has exactly one live workbook at
+      // that site there's no real ambiguity to ask them about, so auto-select
+      // it instead of dead-ending. Genuine ambiguity (0 or >1 workbooks for
+      // this site) still falls through to the message below.
+      const siteWorkbooks = state.requestedSiteId
+        ? (state.options.workbooks_by_site[String(state.requestedSiteId)] || [])
+        : [];
+      if (state.requestedSiteId && siteWorkbooks.length === 1) {
+        state.requestedWorkbookId = parseInt(siteWorkbooks[0].id || siteWorkbooks[0].workbook_id, 10);
+      } else {
+        setEmpty(
+          "Missing workbook context.",
+          "Open this workbook from My Workbooks so the workbook link includes a workbook ID."
+        );
+        return;
+      }
     }
 
     const requestedSite = state.options.sites.find(site => parseInt(site.id) === state.requestedSiteId);

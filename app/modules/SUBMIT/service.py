@@ -255,6 +255,33 @@ def _get_user_workbook_site_ids(user_id):
     return {row.site_id for row in rows}
 
 
+def _get_user_live_workbooks_for_site(user_id, site_id):
+    """
+    Live (active, published/live-status) workbooks this user is assigned
+    (via WorkbookSiteSubmitter) to submit for at this specific site -- the
+    same per-site lookup get_annual_workbook_options() runs in its loop,
+    factored out so a single-site resolution (e.g. NOTIFY's deep-link
+    workbook_id lookup) doesn't have to duplicate the query.
+    """
+    return (
+        db.session.query(Workbook)
+        .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+        .join(
+            WorkbookSiteSubmitter,
+            (WorkbookSiteSubmitter.workbook_id == Workbook.id)
+            & (WorkbookSiteSubmitter.site_id == WorkbookSite.site_id),
+        )
+        .filter(
+            WorkbookSite.site_id == site_id,
+            WorkbookSiteSubmitter.user_id == user_id,
+            Workbook.is_active == True,
+            db.func.lower(Workbook.status).in_(LIVE_WORKBOOK_STATUSES),
+        )
+        .order_by(Workbook.name.asc(), Workbook.id.asc())
+        .all()
+    )
+
+
 class DuplicateSubmissionError(Exception):
     def __init__(self, existing_id):
         self.existing_id = existing_id
@@ -976,23 +1003,7 @@ def get_annual_workbook_options(user_id):
     forms_by_site = {}
     workbooks_by_site = {}
     for site in sites:
-        workbook_rows = (
-            db.session.query(Workbook)
-            .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
-            .join(
-                WorkbookSiteSubmitter,
-                (WorkbookSiteSubmitter.workbook_id == Workbook.id)
-                & (WorkbookSiteSubmitter.site_id == WorkbookSite.site_id),
-            )
-            .filter(
-                WorkbookSite.site_id == site.id,
-                WorkbookSiteSubmitter.user_id == user_id,
-                Workbook.is_active == True,
-                db.func.lower(Workbook.status).in_(LIVE_WORKBOOK_STATUSES),
-            )
-            .order_by(Workbook.name.asc(), Workbook.id.asc())
-            .all()
-        )
+        workbook_rows = _get_user_live_workbooks_for_site(user_id, site.id)
         site_workbooks = []
         legacy_forms = []
         for workbook in workbook_rows:

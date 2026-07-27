@@ -11,10 +11,36 @@ from app.modules.NOTIFY.service import (
     mark_as_read,
     mark_all_as_read
 )
-from app.modules.SUBMIT.service import fy_start_year_for
+from app.modules.SUBMIT.service import fy_start_year_for, _get_user_live_workbooks_for_site
 
 MODULE_CODE = "NOTIFY"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
+
+
+def _annual_workbook_link(user_id, site_id, fy_start, month, form_id=None):
+    """
+    Build a /module/SUBMIT/annual deep link, including workbook_id whenever it
+    can be resolved unambiguously. annual_workbook.js hard-requires a
+    workbook_id to render anything (see its "Missing workbook context"
+    dead-end) even when the user's site access/assignment data is otherwise
+    correct, so a link built without one is silently broken.
+
+    Zero or multiple live workbooks at this site are both genuinely ambiguous
+    (no assignment yet, or this site is reachable through more than one
+    workbook) -- rather than guess one or build a site-filter UI for My
+    Workbooks (it doesn't read any query params today, see spoc_sheets.js),
+    both fall back to the plain My Workbooks page, where the user can see and
+    pick from their own actual assignments.
+    """
+    workbooks = _get_user_live_workbooks_for_site(user_id, site_id)
+    if len(workbooks) != 1:
+        return "/module/SUBMIT/"
+
+    params = f"site_id={site_id}"
+    if form_id is not None:
+        params += f"&form_id={form_id}"
+    params += f"&fy={fy_start}&month={month}&workbook_id={workbooks[0].id}"
+    return f"/module/SUBMIT/annual?{params}"
 
 
 def _resolve_notification_link(notification, user):
@@ -33,7 +59,7 @@ def _resolve_notification_link(notification, user):
         if not can_enter:
             return link_url
         fy_start = fy_start_year_for(period.year, period.month)
-        return f"/module/SUBMIT/annual?site_id={period.site_id}&fy={fy_start}&month={period.month}"
+        return _annual_workbook_link(user.id, period.site_id, fy_start, period.month)
 
     if notification.entity_type != "submission":
         return link_url
@@ -50,10 +76,10 @@ def _resolve_notification_link(notification, user):
 
             period = ReportingPeriod.query.get(submission.reporting_period_id)
             if period:
-                return (
-                    f"/module/SUBMIT/annual?site_id={submission.site_id}"
-                    f"&form_id={submission.form_id}&fy={fy_start_year_for(period.year, period.month)}"
-                    f"&month={period.month}"
+                return _annual_workbook_link(
+                    user.id, submission.site_id,
+                    fy_start_year_for(period.year, period.month), period.month,
+                    form_id=submission.form_id,
                 )
         return f"/module/SUBMIT/submissions/{notification.entity_id}"
 
