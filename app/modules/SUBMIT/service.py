@@ -1369,7 +1369,229 @@ def _monthly_series_for_results(rows, monthly_fields):
 DEFAULT_AGGREGATE_BLANK_POLICY = "partial"
 
 
-def _compose_sheet_results(result_fields, monthly_fields, rows):
+def _monthly_rows_for_calc(site_id, form, monthly_fields, fy_start_year):
+    """
+    Minimal per-month `values` rows for a form's monthly fields -- just
+    enough for _monthly_series_for_results() to build FY aggregates from.
+    This is compose_annual_workbook_data()'s row-building loop with every
+    UI-only field (editability, issues, submission status, last_saved, ...)
+    stripped out, for use when resolving a SIBLING sheet's own results (see
+    _CrossSheetResolver) -- that sheet isn't the one being viewed, so none of
+    that payload is needed, only the raw values its formulas depend on.
+    """
+    months = _fy_months(fy_start_year)
+    periods = ReportingPeriod.query.filter(
+        ReportingPeriod.site_id == site_id,
+        ReportingPeriod.is_deleted == False,
+        tuple_(ReportingPeriod.year, ReportingPeriod.month).in_(
+            [(item["year"], item["month"]) for item in months]
+        ),
+    ).all()
+    period_by_key = {(period.year, period.month): period for period in periods}
+
+    submissions = Submission.query.filter(
+        Submission.site_id == site_id,
+        Submission.form_id == form.id,
+        Submission.is_deleted == False,
+        Submission.reporting_period_id.in_([period.id for period in periods] or [0]),
+    ).all()
+    submission_by_period = {submission.reporting_period_id: submission for submission in submissions}
+
+    calc_preview = _compute_preview_calculated_values(list(submissions), monthly_fields)
+
+    rows = []
+    for item in months:
+        period = period_by_key.get((item["year"], item["month"]))
+        submission = submission_by_period.get(period.id) if period else None
+        values = _submission_values_payload(submission, monthly_fields)
+        if submission and submission.id in calc_preview:
+            for code, preview in calc_preview[submission.id].items():
+                preview_val = preview.get("value") if preview.get("status") == CALC_STATUS_OK else None
+                if preview_val is not None and values.get(code) in (None, ""):
+                    values[code] = preview_val
+        rows.append({**item, "values": values})
+    return rows
+
+
+class _CrossSheetResolver:
+    """
+    Resolves formula tokens that reference ANOTHER sheet's "Sheet/FY result
+    below table" field (e.g. GRI Summary's fields summing Cargo Handled's,
+    Electricity's, and Fuel Consumption's own FY totals), scoped to sheets in
+    the same workbook -- matching the boundary FRMULA's cross-sheet formula
+    builder already establishes in its UI (cross-SITE aggregation stays
+    RPTBLD's job, not this).
+
+    Design choice (see the annual/cross-sheet formula brief this class was
+    added for): sheet-level results have no persisted store anywhere --
+    unlike a monthly field's calculated_value (persisted on SubmissionValue
+    via resolve_calculated_fields(persist=True)), _compose_sheet_results has
+    always been computed fresh and read-only, every request, with nothing
+    equivalent to write to. Adding that persistence would mean solving
+    invalidation too: every monthly autosave on a sheet would need to know
+    which OTHER sheets' formulas transitively depend on it and recompute
+    theirs as well -- a real recalculation-graph engine, well beyond this
+    fix. Recomputing sibling sheets on demand instead is correct by
+    construction (always current, no staleness), and cheap relative to what
+    this request already does: compose_annual_workbook_data() already runs
+    this exact monthly+annual pipeline once for the sheet being viewed, so
+    extending it to also run (once, memoized) for whichever OTHER sheets are
+    actually referenced -- typically a handful in a workbook this size --
+    is the same cost class, not a new one. This is a read path (a page
+    load), not a hot write path, so recompute-on-read is an honest
+    trade-off, not a shortcut.
+
+    Cross-sheet cycles (point 3): resolution is a plain recursive DFS across
+    sheets (resolve() -> _results_for_form() -> resolve() -> ...), so a
+    cycle is just a sheet whose resolution is already in progress on the
+    current call stack (self._resolving). That's detected and reported as a
+    blocking "error" (not "pending" -- a structural cycle will never
+    resolve no matter how much data is entered) rather than recursing
+    forever.
+    """
+
+    def __init__(self, site_id, fy_start_year, sheet_rows):
+        self.site_id = site_id
+        self.fy_start_year = fy_start_year
+        self.form_by_id = {form.id: form for _workbook_form, form in sheet_rows}
+        self.label_by_form_id = {
+            form.id: (workbook_form.sheet_label or human_sheet_label(form))
+            for workbook_form, form in sheet_rows
+        }
+        self._shape_cache = {}    # form.id -> (fields, monthly_fields, sheet_result_fields)
+        self._field_cache = {}    # form.id -> {field_code: field_payload}
+        self._results_cache = {}  # form.id -> {field_code: result_dict}
+        self._resolving = set()   # form.ids currently on the resolution call stack
+
+    def _sheet_shape_for(self, form):
+        """
+        (fields, monthly_fields, sheet_result_fields) for `form`, memoized --
+        computed once no matter how many tokens end up asking about this
+        sheet. sheet_result_fields includes synthesize_automatic_fy_totals()'s
+        synthetic entries (e.g. "upstream_monthly__auto_fy_total") -- those
+        exist only in memory, never as a real Field row, so a cross-sheet
+        formula referencing one would otherwise never be found.
+        """
+        if form.id not in self._shape_cache:
+            fields = _field_payload(form.current_version_id)
+            sections = _sections_payload(form.current_version_id)
+            monthly_fields = monthly_table_fields(fields, sections)
+            explicit_result_fields = [field for field in fields if is_sheet_result_field(field)]
+            sheet_result_fields = explicit_result_fields + synthesize_automatic_fy_totals(
+                monthly_fields, explicit_result_fields
+            )
+            self._shape_cache[form.id] = (fields, monthly_fields, sheet_result_fields)
+        return self._shape_cache[form.id]
+
+    def _fields_for(self, form):
+        if form.id not in self._field_cache:
+            fields, _monthly_fields, sheet_result_fields = self._sheet_shape_for(form)
+            combined = {field["field_code"]: field for field in fields}
+            for field in sheet_result_fields:
+                combined.setdefault(field["field_code"], field)
+            self._field_cache[form.id] = combined
+        return self._field_cache[form.id]
+
+    def _owner_form_for_code(self, code, exclude_form_id):
+        # Iterates sheet_rows' display order for a deterministic match in the
+        # (practically impossible, given timestamp-based field codes -- see
+        # uq_fields_code_per_form, which only guarantees uniqueness *within*
+        # one form) case of a code collision across two sibling sheets.
+        for form_id, form in self.form_by_id.items():
+            if form_id == exclude_form_id:
+                continue
+            if code in self._fields_for(form):
+                return form
+        return None
+
+    def resolve(self, code, requesting_form_id):
+        """
+        code isn't a field on the requesting sheet itself (that's already
+        been checked by the caller) -- look for it on a sibling sheet.
+        Returns None if it isn't a field anywhere in the workbook (a
+        genuinely broken/stale token reference -- unchanged "Unknown formula
+        variable" behavior). Otherwise returns:
+          {"ok": True, "value": float, "partial": bool, "note": str|None}
+        or
+          {"ok": False, "hard_error": bool, "message": str}
+        """
+        owner = self._owner_form_for_code(code, exclude_form_id=requesting_form_id)
+        if owner is None:
+            return None
+
+        owner_label = self.label_by_form_id.get(owner.id, owner.code)
+
+        if owner.id in self._resolving:
+            return {
+                "ok": False,
+                "hard_error": True,
+                "message": f"Circular cross-sheet formula dependency involving sheet '{owner_label}'.",
+            }
+
+        result = self._results_for_form(owner).get(code) or {}
+        owner_field = self._fields_for(owner).get(code) or {}
+        field_label = owner_field.get("field_name") or code
+        status = result.get("status")
+
+        if status in ("calculated", "partial"):
+            is_partial = status == "partial"
+            return {
+                "ok": True,
+                "value": result.get("value"),
+                "partial": is_partial,
+                "note": (
+                    f"'{field_label}' from '{owner_label}' is itself a partial result "
+                    f"({result.get('message') or 'not all months entered'})."
+                    if is_partial else None
+                ),
+            }
+
+        reason = result.get("message") or "not calculated yet"
+        return {
+            "ok": False,
+            "hard_error": status == "error",
+            "message": f"Waiting on '{owner_label}' → '{field_label}': {reason}",
+        }
+
+    def resolve_external_for(self, form):
+        """
+        Returns a resolve_external callable scoped to `form`, and marks it as
+        currently resolving (for cycle detection) until finish_external_for
+        is called. Used both for sibling sheets (internally, from
+        _results_for_form) and for the sheet actually being viewed
+        (compose_annual_workbook_data calls these two directly, so its own
+        richer/UI row-building isn't duplicated through _results_for_form).
+        """
+        self._resolving.add(form.id)
+        return lambda code: self.resolve(code, form.id)
+
+    def finish_external_for(self, form, sheet_results):
+        self._resolving.discard(form.id)
+        self._results_cache[form.id] = {result["field_code"]: result for result in sheet_results}
+
+    def _results_for_form(self, form):
+        if form.id in self._results_cache:
+            return self._results_cache[form.id]
+
+        _fields, monthly_fields, sheet_result_fields = self._sheet_shape_for(form)
+        rows = _monthly_rows_for_calc(self.site_id, form, monthly_fields, self.fy_start_year)
+
+        resolve_external = self.resolve_external_for(form)
+        sheet_results = _compose_sheet_results(
+            sheet_result_fields, monthly_fields, rows, resolve_external=resolve_external
+        )
+        self.finish_external_for(form, sheet_results)
+        return self._results_cache[form.id]
+
+
+def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external=None):
+    """
+    resolve_external, if given, is called as resolve_external(field_code)
+    for any bare (non-SUM_MONTHS) formula token that isn't a monthly field or
+    another result field on THIS sheet -- i.e. a genuine cross-sheet
+    reference. See _CrossSheetResolver.resolve() for its contract; the
+    only real caller.
+    """
     if not result_fields:
         return []
 
@@ -1468,6 +1690,52 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
                     strict_block_messages.append(f"{name} is missing for {preview}{suffix}.")
             context_values[name] = series_values
 
+        # Bare (non-SUM_MONTHS) references to another calculated result
+        # field -- same-sheet, or (via resolve_external) a sibling sheet's --
+        # need their dependency's status checked before evaluate_formula
+        # runs. Without this, a field that's legitimately still
+        # pending/errored upstream surfaces as a misleading "Unknown formula
+        # variable" (evaluate_formula's NameNotDefined) instead of a clear
+        # "waiting on X" / propagated error. A same-sheet dependency that's
+        # part of THIS sheet's own cycle is left alone here -- the existing
+        # cyclic-reclassification pass below already owns that case.
+        pending_dependency_messages = []
+        error_dependency_messages = []
+        external_partial_notes = []
+        for name in token_keys_by_code[code]:
+            if name in aggregate_names or name in value_set_snapshot or name in context_values:
+                continue
+            if name in fields_by_code:
+                if name in cyclic_set:
+                    continue
+                dep_result = results_by_code.get(name)
+                dep_label = fields_by_code[name].get("field_name") or name
+                if dep_result and dep_result.get("status") == "error":
+                    error_dependency_messages.append(
+                        f"'{dep_label}' could not be calculated ({dep_result.get('message') or 'error'})."
+                    )
+                else:
+                    reason = (dep_result or {}).get("message") or "has not been entered yet"
+                    pending_dependency_messages.append(f"'{dep_label}' is not calculated yet ({reason}).")
+                continue
+            if resolve_external is None:
+                continue
+            external = resolve_external(name)
+            if external is None:
+                # Not a field anywhere reachable -- a genuinely broken/stale
+                # token reference. Fall through unchanged: evaluate_formula's
+                # NameNotDefined will produce the existing "Unknown formula
+                # variable" error.
+                continue
+            if external.get("ok"):
+                context_values[name] = external.get("value")
+                if external.get("note"):
+                    external_partial_notes.append(external["note"])
+            elif external.get("hard_error"):
+                error_dependency_messages.append(external.get("message") or f"'{name}' could not be calculated.")
+            else:
+                pending_dependency_messages.append(external.get("message") or f"'{name}' is not available yet.")
+
         # Informational only -- with a topological pass order, this is only
         # ever non-empty for fields left over in a dependency cycle.
         unresolved_deps_by_code[code] = [
@@ -1475,10 +1743,18 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
             if name in fields_by_code and name not in result_values
         ]
 
-        if unavailable_messages:
+        if unavailable_messages or error_dependency_messages:
+            results_by_code[code] = {
+                "status": "error" if error_dependency_messages else "needs_input",
+                "message": "Cannot calculate: " + " ".join(unavailable_messages + error_dependency_messages),
+                "source_field_codes": sorted(aggregate_names),
+            }
+            return
+
+        if pending_dependency_messages:
             results_by_code[code] = {
                 "status": "needs_input",
-                "message": "Cannot calculate: " + " ".join(unavailable_messages),
+                "message": "Cannot calculate: " + " ".join(pending_dependency_messages),
                 "source_field_codes": sorted(aggregate_names),
             }
             return
@@ -1520,17 +1796,23 @@ def _compose_sheet_results(result_fields, monthly_fields, rows):
                     pass
             result_values[code] = result
 
-            # "calculated" means literally every month is present, not just
-            # "no error" -- any missing month (permitted through because
-            # blank_policy isn't "strict") makes this "partial" instead, so
-            # the two statuses never overlap.
-            if combined_missing_months:
+            # "calculated" means literally every month is present AND every
+            # cross-sheet dependency is itself a full (non-partial) result --
+            # not just "no error". Any missing month (permitted through
+            # because blank_policy isn't "strict"), or a cross-sheet
+            # dependency that's itself only "partial", makes this "partial"
+            # instead, so the two statuses never overlap.
+            if combined_missing_months or external_partial_notes:
+                message_parts = []
+                if combined_missing_months:
+                    message_parts.append(f"{total_present} of {total_months} months entered.")
+                message_parts.extend(external_partial_notes)
                 results_by_code[code] = {
                     "status": "partial",
                     "value": result,
-                    "message": f"{total_present} of {total_months} months entered.",
-                    "months_entered": total_present,
-                    "months_total": total_months,
+                    "message": " ".join(message_parts),
+                    "months_entered": total_present if total_months else None,
+                    "months_total": total_months if total_months else None,
                     "source_field_codes": sorted(aggregate_names),
                 }
             else:
@@ -1687,7 +1969,19 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
             "is_active_period": bool(period and period.status == "OPEN"),
         })
 
-    sheet_results = _compose_sheet_results(sheet_result_fields, monthly_fields, rows)
+    # Resolves any formula token that isn't a field on this sheet against
+    # sibling sheets in the same workbook (see _CrossSheetResolver) -- e.g.
+    # GRI Summary's fields referencing Cargo Handled's/Electricity's/Fuel
+    # Consumption's own FY totals. resolve_external_for()/finish_external_for()
+    # (rather than routing through the resolver's internal _results_for_form)
+    # so this sheet's already-built, UI-rich `rows` aren't recomputed a
+    # second time through the resolver's lighter-weight path.
+    cross_sheet_resolver = _CrossSheetResolver(site_id, fy_start_year, sheet_rows)
+    resolve_external = cross_sheet_resolver.resolve_external_for(form)
+    sheet_results = _compose_sheet_results(
+        sheet_result_fields, monthly_fields, rows, resolve_external=resolve_external
+    )
+    cross_sheet_resolver.finish_external_for(form, sheet_results)
 
     return {
         "financial_year": {

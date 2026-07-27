@@ -309,6 +309,133 @@ class TestComposeSheetResultsPartialAggregates:
         assert "missing for" in result["message"]
 
 
+class TestComposeSheetResultsDependencyPropagation:
+    """
+    A result field's formula can reference another result field directly (a
+    bare, non-SUM_MONTHS token) -- same-sheet, or, via resolve_external, a
+    sibling sheet's (see _CrossSheetResolver and TestCrossSheetResults in
+    tests/test_cross_sheet_results.py for the full cross-sheet path). Before
+    this, a dependency that was itself legitimately still pending/errored
+    made evaluate_formula raise NameNotDefined, surfacing as a generic
+    "Unknown formula variable" -- confusing, since the token DOES exist, it
+    just hasn't resolved yet. Every case here was previously unreachable in
+    practice (no sheet had a result field referencing another result field
+    directly, only SUM_MONTHS of its own monthly fields), which is why it
+    went unnoticed until GRI Summary's cross-sheet formulas hit the same
+    pattern.
+    """
+
+    def test_same_sheet_pending_dependency_surfaces_as_needs_input_not_unknown_variable(self, make_formula_version):
+        formula_a = make_formula_version("SUM_MONTHS(diesel_kl)", {"diesel_kl": {}})
+        formula_b = make_formula_version("field_a * 2", {"field_a": {}})
+        field_a = {
+            "field_id": 1, "field_code": "field_a", "field_name": "Field A",
+            "field_type": "calculated", "field_config": {"formula_version_id": formula_a.id},
+        }
+        field_b = {
+            "field_id": 2, "field_code": "field_b", "field_name": "Field B",
+            "field_type": "calculated", "field_config": {"formula_version_id": formula_b.id},
+        }
+        monthly_fields = [{"field_code": "diesel_kl", "field_type": "number", "frequency": "monthly"}]
+        rows = [{"label": "Apr", "values": {"diesel_kl": None}}]  # nothing entered
+
+        results = {r["field_code"]: r for r in _compose_sheet_results([field_a, field_b], monthly_fields, rows)}
+
+        assert results["field_a"]["status"] == "needs_input"
+        assert results["field_b"]["status"] == "needs_input"
+        assert "Unknown formula variable" not in results["field_b"]["message"]
+        assert "Field A" in results["field_b"]["message"]
+
+    def test_same_sheet_errored_dependency_propagates_as_error(self, make_formula_version):
+        formula_a = make_formula_version("missing_field + 1", {"missing_field": {}})
+        formula_b = make_formula_version("field_a * 2", {"field_a": {}})
+        field_a = {
+            "field_id": 1, "field_code": "field_a", "field_name": "Field A",
+            "field_type": "calculated", "field_config": {"formula_version_id": formula_a.id},
+        }
+        field_b = {
+            "field_id": 2, "field_code": "field_b", "field_name": "Field B",
+            "field_type": "calculated", "field_config": {"formula_version_id": formula_b.id},
+        }
+
+        results = {r["field_code"]: r for r in _compose_sheet_results([field_a, field_b], [], [])}
+
+        assert results["field_a"]["status"] == "error"
+        assert results["field_b"]["status"] == "error"
+        assert "Field A" in results["field_b"]["message"]
+
+
+class TestComposeSheetResultsCrossSheetResolveExternal:
+    """
+    _compose_sheet_results's resolve_external contract in isolation, via a
+    hand-written stub -- the real caller (_CrossSheetResolver.resolve(), see
+    tests/test_cross_sheet_results.py) is exercised end-to-end elsewhere;
+    this pins down exactly what _compose_sheet_results does with each shape
+    resolve_external can return, without needing a real workbook/DB for it.
+    """
+
+    def _field(self, formula_version):
+        return {
+            "field_id": 1, "field_code": "gri_total", "field_name": "GRI Total",
+            "field_type": "calculated", "field_config": {"formula_version_id": formula_version.id},
+        }
+
+    def test_ok_value_is_used_in_formula(self, make_formula_version):
+        formula = make_formula_version("cargo_fy_total * 2", {"cargo_fy_total": {}})
+        resolve_external = lambda code: {"ok": True, "value": 21} if code == "cargo_fy_total" else None
+
+        results = _compose_sheet_results([self._field(formula)], [], [], resolve_external=resolve_external)
+
+        assert results[0]["status"] == "calculated"
+        assert results[0]["value"] == 42
+
+    def test_pending_upstream_surfaces_as_needs_input_with_clear_message(self, make_formula_version):
+        formula = make_formula_version("cargo_fy_total * 2", {"cargo_fy_total": {}})
+        message = "Waiting on 'Cargo Handled' → 'FY Total Cargo': Cannot calculate: no months have been entered yet."
+        resolve_external = lambda code: {"ok": False, "hard_error": False, "message": message}
+
+        results = _compose_sheet_results([self._field(formula)], [], [], resolve_external=resolve_external)
+
+        assert results[0]["status"] == "needs_input"
+        assert "Waiting on 'Cargo Handled'" in results[0]["message"]
+
+    def test_hard_error_upstream_surfaces_as_error(self, make_formula_version):
+        formula = make_formula_version("cargo_fy_total * 2", {"cargo_fy_total": {}})
+        message = "Circular cross-sheet formula dependency involving sheet 'Cargo Handled'."
+        resolve_external = lambda code: {"ok": False, "hard_error": True, "message": message}
+
+        results = _compose_sheet_results([self._field(formula)], [], [], resolve_external=resolve_external)
+
+        assert results[0]["status"] == "error"
+        assert "Circular cross-sheet" in results[0]["message"]
+
+    def test_partial_upstream_downgrades_result_to_partial_with_note(self, make_formula_version):
+        formula = make_formula_version("cargo_fy_total * 2", {"cargo_fy_total": {}})
+        note = "'FY Total Cargo' from 'Cargo Handled' is itself a partial result (1 of 12 months entered.)."
+        resolve_external = lambda code: {"ok": True, "value": 21, "partial": True, "note": note}
+
+        results = _compose_sheet_results([self._field(formula)], [], [], resolve_external=resolve_external)
+
+        assert results[0]["status"] == "partial"
+        assert results[0]["value"] == 42
+        assert note in results[0]["message"]
+        # No monthly aggregate operands were involved at all, so there's no
+        # "X of Y months" fraction to report -- must stay None, not "0 of 0".
+        assert results[0]["months_total"] is None
+
+    def test_unresolvable_token_falls_through_to_existing_unknown_variable_error(self, make_formula_version):
+        # resolve_external returning None means "not a field anywhere in the
+        # workbook" -- a genuinely broken/stale token reference, same as
+        # today's behavior with no resolve_external at all.
+        formula = make_formula_version("ghost_field + 1", {"ghost_field": {}})
+        resolve_external = lambda code: None
+
+        results = _compose_sheet_results([self._field(formula)], [], [], resolve_external=resolve_external)
+
+        assert results[0]["status"] == "error"
+        assert "Unknown formula variable" in results[0]["message"]
+
+
 class TestAutomaticFyTotals:
     """
     Every monthly numeric field (raw input or a per-row calculated field)
