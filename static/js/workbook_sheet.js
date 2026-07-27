@@ -551,9 +551,22 @@
     return { footerResults: sheetResults || [], overflowResults: [] };
   }
 
-  function renderSheetResultFooterCell(result, showLabel) {
+  // Shared by renderSheetResultFooterCell (in-table FY TOTAL row) and
+  // renderSheetResultsOverflowHtml (GRI Summary's below-table section) --
+  // one source of truth for status color/label so the two never drift
+  // apart again. needs_input is the NORMAL, expected state for a period
+  // with no data entered yet -- it is not a warning, so it gets a calm,
+  // neutral slate treatment, distinct from a genuine "error" (a broken
+  // formula reference or a circular dependency), which keeps the amber
+  // warning color since it actually needs attention. not_configured (a
+  // formula never attached at all) keeps its existing distinct rose
+  // treatment, unchanged -- out of scope here, since it reads as more of a
+  // setup problem than either "waiting on data" or a runtime error.
+  function sheetResultStatusMeta(result) {
     const calculated = result.status === "calculated";
     const partial = result.status === "partial";
+    const notConfigured = result.status === "not_configured";
+    const isError = result.status === "error";
     // Partial keeps the same navy identity as a full "calculated" result
     // (it's a real, trustworthy number, just not from every month yet) but
     // at a lighter weight so it doesn't read as a settled final total.
@@ -562,41 +575,57 @@
       : partial
         ? "text-[#1a3a6b] font-medium"
         : "text-slate-400";
-    const statusClass = calculated
+    const badgeClass = calculated
       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
       : partial
         ? "border-blue-200 bg-blue-50 text-blue-700"
-        : result.status === "not_configured"
+        : notConfigured
           ? "border-rose-200 bg-rose-50 text-rose-700"
-          : "border-amber-200 bg-amber-50 text-amber-700";
-    const statusLabel = calculated
+          : isError
+            ? "border-amber-200 bg-amber-50 text-amber-700"
+            : "border-slate-200 bg-slate-100 text-slate-500";
+    const label = calculated
       ? "Calculated"
       : partial
         ? "Partial"
-        : result.status === "not_configured"
+        : notConfigured
           ? "Not configured"
-          : "Needs input";
+          : isError
+            ? "Error"
+            : "Needs input";
+    // Full message detail moves to the hover tooltip for needs_input --
+    // that's the common, expected "nothing entered yet" case, and showing
+    // its full sentence permanently under every single column produces a
+    // wall of repeated text. A genuine problem (error / not_configured)
+    // still needs attention, so it keeps its detail visible inline too.
+    const showInlineMessage = isError || notConfigured;
+    const messageClass = notConfigured ? "text-rose-700" : "text-amber-700";
+    return { calculated, partial, notConfigured, isError, valueClass, badgeClass, label, showInlineMessage, messageClass };
+  }
+
+  function renderSheetResultFooterCell(result, showLabel) {
+    const meta = sheetResultStatusMeta(result);
     // The fraction lives in the badge for a partial result ("PARTIAL · 7/12")
     // instead of repeating three times across the card -- next to the value,
     // in the badge, and again as a full sentence. A full "calculated" result
     // never shows a fraction since 12/12 is implied.
-    const badgeText = partial && result.months_total
-      ? `${statusLabel} · ${result.months_entered}/${result.months_total}`
-      : statusLabel;
+    const badgeText = meta.partial && result.months_total
+      ? `${meta.label} · ${result.months_entered}/${result.months_total}`
+      : meta.label;
     // Full detail (the "7 of 12 months entered." sentence, plus whatever
     // else the result carries) moves to a hover tooltip instead of staying
     // permanently visible on the card.
-    const tooltipParts = [statusLabel];
+    const tooltipParts = [meta.label];
     if (result.message) tooltipParts.push(result.message);
     const tooltipTitle = escapeHtml(tooltipParts.join(" · "));
     return `
       <div class="px-2 py-1.5 text-right" title="${tooltipTitle}">
         ${showLabel ? `<div class="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>` : ""}
-        <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
+        <div class="tabular-nums text-sm ${meta.valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
         <div class="mt-1 flex justify-end">
-          <span class="whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase ${statusClass}">${escapeHtml(badgeText)}</span>
+          <span class="whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase ${meta.badgeClass}">${escapeHtml(badgeText)}</span>
         </div>
-        ${result.message && !partial ? `<div class="mt-1 text-left text-[10px] font-medium text-amber-700">${escapeHtml(result.message)}</div>` : ""}
+        ${result.message && meta.showInlineMessage ? `<div class="mt-1 text-left text-[10px] font-medium ${meta.messageClass}">${escapeHtml(result.message)}</div>` : ""}
       </div>
     `;
   }
@@ -691,33 +720,39 @@
     `;
   }
 
-  function renderSheetResultsOverflowHtml(sheetResults) {
+  function renderSheetResultsOverflowHtml(sheetResults, options) {
+    // showAll: true is for callers with no monthly table at all (e.g. an
+    // annual-only sheet) -- there's no in-table footer row to fall back on,
+    // so every result must render here instead of just the overflow subset.
+    const showAll = options && options.showAll;
     const { overflowResults } = splitSheetResults(sheetResults);
-    if (!overflowResults.length) return "";
+    const results = showAll ? (Array.isArray(sheetResults) ? sheetResults : []) : overflowResults;
+    if (!results.length) return "";
 
     return `
       <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
         <div class="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-600">Sheet results</div>
         <div class="flex flex-wrap gap-x-6 gap-y-2">
-          ${overflowResults.map((result) => {
-            const calculated = result.status === "calculated";
-            const partial = result.status === "partial";
-            const valueClass = calculated
-              ? "text-[#1a3a6b] font-semibold"
-              : partial
-                ? "text-[#1a3a6b] font-medium"
-                : "text-slate-400";
-            const badgeSuffix = partial && result.months_total
-              ? ` (${result.months_entered}/${result.months_total})`
-              : "";
-            const tooltipParts = [calculated ? "Calculated" : partial ? "Partial" : (result.status || "")];
+          ${results.map((result) => {
+            // Same status meta as the in-table FY TOTAL footer cell
+            // (renderSheetResultFooterCell) -- badge color/label and
+            // "needs_input hides its message inline, error doesn't" both
+            // come from one shared place so the two never diverge again.
+            const meta = sheetResultStatusMeta(result);
+            const badgeText = meta.partial && result.months_total
+              ? `${meta.label} · ${result.months_entered}/${result.months_total}`
+              : meta.label;
+            const tooltipParts = [meta.label];
             if (result.message) tooltipParts.push(result.message);
             const tooltipTitle = escapeHtml(tooltipParts.filter(Boolean).join(" · "));
             return `
               <div class="min-w-[160px]" title="${tooltipTitle}">
-                <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}${escapeHtml(badgeSuffix)}</div>
-                <div class="tabular-nums text-sm ${valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
-                ${result.message && !partial ? `<div class="text-[10px] text-amber-700">${escapeHtml(result.message)}</div>` : ""}
+                <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(result.label || result.field_code || "Result")}</div>
+                <div class="tabular-nums text-sm ${meta.valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
+                <div class="mt-1">
+                  <span class="whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase ${meta.badgeClass}">${escapeHtml(badgeText)}</span>
+                </div>
+                ${result.message && meta.showInlineMessage ? `<div class="mt-1 text-[10px] font-medium ${meta.messageClass}">${escapeHtml(result.message)}</div>` : ""}
               </div>
             `;
           }).join("")}
