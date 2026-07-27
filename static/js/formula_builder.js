@@ -78,6 +78,11 @@ document.addEventListener("DOMContentLoaded", function () {
   const previewInputsGrid = document.getElementById("preview-inputs-grid");
   const previewResultValue = document.getElementById("preview-result-value");
   const formVersionSelect = document.getElementById("form-version-select");
+  const crossSheetHint = document.getElementById("cross-sheet-hint");
+  // Server-rendered starting selection, derived from _returnFormId/_returnVersionId
+  // (see index()'s selected_form_version_id). The user changing the selector away
+  // from this is the sole signal for cross-sheet intent -- no separate toggle.
+  const _originalFormVersionValue = formVersionSelect.value;
   const modalCreate = document.getElementById("modal-create");
   const btnCloseModal = document.getElementById("btn-close-modal");
   const btnCancelModal = document.getElementById("btn-cancel-modal");
@@ -778,8 +783,18 @@ document.addEventListener("DOMContentLoaded", function () {
       });
   }
 
+  function updateCrossSheetHint() {
+    if (!crossSheetHint) return;
+    const isCrossSheet = formVersionSelect.value !== _originalFormVersionValue;
+    crossSheetHint.classList.toggle("hidden", !isCrossSheet);
+  }
+
   formVersionSelect.onchange = function () {
+    // Only the palette's available fields change here -- the expression
+    // itself (expressionTextarea.value) is untouched, so tokens already
+    // inserted from the original sheet stay in the formula as-is.
     loadFormFields(formVersionSelect.value);
+    updateCrossSheetHint();
   };
 
   // ── Report-context palette: canonical metrics + per-group refs ────────
@@ -1030,12 +1045,17 @@ document.addEventListener("DOMContentLoaded", function () {
       if (selectedFormulaId === null) {
         const code = slugify(name);
         if (!code) { showToast("Could not generate a code from that name.", "error"); return; }
+        // Selector left on the sheet the builder opened from -> keep today's
+        // single-sheet scoping (_returnFormId). Selector changed -> the user
+        // wants to browse another sheet's fields, so form_id goes null and
+        // publish_formula_version falls back to its unscoped, all-sheets check.
+        const isCrossSheet = formVersionSelect.value !== _originalFormVersionValue;
         const createRes = await fetch("/module/FRMULA/api", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name, code, expression, tokens,
-            form_id: _returnFormId ? parseInt(_returnFormId, 10) : null,
+            form_id: isCrossSheet ? null : (_returnFormId ? parseInt(_returnFormId, 10) : null),
             context: _isReportContext ? "report" : "field",
           })
         });
