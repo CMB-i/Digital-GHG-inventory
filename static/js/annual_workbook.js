@@ -534,7 +534,7 @@ document.addEventListener("DOMContentLoaded", function () {
   // Update save status text every 30 seconds
   setInterval(updateLastSavedText, 30000);
 
-  function renderSheetResultsOverflow(sheetResults) {
+  function renderSheetResultsOverflow(sheetResults, options) {
     if (!sheetResultsSection) return;
     const results = Array.isArray(sheetResults) ? sheetResults : [];
     if (!window.WorkbookSheet || typeof window.WorkbookSheet.renderSheetResultsOverflowHtml !== "function") {
@@ -542,7 +542,7 @@ document.addEventListener("DOMContentLoaded", function () {
       sheetResultsSection.innerHTML = "";
       return;
     }
-    const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(results);
+    const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(results, options);
     if (!html) {
       sheetResultsSection.classList.add("hidden");
       sheetResultsSection.innerHTML = "";
@@ -560,50 +560,63 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const fields = state.workbook.fields || [];
     const rows = state.workbook.rows || [];
+    const sheetResults = state.workbook.sheet_results || [];
+    const hasMonthlyFields = fields.length > 0;
 
-    if (!fields.length) {
+    // A sheet can have zero monthly-table fields and still have published
+    // fields if all of them are annual ("Sheet/FY result below table")
+    // fields -- those never appear in `fields` (backend sends them via
+    // sheet_results instead), so the empty state must only show when
+    // neither exists.
+    if (!hasMonthlyFields && !sheetResults.length) {
       setEmpty("No fields configured", "The selected form has no published fields.");
       return;
     }
 
     emptyEl.classList.add("hidden");
-    tableWrap.classList.remove("hidden");
     const mode = "entry";
 
-    const sheetResults = state.workbook.sheet_results || [];
+    if (hasMonthlyFields) {
+      tableWrap.classList.remove("hidden");
+      window.WorkbookSheet.render({
+        mode: mode,
+        headEl: tableHead,
+        bodyEl: tableBody,
+        fields,
+        sections: state.workbook.sections || [],
+        workbookValues: state.workbook.workbook_values || {},
+        canEditWorkbookValues: hasOpenWorkbookPeriod(),
+        sheetResults,
+        rows: rows.map(row => ({
+          ...row,
+          editable: mode === "calc_results" ? false : Boolean(row.editability && row.editability.editable),
+          reason: row.editability ? row.editability.reason : ""
+        })),
+        selectedRowKey: state.selectedRowKey,
+        onRowSelect: function (key) {
+          state.selectedRowKey = key;
+          renderTable();
+          renderHeader();
+        },
+        onCellChange: function(e) {
+          onCellChange(e);
+          triggerAutosave(e);
+        },
+        onWorkbookValueChange: function(e) {
+          onWorkbookValueChange(e);
+          triggerAutosave(e);
+        },
+        onCellOpen: openCellDetail
+      });
+    } else {
+      // No monthly table to show -- the sheet's fields are all annual, so
+      // the only thing to render is the FY/annual results section below.
+      tableWrap.classList.add("hidden");
+    }
 
-    window.WorkbookSheet.render({
-      mode: mode,
-      headEl: tableHead,
-      bodyEl: tableBody,
-      fields,
-      sections: state.workbook.sections || [],
-      workbookValues: state.workbook.workbook_values || {},
-      canEditWorkbookValues: hasOpenWorkbookPeriod(),
-      sheetResults,
-      rows: rows.map(row => ({
-        ...row,
-        editable: mode === "calc_results" ? false : Boolean(row.editability && row.editability.editable),
-        reason: row.editability ? row.editability.reason : ""
-      })),
-      selectedRowKey: state.selectedRowKey,
-      onRowSelect: function (key) {
-        state.selectedRowKey = key;
-        renderTable();
-        renderHeader();
-      },
-      onCellChange: function(e) {
-        onCellChange(e);
-        triggerAutosave(e);
-      },
-      onWorkbookValueChange: function(e) {
-        onWorkbookValueChange(e);
-        triggerAutosave(e);
-      },
-      onCellOpen: openCellDetail
-    });
-
-    renderSheetResultsOverflow(sheetResults);
+    // With no monthly table, nothing renders these results into an in-table
+    // footer, so show all of them here instead of just the overflow subset.
+    renderSheetResultsOverflow(sheetResults, { showAll: !hasMonthlyFields });
 
     // Check sent back badge
     const needsCorrectionRow = rows.find(row => 

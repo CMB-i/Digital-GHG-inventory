@@ -691,15 +691,20 @@
     `;
   }
 
-  function renderSheetResultsOverflowHtml(sheetResults) {
+  function renderSheetResultsOverflowHtml(sheetResults, options) {
+    // showAll: true is for callers with no monthly table at all (e.g. an
+    // annual-only sheet) -- there's no in-table footer row to fall back on,
+    // so every result must render here instead of just the overflow subset.
+    const showAll = options && options.showAll;
     const { overflowResults } = splitSheetResults(sheetResults);
-    if (!overflowResults.length) return "";
+    const results = showAll ? (Array.isArray(sheetResults) ? sheetResults : []) : overflowResults;
+    if (!results.length) return "";
 
     return `
       <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
         <div class="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-600">Sheet results</div>
         <div class="flex flex-wrap gap-x-6 gap-y-2">
-          ${overflowResults.map((result) => {
+          ${results.map((result) => {
             const calculated = result.status === "calculated";
             const partial = result.status === "partial";
             const valueClass = calculated
