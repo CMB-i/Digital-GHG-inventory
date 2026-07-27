@@ -1812,7 +1812,6 @@ document.addEventListener("DOMContentLoaded", function () {
       const formulaSelect = document.getElementById("prop-formula");
       const formulaHint   = document.getElementById("formula-publish-hint");
       const formulaOk     = document.getElementById("formula-status-ok");
-      const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
       const calcUnitInput = document.getElementById("prop-calc-unit");
       const calcDecimalsInput = document.getElementById("prop-calc-decimals");
       if (calcDecimalsInput) {
@@ -1832,13 +1831,29 @@ document.addEventListener("DOMContentLoaded", function () {
         formulaSelect.value = config.formula_version_id;
         if (formulaHint) formulaHint.classList.add("hidden");
         if (formulaOk)   formulaOk.classList.remove("hidden");
-        if (calcUnitWrap)  calcUnitWrap.classList.remove("hidden");
-        if (calcUnitInput) calcUnitInput.value = config.unit || "";
       } else {
         if (formulaHint)   formulaHint.classList.remove("hidden");
         if (formulaOk)     formulaOk.classList.add("hidden");
-        if (calcUnitWrap)  calcUnitWrap.classList.add("hidden");
-        if (calcUnitInput) calcUnitInput.value = "";
+      }
+      // Unit is a property of the field's output, independent of whether a
+      // formula happens to be attached yet -- always populated, never cleared
+      // by formula-attachment state.
+      if (calcUnitInput) {
+        const calcUnitVal = config.unit || "";
+        let found = false;
+        for (let i = 0; i < calcUnitInput.options.length; i++) {
+          if (calcUnitInput.options[i].value === calcUnitVal) {
+            found = true;
+            break;
+          }
+        }
+        if (!found && calcUnitVal) {
+          const opt = document.createElement("option");
+          opt.value = calcUnitVal;
+          opt.textContent = calcUnitVal;
+          calcUnitInput.appendChild(opt);
+        }
+        calcUnitInput.value = calcUnitVal;
       }
     }
 
@@ -2017,7 +2032,6 @@ document.addEventListener("DOMContentLoaded", function () {
       if (!field || field.field_type !== "calculated") return;
 
       field.field_config = field.field_config || {};
-      const calcUnitWrap  = document.getElementById("prop-calc-unit-wrap");
       const calcUnitInput = document.getElementById("prop-calc-unit");
       const formulaVal = propFormulaSelect.value;
       const prevFormulaId = field.field_config.formula_version_id;
@@ -2028,7 +2042,6 @@ document.addEventListener("DOMContentLoaded", function () {
         if (formulaChanged) {
           field.field_config.unit = "";
           if (calcUnitInput) calcUnitInput.value = "";
-          if (calcUnitWrap) calcUnitWrap.classList.remove("hidden");
           fetch(`/module/FRMULA/api/version/${formulaVal}`)
             .then(res => res.json())
             .then(resData => {
@@ -2040,8 +2053,6 @@ document.addEventListener("DOMContentLoaded", function () {
       } else {
         field.field_config.expression = "";
         field.field_config.tokens = [];
-        if (calcUnitInput) calcUnitInput.value = "";
-        if (calcUnitWrap) calcUnitWrap.classList.add("hidden");
       }
 
       isUnsaved = true;
