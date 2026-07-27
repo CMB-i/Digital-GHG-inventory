@@ -323,6 +323,10 @@ class TestComposeSheetResultsDependencyPropagation:
     directly, only SUM_MONTHS of its own monthly fields), which is why it
     went unnoticed until GRI Summary's cross-sheet formulas hit the same
     pattern.
+
+    A dependency chain's message is flattened to its ROOT cause(s), not
+    nested per hop -- see TestBlockingCauseFlattening below for that
+    specifically. These tests just cover the single-hop same-sheet case.
     """
 
     def test_same_sheet_pending_dependency_surfaces_as_needs_input_not_unknown_variable(self, make_formula_version):
@@ -339,14 +343,24 @@ class TestComposeSheetResultsDependencyPropagation:
         monthly_fields = [{"field_code": "diesel_kl", "field_type": "number", "frequency": "monthly"}]
         rows = [{"label": "Apr", "values": {"diesel_kl": None}}]  # nothing entered
 
-        results = {r["field_code"]: r for r in _compose_sheet_results([field_a, field_b], monthly_fields, rows)}
+        results = {
+            r["field_code"]: r for r in _compose_sheet_results(
+                [field_a, field_b], monthly_fields, rows, own_sheet_label="This Sheet",
+            )
+        }
 
         assert results["field_a"]["status"] == "needs_input"
         assert results["field_b"]["status"] == "needs_input"
         assert "Unknown formula variable" not in results["field_b"]["message"]
-        assert "Field A" in results["field_b"]["message"]
+        assert results["field_b"]["message"] == "Waiting on: This Sheet (Field A)."
+        assert results["field_b"]["blocking_causes"] == [("This Sheet", "Field A")]
 
-    def test_same_sheet_errored_dependency_propagates_as_error(self, make_formula_version):
+    def test_same_sheet_errored_dependency_propagates_root_cause_not_a_wrapper(self, make_formula_version):
+        # field_a's own formula references a token that doesn't exist
+        # anywhere (a genuinely broken/stale reference) -- ITS error message
+        # IS the root cause. field_b, which merely references field_a, must
+        # surface that same root cause directly, not a second-hand
+        # "'Field A' could not be calculated" wrapper around it.
         formula_a = make_formula_version("missing_field + 1", {"missing_field": {}})
         formula_b = make_formula_version("field_a * 2", {"field_a": {}})
         field_a = {
@@ -362,7 +376,104 @@ class TestComposeSheetResultsDependencyPropagation:
 
         assert results["field_a"]["status"] == "error"
         assert results["field_b"]["status"] == "error"
-        assert "Field A" in results["field_b"]["message"]
+        # Same root cause text on both -- field_b didn't wrap it in another layer.
+        assert results["field_a"]["error_causes"] == results["field_b"]["error_causes"]
+        assert "Unknown formula variable" in results["field_b"]["message"]
+        assert "Field A" not in results["field_b"]["message"]
+
+
+class TestBlockingCauseFlattening:
+    """
+    The actual bug this was written for: GRI Summary's intensity fields
+    depend on another GRI field (same-sheet) which itself depends on
+    cross-sheet fields, and before this fix each hop's full "Cannot
+    calculate: ..." text got embedded inside the next hop's message, 3-4
+    levels deep. A dependency chain must collapse to one flat, deduplicated,
+    per-sheet-grouped list of ROOT causes instead.
+    """
+
+    def test_two_hop_chain_flattens_to_the_cross_sheet_root_not_the_intermediate_field(self, make_formula_version):
+        # field_b (same sheet) depends on cross-sheet field_a via
+        # resolve_external; field_c depends on field_b. field_c's message
+        # must name the cross-sheet root directly, not "field_b is waiting on...".
+        formula_b = make_formula_version("upstream_total + 1", {"upstream_total": {}})
+        formula_c = make_formula_version("field_b * 2", {"field_b": {}})
+        field_b = {
+            "field_id": 1, "field_code": "field_b", "field_name": "Field B",
+            "field_type": "calculated", "field_config": {"formula_version_id": formula_b.id},
+        }
+        field_c = {
+            "field_id": 2, "field_code": "field_c", "field_name": "Field C",
+            "field_type": "calculated", "field_config": {"formula_version_id": formula_c.id},
+        }
+        resolve_external = lambda code: (
+            {"ok": False, "hard_error": False, "blocking_causes": [("Cargo Handled", "FY Total Cargo")]}
+            if code == "upstream_total" else None
+        )
+
+        results = {
+            r["field_code"]: r for r in _compose_sheet_results(
+                [field_b, field_c], [], [], resolve_external=resolve_external, own_sheet_label="GRI Summary",
+            )
+        }
+
+        assert results["field_b"]["message"] == "Waiting on: Cargo Handled (FY Total Cargo)."
+        # field_c's message names the ORIGINAL cross-sheet root directly --
+        # it does not say "Field B" or repeat "Cannot calculate" twice.
+        assert results["field_c"]["message"] == "Waiting on: Cargo Handled (FY Total Cargo)."
+        assert results["field_c"]["message"].count("Cannot calculate") == 0
+        assert "Field B" not in results["field_c"]["message"]
+
+    def test_multiple_cross_sheet_roots_are_grouped_by_sheet_and_deduplicated(self, make_formula_version):
+        # A field referencing two upstream fields, one of which resolves via
+        # two different (deduplicated) sheets, and one shared field code
+        # reached through more than one path (deduplicated within a sheet too).
+        formula = make_formula_version(
+            "electricity_gj + fuel_gj + electricity_tco2e", {"electricity_gj": {}, "fuel_gj": {}, "electricity_tco2e": {}},
+        )
+        field = {
+            "field_id": 1, "field_code": "total", "field_name": "Total",
+            "field_type": "calculated", "field_config": {"formula_version_id": formula.id},
+        }
+
+        def resolve_external(code):
+            if code == "electricity_gj":
+                return {"ok": False, "hard_error": False, "blocking_causes": [("Electricity", "FY Total Electricity (GJ)")]}
+            if code == "electricity_tco2e":
+                # Same sheet as electricity_gj's cause, different field --
+                # must be grouped under the SAME "Electricity" bucket.
+                return {"ok": False, "hard_error": False, "blocking_causes": [("Electricity", "FY Total Electricity (tCO2e)")]}
+            if code == "fuel_gj":
+                return {"ok": False, "hard_error": False, "blocking_causes": [("Fuel Consumption", "FY Total Fuel Energy (GJ)")]}
+            return None
+
+        results = _compose_sheet_results([field], [], [], resolve_external=resolve_external)
+
+        assert results[0]["status"] == "needs_input"
+        assert results[0]["message"] == (
+            "Waiting on: Electricity (FY Total Electricity (GJ), FY Total Electricity (tCO2e)), "
+            "Fuel Consumption (FY Total Fuel Energy (GJ))."
+        )
+
+    def test_genuine_error_in_the_chain_surfaces_distinctly_not_lumped_with_pending(self, make_formula_version):
+        # If the ROOT cause is a genuine error (not just "no data yet"), the
+        # dependent field must become "error" too, not "needs_input" -- a
+        # structural problem must never read as ordinary missing data.
+        formula = make_formula_version("broken_upstream + 1", {"broken_upstream": {}})
+        field = {
+            "field_id": 1, "field_code": "total", "field_name": "Total",
+            "field_type": "calculated", "field_config": {"formula_version_id": formula.id},
+        }
+        resolve_external = lambda code: {
+            "ok": False, "hard_error": True,
+            "error_causes": ["Circular cross-sheet formula dependency involving sheet 'Cargo Handled'."],
+        }
+
+        results = _compose_sheet_results([field], [], [], resolve_external=resolve_external)
+
+        assert results[0]["status"] == "error"
+        assert "Circular cross-sheet" in results[0]["message"]
+        assert "Waiting on:" not in results[0]["message"]
 
 
 class TestComposeSheetResultsCrossSheetResolveExternal:
@@ -391,18 +502,19 @@ class TestComposeSheetResultsCrossSheetResolveExternal:
 
     def test_pending_upstream_surfaces_as_needs_input_with_clear_message(self, make_formula_version):
         formula = make_formula_version("cargo_fy_total * 2", {"cargo_fy_total": {}})
-        message = "Waiting on 'Cargo Handled' → 'FY Total Cargo': Cannot calculate: no months have been entered yet."
-        resolve_external = lambda code: {"ok": False, "hard_error": False, "message": message}
+        resolve_external = lambda code: {
+            "ok": False, "hard_error": False, "blocking_causes": [("Cargo Handled", "FY Total Cargo")],
+        }
 
         results = _compose_sheet_results([self._field(formula)], [], [], resolve_external=resolve_external)
 
         assert results[0]["status"] == "needs_input"
-        assert "Waiting on 'Cargo Handled'" in results[0]["message"]
+        assert results[0]["message"] == "Waiting on: Cargo Handled (FY Total Cargo)."
 
     def test_hard_error_upstream_surfaces_as_error(self, make_formula_version):
         formula = make_formula_version("cargo_fy_total * 2", {"cargo_fy_total": {}})
         message = "Circular cross-sheet formula dependency involving sheet 'Cargo Handled'."
-        resolve_external = lambda code: {"ok": False, "hard_error": True, "message": message}
+        resolve_external = lambda code: {"ok": False, "hard_error": True, "error_causes": [message]}
 
         results = _compose_sheet_results([self._field(formula)], [], [], resolve_external=resolve_external)
 

@@ -1512,8 +1512,19 @@ class _CrossSheetResolver:
         genuinely broken/stale token reference -- unchanged "Unknown formula
         variable" behavior). Otherwise returns:
           {"ok": True, "value": float, "partial": bool, "note": str|None}
-        or
-          {"ok": False, "hard_error": bool, "message": str}
+        or, blocked on missing data (never yet calculated, not a genuine
+        error):
+          {"ok": False, "hard_error": False, "blocking_causes": [(sheet, field), ...]}
+        or, a genuine error (broken formula, circular dependency):
+          {"ok": False, "hard_error": True, "error_causes": [str, ...]}
+
+        blocking_causes/error_causes are already flattened to the ROOT
+        cause(s) -- if the owner field's own blockage is itself just a
+        reference to something further upstream, its own (already-flattened)
+        causes are returned as-is rather than wrapping them in another
+        "waiting on the owner" layer, so a multi-hop chain across several
+        sheets collapses to one flat list instead of nesting a "Cannot
+        calculate: ..." inside another one per hop.
         """
         owner = self._owner_form_for_code(code, exclude_form_id=requesting_form_id)
         if owner is None:
@@ -1525,7 +1536,7 @@ class _CrossSheetResolver:
             return {
                 "ok": False,
                 "hard_error": True,
-                "message": f"Circular cross-sheet formula dependency involving sheet '{owner_label}'.",
+                "error_causes": [f"Circular cross-sheet formula dependency involving sheet '{owner_label}'."],
             }
 
         result = self._results_for_form(owner).get(code) or {}
@@ -1546,11 +1557,23 @@ class _CrossSheetResolver:
                 ),
             }
 
-        reason = result.get("message") or "not calculated yet"
+        if status == "error":
+            return {
+                "ok": False,
+                "hard_error": True,
+                "error_causes": result.get("error_causes") or [
+                    f"'{field_label}' (from '{owner_label}') could not be calculated: {result.get('message') or 'error'}."
+                ],
+            }
+
+        # needs_input / not_configured -- not an error, just not calculated
+        # yet. If the owner field's own blockage already names root causes
+        # (it's itself waiting on something further upstream), pass those
+        # through unchanged; otherwise the owner field IS the root cause.
         return {
             "ok": False,
-            "hard_error": status == "error",
-            "message": f"Waiting on '{owner_label}' → '{field_label}': {reason}",
+            "hard_error": False,
+            "blocking_causes": result.get("blocking_causes") or [(owner_label, field_label)],
         }
 
     def resolve_external_for(self, form):
@@ -1578,19 +1601,46 @@ class _CrossSheetResolver:
 
         resolve_external = self.resolve_external_for(form)
         sheet_results = _compose_sheet_results(
-            sheet_result_fields, monthly_fields, rows, resolve_external=resolve_external
+            sheet_result_fields, monthly_fields, rows,
+            resolve_external=resolve_external,
+            own_sheet_label=self.label_by_form_id.get(form.id, form.code),
         )
         self.finish_external_for(form, sheet_results)
         return self._results_cache[form.id]
 
 
-def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external=None):
+def _group_blocking_causes_by_sheet(causes):
+    """
+    causes: an iterable of (sheet_label, field_label) tuples (already
+    resolved to their ROOT cause -- see _compose_sheet_results/
+    _CrossSheetResolver.resolve()). Groups and dedupes into
+    "Sheet A (Field 1, Field 2), Sheet B (Field 3)", in first-seen order,
+    so a field referencing the same upstream sheet/field through more than
+    one path is named exactly once.
+    """
+    fields_by_sheet = {}
+    for sheet_label, field_label in causes:
+        field_labels = fields_by_sheet.setdefault(sheet_label, [])
+        if field_label not in field_labels:
+            field_labels.append(field_label)
+    return ", ".join(
+        f"{sheet_label} ({', '.join(field_labels)})"
+        for sheet_label, field_labels in fields_by_sheet.items()
+    )
+
+
+def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external=None, own_sheet_label=None):
     """
     resolve_external, if given, is called as resolve_external(field_code)
     for any bare (non-SUM_MONTHS) formula token that isn't a monthly field or
     another result field on THIS sheet -- i.e. a genuine cross-sheet
     reference. See _CrossSheetResolver.resolve() for its contract; the
     only real caller.
+
+    own_sheet_label names THIS sheet, used only to attach a sheet name to a
+    same-sheet dependency that becomes a named root cause for some OTHER
+    (cross-sheet) field referencing one of this sheet's own results later --
+    never shown for a field describing its own direct blockage.
     """
     if not result_fields:
         return []
@@ -1699,8 +1749,17 @@ def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external
         # "waiting on X" / propagated error. A same-sheet dependency that's
         # part of THIS sheet's own cycle is left alone here -- the existing
         # cyclic-reclassification pass below already owns that case.
-        pending_dependency_messages = []
-        error_dependency_messages = []
+        #
+        # pending_causes/error_causes collect already-flattened ROOT causes
+        # (see _CrossSheetResolver.resolve()'s docstring) -- when a
+        # dependency is itself just waiting on something further upstream,
+        # its own root causes are inherited directly rather than wrapping
+        # them in one more "X is waiting on Y" layer, so a multi-hop chain
+        # (GRI Summary -> Total Energy (GJ) -> Electricity/Fuel Consumption)
+        # collapses to one flat, deduplicated list instead of nesting a
+        # "Cannot calculate: ..." inside another one per hop.
+        pending_causes = []
+        error_causes = []
         external_partial_notes = []
         for name in token_keys_by_code[code]:
             if name in aggregate_names or name in value_set_snapshot or name in context_values:
@@ -1711,12 +1770,14 @@ def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external
                 dep_result = results_by_code.get(name)
                 dep_label = fields_by_code[name].get("field_name") or name
                 if dep_result and dep_result.get("status") == "error":
-                    error_dependency_messages.append(
-                        f"'{dep_label}' could not be calculated ({dep_result.get('message') or 'error'})."
+                    error_causes.extend(
+                        dep_result.get("error_causes")
+                        or [f"'{dep_label}' could not be calculated: {dep_result.get('message') or 'error'}."]
                     )
                 else:
-                    reason = (dep_result or {}).get("message") or "has not been entered yet"
-                    pending_dependency_messages.append(f"'{dep_label}' is not calculated yet ({reason}).")
+                    pending_causes.extend(
+                        (dep_result or {}).get("blocking_causes") or [(own_sheet_label, dep_label)]
+                    )
                 continue
             if resolve_external is None:
                 continue
@@ -1732,9 +1793,9 @@ def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external
                 if external.get("note"):
                     external_partial_notes.append(external["note"])
             elif external.get("hard_error"):
-                error_dependency_messages.append(external.get("message") or f"'{name}' could not be calculated.")
+                error_causes.extend(external.get("error_causes") or [f"'{name}' could not be calculated."])
             else:
-                pending_dependency_messages.append(external.get("message") or f"'{name}' is not available yet.")
+                pending_causes.extend(external.get("blocking_causes") or [])
 
         # Informational only -- with a topological pass order, this is only
         # ever non-empty for fields left over in a dependency cycle.
@@ -1743,18 +1804,22 @@ def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external
             if name in fields_by_code and name not in result_values
         ]
 
-        if unavailable_messages or error_dependency_messages:
+        if unavailable_messages or error_causes:
+            deduped_errors = list(dict.fromkeys(error_causes))
             results_by_code[code] = {
-                "status": "error" if error_dependency_messages else "needs_input",
-                "message": "Cannot calculate: " + " ".join(unavailable_messages + error_dependency_messages),
+                "status": "error" if deduped_errors else "needs_input",
+                "message": "Cannot calculate: " + " ".join(unavailable_messages + deduped_errors),
+                "error_causes": deduped_errors,
                 "source_field_codes": sorted(aggregate_names),
             }
             return
 
-        if pending_dependency_messages:
+        if pending_causes:
+            deduped_causes = list(dict.fromkeys(pending_causes))
             results_by_code[code] = {
                 "status": "needs_input",
-                "message": "Cannot calculate: " + " ".join(pending_dependency_messages),
+                "message": f"Waiting on: {_group_blocking_causes_by_sheet(deduped_causes)}.",
+                "blocking_causes": deduped_causes,
                 "source_field_codes": sorted(aggregate_names),
             }
             return
@@ -1826,6 +1891,7 @@ def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external
             results_by_code[code] = {
                 "status": "error",
                 "message": str(exc),
+                "error_causes": [str(exc)],
                 "source_field_codes": sorted(aggregate_names),
             }
 
@@ -1847,9 +1913,11 @@ def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external
         cyclic_deps = sorted(name for name in (unresolved_deps_by_code.get(code) or []) if name in cyclic_set)
         if not cyclic_deps:
             continue
+        message = f"Circular formula dependency involving field {', '.join(cyclic_deps)}."
         results_by_code[code] = {
             "status": "error",
-            "message": f"Circular formula dependency involving field {', '.join(cyclic_deps)}.",
+            "message": message,
+            "error_causes": [message],
             "source_field_codes": result.get("source_field_codes", []),
         }
 
@@ -1879,6 +1947,14 @@ def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external
             "months_total": result.get("months_total"),
             "source_field_codes": source_field_codes,
             "display_region": config.get("display_region") or "under_input_column",
+            # Already-flattened root cause(s) for a needs_input/error result
+            # (see _group_blocking_causes_by_sheet / _CrossSheetResolver.resolve())
+            # -- carried through so a dependent field (same-sheet or, via
+            # resolve_external, a sibling sheet's) can inherit these directly
+            # instead of wrapping them in another "waiting on the wrapper
+            # field" layer. Not meaningful for calculated/partial results.
+            "blocking_causes": result.get("blocking_causes") or [],
+            "error_causes": result.get("error_causes") or [],
         })
     return sheet_results
 
@@ -1979,7 +2055,9 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
     cross_sheet_resolver = _CrossSheetResolver(site_id, fy_start_year, sheet_rows)
     resolve_external = cross_sheet_resolver.resolve_external_for(form)
     sheet_results = _compose_sheet_results(
-        sheet_result_fields, monthly_fields, rows, resolve_external=resolve_external
+        sheet_result_fields, monthly_fields, rows,
+        resolve_external=resolve_external,
+        own_sheet_label=workbook_form.sheet_label or human_sheet_label(form),
     )
     cross_sheet_resolver.finish_external_for(form, sheet_results)
 
