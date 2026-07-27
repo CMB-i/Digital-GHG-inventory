@@ -1004,12 +1004,59 @@ document.addEventListener("DOMContentLoaded", function () {
             openInspector(pending.fieldCode);
             if (pending.formulaVersionId) {
               const msg = document.getElementById("prefill-formula-msg");
-              if (msg) {
-                const formulaEntry = availableFormulas.find(f => f.current_version_id === pending.formulaVersionId);
-                const formulaName = formulaEntry ? formulaEntry.name : "Formula";
-                msg.textContent = `${formulaName} linked. Save Draft to persist this change.`;
-                msg.classList.remove("hidden");
-              }
+              const versionId = pending.formulaVersionId;
+              // availableFormulas is scoped to this form's own published formulas
+              // (see FORMBLD/views.py's get_version_details), so it has no entry
+              // for a cross-sheet formula whose form_id differs -- fetching the
+              // version directly is the one source both the dropdown label and
+              // this message derive from, so they can no longer disagree.
+              fetch(`/module/FRMULA/api/version/${versionId}`)
+                .then(res => res.json())
+                .then(resData => {
+                  if (!resData || !resData.formula) {
+                    throw new Error("Formula not found in response");
+                  }
+                  // The inspector may have moved to a different field by the time
+                  // this resolves -- don't touch a field the user's since left.
+                  if (selectedFieldCode !== pending.fieldCode) return;
+
+                  if (propFormulaSelect) {
+                    const valueStr = String(versionId);
+                    let option = null;
+                    for (let i = 0; i < propFormulaSelect.options.length; i++) {
+                      if (propFormulaSelect.options[i].value === valueStr) {
+                        option = propFormulaSelect.options[i];
+                        break;
+                      }
+                    }
+                    if (!option) {
+                      option = document.createElement("option");
+                      option.value = valueStr;
+                      propFormulaSelect.appendChild(option);
+                    }
+                    // Force-overwrite the label -- unlike ensureFormulaOptionPresent,
+                    // which deliberately skips relabeling an already-present option
+                    // (see its own comment) so it doesn't wipe a real attachment
+                    // elsewhere; here we WANT to overwrite, since this fetch is the
+                    // authoritative source for this exact version.
+                    option.textContent = `${resData.formula.name} (${resData.formula.code})`;
+                    propFormulaSelect.value = valueStr;
+                  }
+
+                  if (msg) {
+                    msg.textContent = `${resData.formula.name} linked. Save Draft to persist this change.`;
+                    msg.classList.remove("hidden");
+                  }
+                })
+                .catch(() => {
+                  if (selectedFieldCode !== pending.fieldCode) return;
+                  if (msg) {
+                    const formulaEntry = availableFormulas.find(f => f.current_version_id === versionId);
+                    const formulaName = formulaEntry ? formulaEntry.name : "Formula";
+                    msg.textContent = `${formulaName} linked. Save Draft to persist this change.`;
+                    msg.classList.remove("hidden");
+                  }
+                });
             }
           }
         } else if (selectedFieldCode && currentFields.some(field => field.field_code === selectedFieldCode)) {
@@ -1680,6 +1727,18 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function openInspector(fieldCode) {
+    // Unconditionally hide any stale "X linked" message from a previous
+    // field's pendingPrefill resolution -- this is the only other place in
+    // the file that touches #prefill-formula-msg (see loadVersionDetails),
+    // and its async fetch always resolves after this synchronous call
+    // returns, so a genuinely-just-linked field's message still reappears
+    // correctly right after.
+    const prefillFormulaMsg = document.getElementById("prefill-formula-msg");
+    if (prefillFormulaMsg) {
+      prefillFormulaMsg.classList.add("hidden");
+      prefillFormulaMsg.textContent = "";
+    }
+
     const field = currentFields.find(x => x.field_code === fieldCode);
     if (!field) return;
 
