@@ -1,4 +1,5 @@
 from app.modules.FORMBLD.model import Field, FieldVersion
+from app.modules.WKBK.model import WorkbookForm
 
 
 NUMERIC_FIELD_TYPES = {"integer", "number", "decimal", "float", "numeric"}
@@ -174,6 +175,56 @@ def _blocked_field_removal_message(prefix, blocked_fields_with_formulas):
         parts.append(f"'{field_code}' is referenced by formula(s) {names}")
     return f"{prefix}: " + "; ".join(parts) + ". Unpublish or edit the formula(s) first."
 
+
+def _retained_formula_versions(fields_list):
+    formula_version_ids = {
+        (field.get("field_config") or {}).get("formula_version_id")
+        for field in fields_list
+        if (field.get("field_type") or "").strip().lower() == "calculated"
+    }
+    formula_version_ids.discard(None)
+    if not formula_version_ids:
+        return []
+
+    from app.modules.FRMULA.model import Formula
+
+    return (
+        FormulaVersion.query.with_entities(FormulaVersion, Formula)
+        .join(Formula, Formula.id == FormulaVersion.formula_id)
+        .filter(
+            FormulaVersion.id.in_(formula_version_ids),
+            Formula.is_deleted == False,
+        )
+        .all()
+    )
+
+
+def _blocking_formulas_for_draft_field_removal(field, form_version, retained_formula_versions):
+    """
+    A Draft save replaces only the Draft's field list. Historical same-form
+    formulas attached solely to older Published FormVersions must not block
+    removing a field from the Draft, otherwise a published sheet can never be
+    corrected without direct row edits. External/legacy current formulas still
+    block, and same-form formulas retained in the incoming Draft payload still
+    block if their attached version references the omitted field.
+    """
+    blocking = []
+    seen_formula_ids = set()
+
+    for formula_version, formula in retained_formula_versions:
+        if field.field_code in (formula_version.tokens or {}):
+            blocking.append(formula)
+            seen_formula_ids.add(formula.id)
+
+    for formula in _formulas_referencing_field(field):
+        if formula.id in seen_formula_ids:
+            continue
+        if formula.form_id != form_version.form_id:
+            blocking.append(formula)
+            seen_formula_ids.add(formula.id)
+
+    return blocking
+
 def delete_sheet(form_id, user_id, reason):
     """
     A sheet can now only ever be attached to the workbook it was created in
@@ -284,15 +335,17 @@ def get_form_version_fields(form_version_id):
     )
     return rows
 
-def compose_preview_workbook_context(form_version_id):
-    version = get_form_version(form_version_id)
-    if not version:
-        raise ValueError("Form version not found.")
 
-    form = get_form(version.form_id)
-    if not form:
-        raise ValueError("Form not found.")
+def _latest_form_version_id(form_id):
+    latest = (
+        FormVersion.query.filter_by(form_id=form_id)
+        .order_by(FormVersion.version_number.desc())
+        .first()
+    )
+    return latest.id if latest else None
 
+
+def _preview_fields_for_version(form_version_id):
     fields = []
     for fv, field in get_form_version_fields(form_version_id):
         field_config = dict(fv.field_config or {})
@@ -311,8 +364,11 @@ def compose_preview_workbook_context(form_version_id):
             "frequency": fv.frequency or "monthly",
             "calculated": field_type == "calculated",
         })
+    return fields
 
-    sections = [{
+
+def _preview_sections_for_version(form_version_id):
+    return [{
         "id": section.id,
         "name": section.name,
         "code": section.code,
@@ -321,6 +377,8 @@ def compose_preview_workbook_context(form_version_id):
         "description": section.description or "",
     } for section in get_form_sections(form_version_id)]
 
+
+def _preview_rows(fields):
     rows = []
     for month, month_name in MOCK_FY_MONTHS:
         year = MOCK_FY_START_YEAR if month >= 4 else MOCK_FY_START_YEAR + 1
@@ -357,7 +415,10 @@ def compose_preview_workbook_context(form_version_id):
             "issues": {},
             "is_active_period": False,
         })
+    return rows
 
+
+def _preview_workbook_values(fields, sections):
     section_by_id = {section["id"]: section for section in sections}
     workbook_values = {}
     for field in fields:
@@ -376,12 +437,173 @@ def compose_preview_workbook_context(form_version_id):
                 "is_locked": bool(field.get("calculated")),
                 "remark": None,
             }
+    return workbook_values
+
+
+class _DraftPreviewCrossSheetResolver:
+    def __init__(self, selected_form_id):
+        self.selected_form_id = selected_form_id
+        self._shape_cache = {}
+        self._results_cache = {}
+        self._resolving = set()
+        self.resolution_order = []
+
+        memberships = WorkbookForm.query.filter_by(form_id=selected_form_id).all()
+        workbook_ids = [row.workbook_id for row in memberships]
+        if len(set(workbook_ids)) != 1:
+            self.form_by_id = {}
+            self.label_by_form_id = {}
+            return
+
+        workbook_id = workbook_ids[0]
+        rows = (
+            WorkbookForm.query.filter_by(workbook_id=workbook_id)
+            .order_by(WorkbookForm.display_order.asc(), WorkbookForm.id.asc())
+            .all()
+        )
+        form_ids = [row.form_id for row in rows]
+        forms = {form.id: form for form in Form.query.filter(Form.id.in_(form_ids)).all()}
+        self.form_by_id = {
+            row.form_id: forms[row.form_id]
+            for row in rows
+            if row.form_id in forms and _latest_form_version_id(row.form_id)
+        }
+        self.label_by_form_id = {
+            row.form_id: (row.sheet_label or forms[row.form_id].name)
+            for row in rows
+            if row.form_id in forms
+        }
+
+    def _shape_for(self, form):
+        if form.id not in self._shape_cache:
+            from app.modules.SUBMIT.service import is_sheet_result_field, monthly_table_fields
+
+            version_id = _latest_form_version_id(form.id)
+            fields = _preview_fields_for_version(version_id)
+            sections = _preview_sections_for_version(version_id)
+            monthly_fields = monthly_table_fields(fields, sections)
+            sheet_result_fields = [field for field in fields if is_sheet_result_field(field)]
+            workbook_values = _preview_workbook_values(fields, sections)
+            rows = _preview_rows(fields)
+            self._shape_cache[form.id] = (fields, sections, monthly_fields, sheet_result_fields, workbook_values, rows)
+        return self._shape_cache[form.id]
+
+    def _fields_for(self, form):
+        fields, _sections, _monthly_fields, _sheet_result_fields, _workbook_values, _rows = self._shape_for(form)
+        return {field["field_code"]: field for field in fields}
+
+    def _owner_forms_for_code(self, code, requesting_form_id):
+        owners = []
+        for form_id, form in self.form_by_id.items():
+            if form_id == requesting_form_id:
+                continue
+            if code in self._fields_for(form):
+                owners.append(form)
+        return owners
+
+    def resolve_external_for(self, form):
+        self._resolving.add(form.id)
+        return lambda code: self.resolve(code, form.id)
+
+    def finish_external_for(self, form, sheet_results):
+        self._resolving.discard(form.id)
+        self._results_cache[form.id] = {result["field_code"]: result for result in sheet_results}
+
+    def resolve(self, code, requesting_form_id):
+        owners = self._owner_forms_for_code(code, requesting_form_id)
+        if not owners:
+            return None
+        if len(owners) > 1:
+            labels = [self.label_by_form_id.get(owner.id, owner.code) for owner in owners]
+            return {
+                "ok": False,
+                "hard_error": True,
+                "error_causes": [
+                    f"Ambiguous cross-sheet formula token '{code}' exists on multiple sheets: {', '.join(labels)}."
+                ],
+            }
+
+        owner = owners[0]
+        owner_label = self.label_by_form_id.get(owner.id, owner.code)
+        if owner.id in self._resolving:
+            return {
+                "ok": False,
+                "hard_error": True,
+                "error_causes": [f"Circular cross-sheet formula dependency involving sheet '{owner_label}'."],
+            }
+
+        result = self._results_for_form(owner).get(code) or {}
+        owner_field = self._fields_for(owner).get(code) or {}
+        field_label = owner_field.get("field_name") or code
+        status = result.get("status")
+
+        if status in ("calculated", "partial"):
+            return {"ok": True, "value": result.get("value"), "partial": status == "partial"}
+        if status == "error":
+            return {
+                "ok": False,
+                "hard_error": True,
+                "error_causes": result.get("error_causes") or [
+                    f"'{field_label}' (from '{owner_label}') could not be calculated: {result.get('message') or 'error'}."
+                ],
+            }
+        return {
+            "ok": False,
+            "hard_error": False,
+            "blocking_causes": result.get("blocking_causes") or [(owner_label, field_label)],
+        }
+
+    def _results_for_form(self, form):
+        if form.id in self._results_cache:
+            return self._results_cache[form.id]
+
+        from app.modules.SUBMIT.service import _compose_sheet_results
+
+        fields, _sections, monthly_fields, sheet_result_fields, workbook_values, rows = self._shape_for(form)
+        resolve_external = self.resolve_external_for(form)
+        sheet_results = _compose_sheet_results(
+            sheet_result_fields,
+            monthly_fields,
+            rows,
+            resolve_external=resolve_external,
+            own_sheet_label=self.label_by_form_id.get(form.id, form.code),
+            annual_fields=fields,
+            workbook_values=workbook_values,
+        )
+        self.finish_external_for(form, sheet_results)
+        self.resolution_order.append(form.code)
+        return self._results_cache[form.id]
+
+def compose_preview_workbook_context(form_version_id):
+    version = get_form_version(form_version_id)
+    if not version:
+        raise ValueError("Form version not found.")
+
+    form = get_form(version.form_id)
+    if not form:
+        raise ValueError("Form not found.")
+
+    fields = _preview_fields_for_version(form_version_id)
+    sections = _preview_sections_for_version(form_version_id)
+    rows = _preview_rows(fields)
+    workbook_values = _preview_workbook_values(fields, sections)
 
     from app.modules.SUBMIT.service import is_sheet_result_field, _compose_sheet_results, monthly_table_fields
 
     sheet_result_fields = [field for field in fields if is_sheet_result_field(field)]
     table_fields = monthly_table_fields(fields, sections)
-    sheet_results = _compose_sheet_results(sheet_result_fields, table_fields, rows)
+    cross_sheet_resolver = _DraftPreviewCrossSheetResolver(form.id)
+    resolve_external = cross_sheet_resolver.resolve_external_for(form)
+    sheet_results = _compose_sheet_results(
+        sheet_result_fields,
+        table_fields,
+        rows,
+        resolve_external=resolve_external,
+        annual_fields=fields,
+        workbook_values=workbook_values,
+        own_sheet_label=form.name,
+    )
+    cross_sheet_resolver.finish_external_for(form, sheet_results)
 
     return {
         "financial_year": {
@@ -418,6 +640,7 @@ def compose_preview_workbook_context(form_version_id):
         "sheet_results": sheet_results,
         "preview_meta": {
             "sheet_result_field_count": len(sheet_result_fields),
+            "dependency_resolution_order": cross_sheet_resolver.resolution_order,
         },
         "rows": rows,
     }
@@ -574,17 +797,23 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
                 raise ValueError(f"Duplicate field code '{code_strip}' found in form fields.")
             seen_codes.add(code_strip)
 
-    # Fields omitted from this payload are about to be soft-deleted below --
-    # block up front, before any mutation, if a published Formula still
-    # references any of them. Checked as one pass over every omitted field so
-    # a batch save is all-or-nothing: either the whole draft saves, or it
-    # fails with every blocked field listed, never a silent partial save.
+    # Fields omitted from this payload are removed from this Draft. Block up
+    # front, before any mutation, if the incoming Draft keeps a formula that
+    # still references any omitted field, or if an external/legacy formula
+    # still depends on it. Historical same-form formulas attached only to
+    # older Published versions are intentionally ignored here: those versions
+    # keep their own FieldVersion rows, and the Draft must remain editable.
     present_codes = {f.get("field_code") for f in fields_list if f.get("field_code")}
     all_fields = Field.query.filter_by(form_id=form_version.form_id, is_deleted=False).all()
     fields_to_remove = [f for f in all_fields if f.field_code not in present_codes]
+    retained_formula_versions = _retained_formula_versions(fields_list)
     blocked = []
     for f in fields_to_remove:
-        referencing_formulas = _formulas_referencing_field(f)
+        referencing_formulas = _blocking_formulas_for_draft_field_removal(
+            f,
+            form_version,
+            retained_formula_versions,
+        )
         if referencing_formulas:
             blocked.append((f.field_code, referencing_formulas))
     if blocked:
@@ -598,12 +827,28 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
         fv.deleted_at = datetime.now(timezone.utc)
         fv.delete_reason = "Overwritten by new draft save"
 
-    # Soft-delete fields that are no longer present
+    # Soft-delete fields that are no longer present only when no other live
+    # FieldVersion still needs the shared Field row. Published/history
+    # versions keep their Field rows active; the omitted Draft FieldVersions
+    # above are enough to remove the field from this Draft.
     for f in fields_to_remove:
-        f.is_deleted = True
-        f.deleted_by = user_id
-        f.deleted_at = datetime.now(timezone.utc)
-        f.delete_reason = "Removed from form draft"
+        remaining_version = (
+            FieldVersion.query.filter(
+                FieldVersion.field_id == f.id,
+                FieldVersion.form_version_id != form_version_id,
+                FieldVersion.is_deleted == False,
+            )
+            .order_by(FieldVersion.version_number.desc(), FieldVersion.id.desc())
+            .first()
+        )
+        if remaining_version:
+            f.current_version_id = remaining_version.id
+            f.updated_by = user_id
+        else:
+            f.is_deleted = True
+            f.deleted_by = user_id
+            f.deleted_at = datetime.now(timezone.utc)
+            f.delete_reason = "Removed from form draft"
 
     db.session.flush()
     

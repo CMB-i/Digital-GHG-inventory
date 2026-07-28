@@ -17,6 +17,9 @@ in tests/test_calc_status.py's TestComposeSheetResultsCrossSheetResolveExternal
 -- this file exercises the real thing end-to-end: two actual sheets in one
 workbook, real submissions, going through compose_annual_workbook_data.
 """
+from decimal import Decimal
+
+from app.modules.SUBMIT.model import WorkbookFieldValue
 from app.modules.SUBMIT.service import compose_annual_workbook_data
 from app.modules.WKBK.model import WorkbookForm
 
@@ -127,6 +130,72 @@ class TestCrossSheetValueResolution:
         assert "Unknown formula variable" not in result["message"]
         assert "Waiting on" in result["message"]
         assert upstream_form.name in result["message"]
+
+    def test_sibling_annual_result_uses_saved_workbook_values(
+        self, make_form, make_field, make_formula_version, make_site, make_workflow,
+        make_user, make_workbook, make_access_grant, db_session, created_objects,
+        system_user,
+    ):
+        upstream_form, upstream_version = make_form()
+        raw_field, raw_version = make_field(
+            upstream_form,
+            upstream_version,
+            "ofr_acetylene_qty_t",
+            field_type="number",
+            frequency="annual",
+        )
+        formula = make_formula_version("ofr_acetylene_qty_t * 47.3", {"ofr_acetylene_qty_t": {}})
+        make_field(
+            upstream_form,
+            upstream_version,
+            "ofr_acetylene_gj",
+            field_type="calculated",
+            frequency="annual",
+            field_config={"formula_version_id": formula.id, "display_region": "below_monthly_table"},
+        )
+
+        downstream_form, downstream_version = make_form()
+        downstream_formula = make_formula_version("ofr_acetylene_gj + 10", {"ofr_acetylene_gj": {}})
+        make_field(
+            downstream_form,
+            downstream_version,
+            "fuel_total",
+            field_type="calculated",
+            frequency="annual",
+            field_config={"formula_version_id": downstream_formula.id, "display_region": "below_monthly_table"},
+        )
+
+        site = make_site()
+        user = make_user()
+        workflow_version = make_workflow([user])
+        workbook = make_workbook(downstream_form, site, workflow_version=workflow_version, submitters=[user])
+        _attach_sibling_sheet(db_session, created_objects, workbook, upstream_form, display_order=20)
+        make_access_grant(user, "submission", scope_type="global", can_view=True, can_submit=True)
+
+        saved_value = WorkbookFieldValue(
+            site_id=site.id,
+            form_id=upstream_form.id,
+            field_id=raw_field.id,
+            field_version_id=raw_version.id,
+            fy_start_year=2026,
+            value_text="0.026",
+            numeric_value=Decimal("0.026"),
+            cell_state="draft_filled",
+            created_by=system_user,
+            updated_by=system_user,
+        )
+        db_session.add(saved_value)
+        db_session.flush()
+        created_objects.append(saved_value)
+
+        data = compose_annual_workbook_data(
+            user.id, site_id=site.id, workbook_id=workbook.id, fy_start_year=2026,
+            selected_form_id=downstream_form.id,
+        )
+
+        results = {r["field_code"]: r for r in data["sheet_results"]}
+        assert results["fuel_total"]["status"] == "calculated"
+        assert results["fuel_total"]["value"] == round(0.026 * 47.3 + 10, 3)
 
 
 class TestCrossSheetCircularDependency:

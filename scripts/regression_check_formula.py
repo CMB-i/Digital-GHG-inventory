@@ -25,6 +25,7 @@ string that's being renamed.
 
 Usage:
     python scripts/regression_check_formula.py --form-code CARGO_MCT
+    python scripts/regression_check_formula.py --form-code FUEL_CONSUMPTION_JAI --prefer-draft
     python scripts/regression_check_formula.py --form-id 21 --out /tmp/before.json
     python scripts/regression_check_formula.py --form-code CARGO_MCT --diff-against /tmp/before.json
 """
@@ -49,6 +50,7 @@ from app.modules.SUBMIT.service import (
     _compose_sheet_results,
     get_approved_valsets_snapshot,
 )
+from app.modules.WKBK.model import WorkbookForm
 
 
 def resolve_form(form_id, form_code):
@@ -57,7 +59,15 @@ def resolve_form(form_id, form_code):
     return Form.query.filter_by(code=form_code).one_or_none()
 
 
-def resolve_form_version_id(form):
+def resolve_form_version_id(form, prefer_draft=False):
+    if prefer_draft:
+        draft = (
+            FormVersion.query.filter_by(form_id=form.id, status="Draft")
+            .order_by(FormVersion.version_number.desc())
+            .first()
+        )
+        if draft:
+            return draft.id
     if form.current_version_id:
         return form.current_version_id
     latest = (
@@ -79,8 +89,21 @@ def sample_raw_values_by_field_id(raw_fields):
     return {f["field_id"]: 100.0 * (idx + 1) for idx, f in enumerate(ordered)}
 
 
-def compute_regression_snapshot(form):
-    form_version_id = resolve_form_version_id(form)
+def workbook_form_rows_for(form):
+    memberships = WorkbookForm.query.filter_by(form_id=form.id).all()
+    workbook_ids = {row.workbook_id for row in memberships}
+    if len(workbook_ids) != 1:
+        return []
+    workbook_id = next(iter(workbook_ids))
+    return (
+        WorkbookForm.query.filter_by(workbook_id=workbook_id)
+        .order_by(WorkbookForm.display_order, WorkbookForm.id)
+        .all()
+    )
+
+
+def _form_shape(form, prefer_draft=False):
+    form_version_id = resolve_form_version_id(form, prefer_draft=prefer_draft)
     if not form_version_id:
         raise ValueError(f"Form id={form.id} code={form.code!r} has no version to evaluate.")
 
@@ -88,6 +111,10 @@ def compute_regression_snapshot(form):
     sections = _sections_payload(form_version_id)
     monthly_fields = monthly_table_fields(fields, sections)
     explicit_result_fields = [f for f in fields if is_sheet_result_field(f)]
+    return form_version_id, fields, monthly_fields, explicit_result_fields
+
+
+def _synthetic_rows_and_preview(fields, monthly_fields):
     fields_map = {f["field_code"]: f for f in fields}
 
     raw_fields = [f for f in fields if f["field_type"] != "calculated"]
@@ -115,8 +142,115 @@ def compute_regression_snapshot(form):
                 row_values[code] = res["value"]
         rows.append({"year": 2026, "month": month, "label": f"Sample Month {month}", "values": row_values})
 
+    workbook_values = {
+        f["field_code"]: {
+            "raw_value": raw_values_by_code[f["field_code"]],
+            "calculated_value": raw_values_by_code[f["field_code"]],
+        }
+        for f in raw_fields
+    }
+    return fields_map, raw_fields, sample_by_field_id, monthly_calc_result, rows, workbook_values
+
+
+def compute_regression_snapshot(form, prefer_draft=False):
+    form_version_id, fields, monthly_fields, explicit_result_fields = _form_shape(form, prefer_draft=prefer_draft)
+    fields_map, raw_fields, sample_by_field_id, monthly_calc_result, rows, workbook_values = (
+        _synthetic_rows_and_preview(fields, monthly_fields)
+    )
+
+    workbook_rows = workbook_form_rows_for(form)
+    sibling_forms = {}
+    form_by_id = {}
+    if workbook_rows:
+        form_ids = [row.form_id for row in workbook_rows]
+        form_by_id = {f.id: f for f in Form.query.filter(Form.id.in_(form_ids)).all()}
+        sibling_forms = {fid: f for fid, f in form_by_id.items() if fid != form.id}
+
+    shape_cache = {form.id: (fields, monthly_fields, explicit_result_fields)}
+    result_cache = {}
+    resolving = set()
+
+    def shape_for(owner_form):
+        if owner_form.id not in shape_cache:
+            _version_id, owner_fields, owner_monthly, owner_results = _form_shape(owner_form, prefer_draft=prefer_draft)
+            shape_cache[owner_form.id] = (owner_fields, owner_monthly, owner_results)
+        return shape_cache[owner_form.id]
+
+    def owner_forms_for_code(code, requesting_form_id):
+        owners = []
+        for owner_id, owner_form in sibling_forms.items():
+            if owner_id == requesting_form_id:
+                continue
+            owner_fields, _owner_monthly, _owner_results = shape_for(owner_form)
+            if any(field["field_code"] == code for field in owner_fields):
+                owners.append(owner_form)
+        return owners
+
+    def results_for(owner_form):
+        if owner_form.id in result_cache:
+            return result_cache[owner_form.id]
+        owner_fields, owner_monthly, owner_result_fields = shape_for(owner_form)
+        _owner_fields_map, _owner_raw_fields, _owner_sample_by_id, _owner_monthly_calc, owner_rows, owner_workbook_values = (
+            _synthetic_rows_and_preview(owner_fields, owner_monthly)
+        )
+
+        resolving.add(owner_form.id)
+        owner_sheet_results = _compose_sheet_results(
+            owner_result_fields,
+            owner_monthly,
+            owner_rows,
+            resolve_external=lambda code: resolve_external(code, owner_form.id),
+            own_sheet_label=owner_form.name,
+            annual_fields=owner_fields,
+            workbook_values=owner_workbook_values,
+        )
+        resolving.discard(owner_form.id)
+        result_cache[owner_form.id] = {r["field_code"]: r for r in owner_sheet_results}
+        return result_cache[owner_form.id]
+
+    def resolve_external(code, requesting_form_id):
+        owners = owner_forms_for_code(code, requesting_form_id)
+        if not owners:
+            return None
+        if len(owners) > 1:
+            return {
+                "ok": False,
+                "hard_error": True,
+                "error_causes": [f"Ambiguous cross-sheet formula token '{code}' in synthetic workbook regression."],
+            }
+        owner = owners[0]
+        if owner.id in resolving:
+            return {
+                "ok": False,
+                "hard_error": True,
+                "error_causes": [f"Circular cross-sheet formula dependency involving sheet '{owner.name}'."],
+            }
+        result = results_for(owner).get(code) or {}
+        if result.get("status") in ("calculated", "partial"):
+            return {"ok": True, "value": result.get("value"), "partial": result.get("status") == "partial"}
+        if result.get("status") == "error":
+            return {"ok": False, "hard_error": True, "error_causes": result.get("error_causes") or [result.get("message")]}
+        owner_fields, _owner_monthly, _owner_results = shape_for(owner)
+        owner_field = next((f for f in owner_fields if f["field_code"] == code), {})
+        return {
+            "ok": False,
+            "hard_error": False,
+            "blocking_causes": [(owner.name, owner_field.get("field_name") or code)],
+        }
+
     sheet_results = (
-        _compose_sheet_results(explicit_result_fields, monthly_fields, rows)
+        _compose_sheet_results(
+            explicit_result_fields,
+            monthly_fields,
+            rows,
+            annual_fields=fields,
+            workbook_values=workbook_values,
+            resolve_external=(
+                (lambda code: resolve_external(code, form.id))
+                if sibling_forms else None
+            ),
+            own_sheet_label=form.name,
+        )
         if explicit_result_fields else []
     )
     sheet_results_by_code = {r["field_code"]: r for r in sheet_results}
@@ -233,6 +367,11 @@ def run():
         "--diff-against", default=None,
         help="Path to a previous snapshot JSON; compares computed values/statuses matched by field_id.",
     )
+    parser.add_argument(
+        "--prefer-draft",
+        action="store_true",
+        help="Evaluate the latest Draft FormVersion when one exists; default remains the current published version.",
+    )
     args = parser.parse_args()
 
     app = create_app()
@@ -242,7 +381,7 @@ def run():
             ident = f"id={args.form_id}" if args.form_id is not None else f"code={args.form_code!r}"
             print(f"No Form found with {ident}")
             return
-        payload = compute_regression_snapshot(form)
+        payload = compute_regression_snapshot(form, prefer_draft=args.prefer_draft)
 
     out_path = args.out or default_output_path(payload["form_code"])
     print_report(payload)

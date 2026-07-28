@@ -498,6 +498,101 @@ class TestFormulaPublishFieldScopedToOwnForm:
         assert version.published_at is not None
         assert formula.current_version_id == version.id
 
+    def test_publish_succeeds_when_token_belongs_to_sibling_form_in_same_workbook(
+        self, make_form, make_field, make_site, make_workflow, make_user,
+        make_workbook, db_session, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+        from app.modules.WKBK.model import WorkbookForm
+
+        own_form, _own_form_version = make_form()
+        sibling_form, sibling_form_version = make_form()
+        make_field(sibling_form, sibling_form_version, "sibling_total")
+
+        user = make_user()
+        site = make_site()
+        workflow_version = make_workflow([user])
+        workbook = make_workbook(own_form, site, workflow_version=workflow_version)
+        workbook_form = WorkbookForm(workbook_id=workbook.id, form_id=sibling_form.id, display_order=20)
+        db_session.add(workbook_form)
+        db_session.flush()
+        created_objects.append(workbook_form)
+
+        formula = create_formula(
+            "Sibling Formula", f"test-sibling-scope-{user.id}", "sibling_total + 1",
+            {"sibling_total": {}}, user.id, form_id=own_form.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        publish_formula_version(version.id, user.id)
+
+        assert version.published_at is not None
+
+    def test_publish_rejects_token_from_another_workbook(
+        self, make_form, make_field, make_site, make_workflow, make_user,
+        make_workbook, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+
+        own_form, _own_form_version = make_form()
+        other_form, other_form_version = make_form()
+        make_field(other_form, other_form_version, "other_workbook_total")
+
+        user = make_user()
+        workflow_version = make_workflow([user])
+        make_workbook(own_form, make_site(), workflow_version=workflow_version)
+        make_workbook(other_form, make_site(), workflow_version=workflow_version)
+
+        formula = create_formula(
+            "Cross Workbook Formula", f"test-cross-workbook-{user.id}", "other_workbook_total + 1",
+            {"other_workbook_total": {}}, user.id, form_id=own_form.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        with pytest.raises(ValueError, match="sheet/workbook scope"):
+            publish_formula_version(version.id, user.id)
+
+    def test_publish_rejects_ambiguous_duplicate_sibling_field_code(
+        self, make_form, make_field, make_site, make_workflow, make_user,
+        make_workbook, db_session, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+        from app.modules.WKBK.model import WorkbookForm
+
+        own_form, _own_form_version = make_form()
+        sibling_a, sibling_a_version = make_form()
+        sibling_b, sibling_b_version = make_form()
+        make_field(sibling_a, sibling_a_version, "duplicate_total")
+        make_field(sibling_b, sibling_b_version, "duplicate_total")
+
+        user = make_user()
+        site = make_site()
+        workflow_version = make_workflow([user])
+        workbook = make_workbook(own_form, site, workflow_version=workflow_version)
+        for display_order, sibling in ((20, sibling_a), (30, sibling_b)):
+            workbook_form = WorkbookForm(workbook_id=workbook.id, form_id=sibling.id, display_order=display_order)
+            db_session.add(workbook_form)
+            db_session.flush()
+            created_objects.append(workbook_form)
+
+        formula = create_formula(
+            "Ambiguous Sibling Formula", f"test-ambiguous-sibling-{user.id}", "duplicate_total + 1",
+            {"duplicate_total": {}}, user.id, form_id=own_form.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        with pytest.raises(ValueError, match="ambiguous"):
+            publish_formula_version(version.id, user.id)
+
 
 class TestFormulaReportContext:
     """Formula.context lets the same Formula/FormulaVersion tables and the
@@ -641,14 +736,15 @@ class TestFieldRemovalBlockedByFormulaReference:
         created_objects.append(draft_version)
         return draft_version.id
 
-    def _publish_formula(self, make_user, created_objects, form, expression, tokens, name, code_suffix):
+    def _publish_formula(self, make_user, created_objects, form, expression, tokens, name, code_suffix, form_id_marker="same"):
         from app.modules.FRMULA.model import FormulaVersion
         from app.modules.FRMULA.service import create_formula, publish_formula_version
 
         user = make_user()
+        formula_form_id = form.id if form_id_marker == "same" else None
         formula = create_formula(
             name, f"test-field-delete-{code_suffix}", expression,
-            tokens, user.id, form_id=form.id,
+            tokens, user.id, form_id=formula_form_id,
         )
         created_objects.append(formula)
         version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
@@ -656,7 +752,7 @@ class TestFieldRemovalBlockedByFormulaReference:
         publish_formula_version(version.id, user.id)
         return formula, version
 
-    def test_field_removal_blocked_when_an_active_formula_references_it(
+    def test_field_removal_blocked_when_retained_draft_formula_references_it(
         self, make_form, make_field, make_user, created_objects,
     ):
         from app.modules.FORMBLD.model import Field
@@ -664,6 +760,7 @@ class TestFieldRemovalBlockedByFormulaReference:
 
         form, form_version = make_form()
         field_a, _fva = make_field(form, form_version, "field_a")
+        calc_field, _calc_fv = make_field(form, form_version, "calc_field", field_type="calculated")
         formula, _version = self._publish_formula(
             make_user, created_objects, form, "field_a + 1", {"field_a": {}},
             "Diesel Emissions", "a",
@@ -672,14 +769,47 @@ class TestFieldRemovalBlockedByFormulaReference:
         draft_version_id = self._draft_version_id(form, actor, created_objects)
 
         with pytest.raises(ValueError, match=formula.name):
-            save_form_draft_fields(draft_version_id, [], actor.id)
+            save_form_draft_fields(draft_version_id, [
+                {
+                    "field_code": calc_field.field_code,
+                    "field_name": "Calc Field",
+                    "field_type": "calculated",
+                    "field_config": {"formula_version_id": formula.current_version_id},
+                    "display_order": 1,
+                    "frequency": "annual",
+                }
+            ], actor.id)
 
         assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is not None
+
+    def test_field_removal_ignores_historical_same_form_formula_not_retained_in_draft(
+        self, make_form, make_field, make_user, created_objects,
+    ):
+        from app.modules.FORMBLD.model import Field, FieldVersion
+        from app.modules.FORMBLD.service import save_form_draft_fields
+
+        form, form_version = make_form()
+        field_a, _fva = make_field(form, form_version, "field_a")
+        self._publish_formula(
+            make_user, created_objects, form, "field_a + 1", {"field_a": {}},
+            "Historical Same Sheet Formula", "historical",
+        )
+        actor = make_user()
+        draft_version_id = self._draft_version_id(form, actor, created_objects)
+
+        save_form_draft_fields(draft_version_id, [], actor.id)
+
+        assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is not None
+        assert FieldVersion.query.filter_by(
+            field_id=field_a.id,
+            form_version_id=draft_version_id,
+            is_deleted=False,
+        ).first() is None
 
     def test_field_removal_succeeds_when_no_formula_references_it(
         self, make_form, make_field, make_user, created_objects,
     ):
-        from app.modules.FORMBLD.model import Field
+        from app.modules.FORMBLD.model import Field, FieldVersion
         from app.modules.FORMBLD.service import save_form_draft_fields
 
         form, form_version = make_form()
@@ -689,7 +819,12 @@ class TestFieldRemovalBlockedByFormulaReference:
 
         save_form_draft_fields(draft_version_id, [], actor.id)
 
-        assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is None
+        assert Field.query.filter_by(id=field_a.id, is_deleted=False).first() is not None
+        assert FieldVersion.query.filter_by(
+            field_id=field_a.id,
+            form_version_id=draft_version_id,
+            is_deleted=False,
+        ).first() is None
 
     def test_batch_draft_save_blocks_and_reports_every_referenced_field(
         self, make_form, make_field, make_user, created_objects,
@@ -707,11 +842,11 @@ class TestFieldRemovalBlockedByFormulaReference:
         field_c, _fvc = make_field(form, form_version, "field_c")
         formula_1, _v1 = self._publish_formula(
             make_user, created_objects, form, "field_a + 1", {"field_a": {}},
-            "Diesel Emissions", "b1",
+            "Diesel Emissions", "b1", form_id_marker="legacy",
         )
         formula_2, _v2 = self._publish_formula(
             make_user, created_objects, form, "field_b + 1", {"field_b": {}},
-            "Grid Emissions", "b2",
+            "Grid Emissions", "b2", form_id_marker="legacy",
         )
         actor = make_user()
         draft_version_id = self._draft_version_id(form, actor, created_objects)
