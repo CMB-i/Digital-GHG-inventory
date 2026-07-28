@@ -175,6 +175,56 @@ def _blocked_field_removal_message(prefix, blocked_fields_with_formulas):
         parts.append(f"'{field_code}' is referenced by formula(s) {names}")
     return f"{prefix}: " + "; ".join(parts) + ". Unpublish or edit the formula(s) first."
 
+
+def _retained_formula_versions(fields_list):
+    formula_version_ids = {
+        (field.get("field_config") or {}).get("formula_version_id")
+        for field in fields_list
+        if (field.get("field_type") or "").strip().lower() == "calculated"
+    }
+    formula_version_ids.discard(None)
+    if not formula_version_ids:
+        return []
+
+    from app.modules.FRMULA.model import Formula
+
+    return (
+        FormulaVersion.query.with_entities(FormulaVersion, Formula)
+        .join(Formula, Formula.id == FormulaVersion.formula_id)
+        .filter(
+            FormulaVersion.id.in_(formula_version_ids),
+            Formula.is_deleted == False,
+        )
+        .all()
+    )
+
+
+def _blocking_formulas_for_draft_field_removal(field, form_version, retained_formula_versions):
+    """
+    A Draft save replaces only the Draft's field list. Historical same-form
+    formulas attached solely to older Published FormVersions must not block
+    removing a field from the Draft, otherwise a published sheet can never be
+    corrected without direct row edits. External/legacy current formulas still
+    block, and same-form formulas retained in the incoming Draft payload still
+    block if their attached version references the omitted field.
+    """
+    blocking = []
+    seen_formula_ids = set()
+
+    for formula_version, formula in retained_formula_versions:
+        if field.field_code in (formula_version.tokens or {}):
+            blocking.append(formula)
+            seen_formula_ids.add(formula.id)
+
+    for formula in _formulas_referencing_field(field):
+        if formula.id in seen_formula_ids:
+            continue
+        if formula.form_id != form_version.form_id:
+            blocking.append(formula)
+            seen_formula_ids.add(formula.id)
+
+    return blocking
+
 def delete_sheet(form_id, user_id, reason):
     """
     A sheet can now only ever be attached to the workbook it was created in
@@ -510,7 +560,6 @@ class _DraftPreviewCrossSheetResolver:
         from app.modules.SUBMIT.service import _compose_sheet_results
 
         fields, _sections, monthly_fields, sheet_result_fields, workbook_values, rows = self._shape_for(form)
-        self.resolution_order.append(form.code)
         resolve_external = self.resolve_external_for(form)
         sheet_results = _compose_sheet_results(
             sheet_result_fields,
@@ -522,6 +571,7 @@ class _DraftPreviewCrossSheetResolver:
             workbook_values=workbook_values,
         )
         self.finish_external_for(form, sheet_results)
+        self.resolution_order.append(form.code)
         return self._results_cache[form.id]
 
 def compose_preview_workbook_context(form_version_id):
@@ -747,17 +797,23 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
                 raise ValueError(f"Duplicate field code '{code_strip}' found in form fields.")
             seen_codes.add(code_strip)
 
-    # Fields omitted from this payload are about to be soft-deleted below --
-    # block up front, before any mutation, if a published Formula still
-    # references any of them. Checked as one pass over every omitted field so
-    # a batch save is all-or-nothing: either the whole draft saves, or it
-    # fails with every blocked field listed, never a silent partial save.
+    # Fields omitted from this payload are removed from this Draft. Block up
+    # front, before any mutation, if the incoming Draft keeps a formula that
+    # still references any omitted field, or if an external/legacy formula
+    # still depends on it. Historical same-form formulas attached only to
+    # older Published versions are intentionally ignored here: those versions
+    # keep their own FieldVersion rows, and the Draft must remain editable.
     present_codes = {f.get("field_code") for f in fields_list if f.get("field_code")}
     all_fields = Field.query.filter_by(form_id=form_version.form_id, is_deleted=False).all()
     fields_to_remove = [f for f in all_fields if f.field_code not in present_codes]
+    retained_formula_versions = _retained_formula_versions(fields_list)
     blocked = []
     for f in fields_to_remove:
-        referencing_formulas = _formulas_referencing_field(f)
+        referencing_formulas = _blocking_formulas_for_draft_field_removal(
+            f,
+            form_version,
+            retained_formula_versions,
+        )
         if referencing_formulas:
             blocked.append((f.field_code, referencing_formulas))
     if blocked:
@@ -771,12 +827,28 @@ def save_form_draft_fields(form_version_id, fields_list, user_id, sections_list=
         fv.deleted_at = datetime.now(timezone.utc)
         fv.delete_reason = "Overwritten by new draft save"
 
-    # Soft-delete fields that are no longer present
+    # Soft-delete fields that are no longer present only when no other live
+    # FieldVersion still needs the shared Field row. Published/history
+    # versions keep their Field rows active; the omitted Draft FieldVersions
+    # above are enough to remove the field from this Draft.
     for f in fields_to_remove:
-        f.is_deleted = True
-        f.deleted_by = user_id
-        f.deleted_at = datetime.now(timezone.utc)
-        f.delete_reason = "Removed from form draft"
+        remaining_version = (
+            FieldVersion.query.filter(
+                FieldVersion.field_id == f.id,
+                FieldVersion.form_version_id != form_version_id,
+                FieldVersion.is_deleted == False,
+            )
+            .order_by(FieldVersion.version_number.desc(), FieldVersion.id.desc())
+            .first()
+        )
+        if remaining_version:
+            f.current_version_id = remaining_version.id
+            f.updated_by = user_id
+        else:
+            f.is_deleted = True
+            f.deleted_by = user_id
+            f.deleted_at = datetime.now(timezone.utc)
+            f.delete_reason = "Removed from form draft"
 
     db.session.flush()
     

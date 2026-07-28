@@ -486,7 +486,7 @@ class TestDraftWorkbookPreviewCrossSheetResolution:
         assert results["total_emissions_tco2e"]["status"] == "calculated"
         assert results["total_emissions_tco2e"]["value"] == 247
         assert payload["preview_meta"]["dependency_resolution_order"][:3] == [
-            fuel_form.code,
             ofr_form.code,
+            fuel_form.code,
             electricity_form.code,
         ]
