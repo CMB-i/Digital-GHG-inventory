@@ -382,6 +382,111 @@ class TestComposeSheetResultsDependencyPropagation:
         assert "Field A" not in results["field_b"]["message"]
 
 
+class TestComposeSheetResultsAnnualInputs:
+    def _annual_raw_field(self, code="annual_qty", name="Annual Qty"):
+        return {
+            "field_id": 10,
+            "field_code": code,
+            "field_name": name,
+            "field_type": "number",
+            "frequency": "annual",
+            "field_config": {},
+        }
+
+    def _result_field(self, formula_version, code="annual_result", name="Annual Result", field_id=20):
+        return {
+            "field_id": field_id,
+            "field_code": code,
+            "field_name": name,
+            "field_type": "calculated",
+            "frequency": "annual",
+            "field_config": {
+                "formula_version_id": formula_version.id,
+                "display_region": "below_monthly_table",
+            },
+        }
+
+    def test_populated_annual_raw_field_calculates(self, make_formula_version):
+        formula = make_formula_version("annual_qty * 47.3", {"annual_qty": {}})
+        raw_field = self._annual_raw_field()
+        result_field = self._result_field(formula)
+
+        results = _compose_sheet_results(
+            [result_field],
+            [],
+            [],
+            annual_fields=[raw_field, result_field],
+            workbook_values={"annual_qty": {"raw_value": "0.026", "calculated_value": 0.026}},
+            own_sheet_label="Other Fuels",
+        )
+
+        assert results[0]["status"] == "calculated"
+        assert results[0]["value"] == round(0.026 * 47.3, 3)
+
+    def test_blank_annual_raw_field_needs_input_not_unknown_variable(self, make_formula_version):
+        formula = make_formula_version("annual_qty * 47.3", {"annual_qty": {}})
+        raw_field = self._annual_raw_field()
+        result_field = self._result_field(formula)
+
+        results = _compose_sheet_results(
+            [result_field],
+            [],
+            [],
+            annual_fields=[raw_field, result_field],
+            workbook_values={"annual_qty": {"raw_value": None, "calculated_value": None}},
+            own_sheet_label="Other Fuels",
+        )
+
+        assert results[0]["status"] == "needs_input"
+        assert "Unknown formula variable" not in results[0]["message"]
+        assert results[0]["message"] == "Waiting on: Other Fuels (Annual Qty)."
+
+    def test_chained_annual_results_resolve_in_dependency_order(self, make_formula_version):
+        formula_a = make_formula_version("annual_qty * 2", {"annual_qty": {}})
+        formula_b = make_formula_version("annual_a + 5", {"annual_a": {}})
+        raw_field = self._annual_raw_field()
+        field_a = self._result_field(formula_a, code="annual_a", name="Annual A", field_id=21)
+        field_b = self._result_field(formula_b, code="annual_b", name="Annual B", field_id=22)
+
+        results = {
+            r["field_code"]: r for r in _compose_sheet_results(
+                [field_b, field_a],
+                [],
+                [],
+                annual_fields=[raw_field, field_a, field_b],
+                workbook_values={"annual_qty": {"raw_value": "3", "calculated_value": 3}},
+                own_sheet_label="Other Fuels",
+            )
+        }
+
+        assert results["annual_a"]["status"] == "calculated"
+        assert results["annual_a"]["value"] == 6
+        assert results["annual_b"]["status"] == "calculated"
+        assert results["annual_b"]["value"] == 11
+
+    def test_upstream_annual_needs_input_propagates_through_chain(self, make_formula_version):
+        formula_a = make_formula_version("annual_qty * 2", {"annual_qty": {}})
+        formula_b = make_formula_version("annual_a + 5", {"annual_a": {}})
+        raw_field = self._annual_raw_field()
+        field_a = self._result_field(formula_a, code="annual_a", name="Annual A", field_id=21)
+        field_b = self._result_field(formula_b, code="annual_b", name="Annual B", field_id=22)
+
+        results = {
+            r["field_code"]: r for r in _compose_sheet_results(
+                [field_b, field_a],
+                [],
+                [],
+                annual_fields=[raw_field, field_a, field_b],
+                workbook_values={"annual_qty": {"raw_value": "", "calculated_value": None}},
+                own_sheet_label="Other Fuels",
+            )
+        }
+
+        assert results["annual_a"]["status"] == "needs_input"
+        assert results["annual_b"]["status"] == "needs_input"
+        assert results["annual_b"]["message"] == "Waiting on: Other Fuels (Annual Qty)."
+
+
 class TestBlockingCauseFlattening:
     """
     The actual bug this was written for: GRI Summary's intensity fields

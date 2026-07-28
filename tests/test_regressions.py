@@ -498,6 +498,101 @@ class TestFormulaPublishFieldScopedToOwnForm:
         assert version.published_at is not None
         assert formula.current_version_id == version.id
 
+    def test_publish_succeeds_when_token_belongs_to_sibling_form_in_same_workbook(
+        self, make_form, make_field, make_site, make_workflow, make_user,
+        make_workbook, db_session, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+        from app.modules.WKBK.model import WorkbookForm
+
+        own_form, _own_form_version = make_form()
+        sibling_form, sibling_form_version = make_form()
+        make_field(sibling_form, sibling_form_version, "sibling_total")
+
+        user = make_user()
+        site = make_site()
+        workflow_version = make_workflow([user])
+        workbook = make_workbook(own_form, site, workflow_version=workflow_version)
+        workbook_form = WorkbookForm(workbook_id=workbook.id, form_id=sibling_form.id, display_order=20)
+        db_session.add(workbook_form)
+        db_session.flush()
+        created_objects.append(workbook_form)
+
+        formula = create_formula(
+            "Sibling Formula", f"test-sibling-scope-{user.id}", "sibling_total + 1",
+            {"sibling_total": {}}, user.id, form_id=own_form.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        publish_formula_version(version.id, user.id)
+
+        assert version.published_at is not None
+
+    def test_publish_rejects_token_from_another_workbook(
+        self, make_form, make_field, make_site, make_workflow, make_user,
+        make_workbook, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+
+        own_form, _own_form_version = make_form()
+        other_form, other_form_version = make_form()
+        make_field(other_form, other_form_version, "other_workbook_total")
+
+        user = make_user()
+        workflow_version = make_workflow([user])
+        make_workbook(own_form, make_site(), workflow_version=workflow_version)
+        make_workbook(other_form, make_site(), workflow_version=workflow_version)
+
+        formula = create_formula(
+            "Cross Workbook Formula", f"test-cross-workbook-{user.id}", "other_workbook_total + 1",
+            {"other_workbook_total": {}}, user.id, form_id=own_form.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        with pytest.raises(ValueError, match="sheet/workbook scope"):
+            publish_formula_version(version.id, user.id)
+
+    def test_publish_rejects_ambiguous_duplicate_sibling_field_code(
+        self, make_form, make_field, make_site, make_workflow, make_user,
+        make_workbook, db_session, created_objects,
+    ):
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+        from app.modules.WKBK.model import WorkbookForm
+
+        own_form, _own_form_version = make_form()
+        sibling_a, sibling_a_version = make_form()
+        sibling_b, sibling_b_version = make_form()
+        make_field(sibling_a, sibling_a_version, "duplicate_total")
+        make_field(sibling_b, sibling_b_version, "duplicate_total")
+
+        user = make_user()
+        site = make_site()
+        workflow_version = make_workflow([user])
+        workbook = make_workbook(own_form, site, workflow_version=workflow_version)
+        for display_order, sibling in ((20, sibling_a), (30, sibling_b)):
+            workbook_form = WorkbookForm(workbook_id=workbook.id, form_id=sibling.id, display_order=display_order)
+            db_session.add(workbook_form)
+            db_session.flush()
+            created_objects.append(workbook_form)
+
+        formula = create_formula(
+            "Ambiguous Sibling Formula", f"test-ambiguous-sibling-{user.id}", "duplicate_total + 1",
+            {"duplicate_total": {}}, user.id, form_id=own_form.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+
+        with pytest.raises(ValueError, match="ambiguous"):
+            publish_formula_version(version.id, user.id)
+
 
 class TestFormulaReportContext:
     """Formula.context lets the same Formula/FormulaVersion tables and the

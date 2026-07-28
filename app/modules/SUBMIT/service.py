@@ -1492,17 +1492,14 @@ class _CrossSheetResolver:
             self._field_cache[form.id] = combined
         return self._field_cache[form.id]
 
-    def _owner_form_for_code(self, code, exclude_form_id):
-        # Iterates sheet_rows' display order for a deterministic match in the
-        # (practically impossible, given timestamp-based field codes -- see
-        # uq_fields_code_per_form, which only guarantees uniqueness *within*
-        # one form) case of a code collision across two sibling sheets.
+    def _owner_forms_for_code(self, code, exclude_form_id):
+        owners = []
         for form_id, form in self.form_by_id.items():
             if form_id == exclude_form_id:
                 continue
             if code in self._fields_for(form):
-                return form
-        return None
+                owners.append(form)
+        return owners
 
     def resolve(self, code, requesting_form_id):
         """
@@ -1526,9 +1523,20 @@ class _CrossSheetResolver:
         sheets collapses to one flat list instead of nesting a "Cannot
         calculate: ..." inside another one per hop.
         """
-        owner = self._owner_form_for_code(code, exclude_form_id=requesting_form_id)
-        if owner is None:
+        owners = self._owner_forms_for_code(code, exclude_form_id=requesting_form_id)
+        if not owners:
             return None
+        if len(owners) > 1:
+            labels = [self.label_by_form_id.get(owner.id, owner.code) for owner in owners]
+            return {
+                "ok": False,
+                "hard_error": True,
+                "error_causes": [
+                    f"Ambiguous cross-sheet formula token '{code}' exists on multiple sheets: {', '.join(labels)}."
+                ],
+            }
+
+        owner = owners[0]
 
         owner_label = self.label_by_form_id.get(owner.id, owner.code)
 
@@ -1596,14 +1604,17 @@ class _CrossSheetResolver:
         if form.id in self._results_cache:
             return self._results_cache[form.id]
 
-        _fields, monthly_fields, sheet_result_fields = self._sheet_shape_for(form)
+        fields, monthly_fields, sheet_result_fields = self._sheet_shape_for(form)
         rows = _monthly_rows_for_calc(self.site_id, form, monthly_fields, self.fy_start_year)
+        workbook_values = workbook_values_payload(self.site_id, form.id, self.fy_start_year, fields)
 
         resolve_external = self.resolve_external_for(form)
         sheet_results = _compose_sheet_results(
             sheet_result_fields, monthly_fields, rows,
             resolve_external=resolve_external,
             own_sheet_label=self.label_by_form_id.get(form.id, form.code),
+            annual_fields=fields,
+            workbook_values=workbook_values,
         )
         self.finish_external_for(form, sheet_results)
         return self._results_cache[form.id]
@@ -1629,7 +1640,15 @@ def _group_blocking_causes_by_sheet(causes):
     )
 
 
-def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external=None, own_sheet_label=None):
+def _compose_sheet_results(
+    result_fields,
+    monthly_fields,
+    rows,
+    resolve_external=None,
+    own_sheet_label=None,
+    annual_fields=None,
+    workbook_values=None,
+):
     """
     resolve_external, if given, is called as resolve_external(field_code)
     for any bare (non-SUM_MONTHS) formula token that isn't a monthly field or
@@ -1652,6 +1671,14 @@ def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external
 
     result_codes = [field["field_code"] for field in result_fields]
     fields_by_code = {field["field_code"]: field for field in result_fields}
+    monthly_fields_by_code = {field["field_code"]: field for field in monthly_fields}
+    annual_fields_by_code = {
+        field["field_code"]: field
+        for field in (annual_fields or [])
+        if field.get("field_type") != "calculated"
+        and field.get("field_code") not in monthly_fields_by_code
+    }
+    workbook_values = workbook_values or {}
 
     formula_version_ids = [
         (field.get("field_config") or {}).get("formula_version_id")
@@ -1714,6 +1741,12 @@ def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external
 
         blank_policy = config.get("blank_policy", DEFAULT_AGGREGATE_BLANK_POLICY)
         context_values = dict(result_values)
+        for annual_code, payload in workbook_values.items():
+            if annual_code not in annual_fields_by_code:
+                continue
+            value = _coerce_sheet_result_number(payload)
+            if value is not None:
+                context_values[annual_code] = value
 
         # "Unavailable" (operand isn't a monthly field on this sheet at all)
         # is a structural problem, not blank data -- it always blocks,
@@ -1778,6 +1811,15 @@ def _compose_sheet_results(result_fields, monthly_fields, rows, resolve_external
                     pending_causes.extend(
                         (dep_result or {}).get("blocking_causes") or [(own_sheet_label, dep_label)]
                     )
+                continue
+            if name in annual_fields_by_code:
+                dep_label = annual_fields_by_code[name].get("field_name") or name
+                pending_causes.append((own_sheet_label, dep_label))
+                continue
+            if name in monthly_fields_by_code:
+                unavailable_messages.append(
+                    f"Monthly field '{name}' must be referenced with SUM_MONTHS({name})."
+                )
                 continue
             if resolve_external is None:
                 continue
@@ -2054,10 +2096,13 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
     # second time through the resolver's lighter-weight path.
     cross_sheet_resolver = _CrossSheetResolver(site_id, fy_start_year, sheet_rows)
     resolve_external = cross_sheet_resolver.resolve_external_for(form)
+    workbook_values = workbook_values_payload(site.id, form.id, fy_start_year, fields)
     sheet_results = _compose_sheet_results(
         sheet_result_fields, monthly_fields, rows,
         resolve_external=resolve_external,
         own_sheet_label=workbook_form.sheet_label or human_sheet_label(form),
+        annual_fields=fields,
+        workbook_values=workbook_values,
     )
     cross_sheet_resolver.finish_external_for(form, sheet_results)
 
@@ -2087,7 +2132,7 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
         },
         "fields": monthly_fields,
         "sections": sections,
-        "workbook_values": workbook_values_payload(site.id, form.id, fy_start_year, fields),
+        "workbook_values": workbook_values,
         "sheet_results": sheet_results,
         "rows": rows,
     }

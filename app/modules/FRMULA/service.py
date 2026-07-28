@@ -336,16 +336,36 @@ def publish_formula_version(version_id, user_id):
                 f"Referenced token '{t_key}' is not a recognized report metric or group reference."
             )
     else:
-        # Cross-check tokens against actual live form field codes and current value set entry codes.
-        # field_code is only unique per-form (uq_fields_code_per_form), so this must be scoped to
-        # the formula's own sheet -- a global check would let a token silently match a field on a
-        # completely different sheet. Formulas created before form_id existed have no reliable sheet
-        # attribution, so they fall back to the old unscoped check.
+        # Cross-check tokens against actual live field codes and current value
+        # set entry codes. field_code is unique only per form, so formulas
+        # with an owning sheet validate against that sheet plus sibling sheets
+        # in the same workbook(s). Formulas created before form_id existed
+        # have no reliable workbook anchor and keep the legacy unscoped
+        # fallback.
         from app.modules.FORMBLD.model import Field
-        field_query = Field.query.filter_by(is_deleted=False)
+        from app.modules.WKBK.model import WorkbookForm
+
+        scoped_form_ids = None
         if formula is not None and formula.form_id is not None:
-            field_query = field_query.filter_by(form_id=formula.form_id)
-        active_field_codes = {f.field_code for f in field_query.all()}
+            workbook_ids = [
+                row.workbook_id
+                for row in WorkbookForm.query.filter_by(form_id=formula.form_id).all()
+            ]
+            scoped_form_ids = {formula.form_id}
+            if workbook_ids:
+                scoped_form_ids.update(
+                    row.form_id
+                    for row in WorkbookForm.query.filter(WorkbookForm.workbook_id.in_(workbook_ids)).all()
+                )
+
+        field_query = Field.query.filter_by(is_deleted=False)
+        if scoped_form_ids is not None:
+            field_query = field_query.filter(Field.form_id.in_(scoped_form_ids))
+        active_fields = field_query.all()
+        active_field_codes = {f.field_code for f in active_fields}
+        field_forms_by_code = {}
+        for field in active_fields:
+            field_forms_by_code.setdefault(field.field_code, set()).add(field.form_id)
 
         from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
         current_valsets = (
@@ -364,8 +384,23 @@ def publish_formula_version(version_id, user_id):
                 active_valset_codes.add(entry.entry_code)
 
         for t_key in tokens_keys:
-            if t_key not in active_field_codes and t_key not in active_valset_codes:
-                raise FormulaValidationError(f"Referenced field/constant '{t_key}' does not exist as an active field or value set entry in the system.")
+            if t_key in active_valset_codes:
+                continue
+            if t_key not in active_field_codes:
+                scope = "the formula's sheet/workbook scope" if scoped_form_ids is not None else "the system"
+                raise FormulaValidationError(
+                    f"Referenced field/constant '{t_key}' does not exist as an active field or value set entry in {scope}."
+                )
+            matching_form_ids = field_forms_by_code.get(t_key, set())
+            if (
+                formula is not None
+                and formula.form_id is not None
+                and formula.form_id not in matching_form_ids
+                and len(matching_form_ids) > 1
+            ):
+                raise FormulaValidationError(
+                    f"Referenced field '{t_key}' is ambiguous within this workbook; it exists on multiple sibling sheets."
+                )
 
     # Validate it works (optional, but a great safeguard)
     validate_formula(version.expression, tokens_keys)

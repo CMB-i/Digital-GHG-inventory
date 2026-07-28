@@ -1,4 +1,5 @@
 from app.modules.FORMBLD.model import Field, FieldVersion
+from app.modules.WKBK.model import WorkbookForm
 
 
 NUMERIC_FIELD_TYPES = {"integer", "number", "decimal", "float", "numeric"}
@@ -284,15 +285,17 @@ def get_form_version_fields(form_version_id):
     )
     return rows
 
-def compose_preview_workbook_context(form_version_id):
-    version = get_form_version(form_version_id)
-    if not version:
-        raise ValueError("Form version not found.")
 
-    form = get_form(version.form_id)
-    if not form:
-        raise ValueError("Form not found.")
+def _latest_form_version_id(form_id):
+    latest = (
+        FormVersion.query.filter_by(form_id=form_id)
+        .order_by(FormVersion.version_number.desc())
+        .first()
+    )
+    return latest.id if latest else None
 
+
+def _preview_fields_for_version(form_version_id):
     fields = []
     for fv, field in get_form_version_fields(form_version_id):
         field_config = dict(fv.field_config or {})
@@ -311,8 +314,11 @@ def compose_preview_workbook_context(form_version_id):
             "frequency": fv.frequency or "monthly",
             "calculated": field_type == "calculated",
         })
+    return fields
 
-    sections = [{
+
+def _preview_sections_for_version(form_version_id):
+    return [{
         "id": section.id,
         "name": section.name,
         "code": section.code,
@@ -321,6 +327,8 @@ def compose_preview_workbook_context(form_version_id):
         "description": section.description or "",
     } for section in get_form_sections(form_version_id)]
 
+
+def _preview_rows(fields):
     rows = []
     for month, month_name in MOCK_FY_MONTHS:
         year = MOCK_FY_START_YEAR if month >= 4 else MOCK_FY_START_YEAR + 1
@@ -357,7 +365,10 @@ def compose_preview_workbook_context(form_version_id):
             "issues": {},
             "is_active_period": False,
         })
+    return rows
 
+
+def _preview_workbook_values(fields, sections):
     section_by_id = {section["id"]: section for section in sections}
     workbook_values = {}
     for field in fields:
@@ -376,12 +387,173 @@ def compose_preview_workbook_context(form_version_id):
                 "is_locked": bool(field.get("calculated")),
                 "remark": None,
             }
+    return workbook_values
+
+
+class _DraftPreviewCrossSheetResolver:
+    def __init__(self, selected_form_id):
+        self.selected_form_id = selected_form_id
+        self._shape_cache = {}
+        self._results_cache = {}
+        self._resolving = set()
+        self.resolution_order = []
+
+        memberships = WorkbookForm.query.filter_by(form_id=selected_form_id).all()
+        workbook_ids = [row.workbook_id for row in memberships]
+        if len(set(workbook_ids)) != 1:
+            self.form_by_id = {}
+            self.label_by_form_id = {}
+            return
+
+        workbook_id = workbook_ids[0]
+        rows = (
+            WorkbookForm.query.filter_by(workbook_id=workbook_id)
+            .order_by(WorkbookForm.display_order.asc(), WorkbookForm.id.asc())
+            .all()
+        )
+        form_ids = [row.form_id for row in rows]
+        forms = {form.id: form for form in Form.query.filter(Form.id.in_(form_ids)).all()}
+        self.form_by_id = {
+            row.form_id: forms[row.form_id]
+            for row in rows
+            if row.form_id in forms and _latest_form_version_id(row.form_id)
+        }
+        self.label_by_form_id = {
+            row.form_id: (row.sheet_label or forms[row.form_id].name)
+            for row in rows
+            if row.form_id in forms
+        }
+
+    def _shape_for(self, form):
+        if form.id not in self._shape_cache:
+            from app.modules.SUBMIT.service import is_sheet_result_field, monthly_table_fields
+
+            version_id = _latest_form_version_id(form.id)
+            fields = _preview_fields_for_version(version_id)
+            sections = _preview_sections_for_version(version_id)
+            monthly_fields = monthly_table_fields(fields, sections)
+            sheet_result_fields = [field for field in fields if is_sheet_result_field(field)]
+            workbook_values = _preview_workbook_values(fields, sections)
+            rows = _preview_rows(fields)
+            self._shape_cache[form.id] = (fields, sections, monthly_fields, sheet_result_fields, workbook_values, rows)
+        return self._shape_cache[form.id]
+
+    def _fields_for(self, form):
+        fields, _sections, _monthly_fields, _sheet_result_fields, _workbook_values, _rows = self._shape_for(form)
+        return {field["field_code"]: field for field in fields}
+
+    def _owner_forms_for_code(self, code, requesting_form_id):
+        owners = []
+        for form_id, form in self.form_by_id.items():
+            if form_id == requesting_form_id:
+                continue
+            if code in self._fields_for(form):
+                owners.append(form)
+        return owners
+
+    def resolve_external_for(self, form):
+        self._resolving.add(form.id)
+        return lambda code: self.resolve(code, form.id)
+
+    def finish_external_for(self, form, sheet_results):
+        self._resolving.discard(form.id)
+        self._results_cache[form.id] = {result["field_code"]: result for result in sheet_results}
+
+    def resolve(self, code, requesting_form_id):
+        owners = self._owner_forms_for_code(code, requesting_form_id)
+        if not owners:
+            return None
+        if len(owners) > 1:
+            labels = [self.label_by_form_id.get(owner.id, owner.code) for owner in owners]
+            return {
+                "ok": False,
+                "hard_error": True,
+                "error_causes": [
+                    f"Ambiguous cross-sheet formula token '{code}' exists on multiple sheets: {', '.join(labels)}."
+                ],
+            }
+
+        owner = owners[0]
+        owner_label = self.label_by_form_id.get(owner.id, owner.code)
+        if owner.id in self._resolving:
+            return {
+                "ok": False,
+                "hard_error": True,
+                "error_causes": [f"Circular cross-sheet formula dependency involving sheet '{owner_label}'."],
+            }
+
+        result = self._results_for_form(owner).get(code) or {}
+        owner_field = self._fields_for(owner).get(code) or {}
+        field_label = owner_field.get("field_name") or code
+        status = result.get("status")
+
+        if status in ("calculated", "partial"):
+            return {"ok": True, "value": result.get("value"), "partial": status == "partial"}
+        if status == "error":
+            return {
+                "ok": False,
+                "hard_error": True,
+                "error_causes": result.get("error_causes") or [
+                    f"'{field_label}' (from '{owner_label}') could not be calculated: {result.get('message') or 'error'}."
+                ],
+            }
+        return {
+            "ok": False,
+            "hard_error": False,
+            "blocking_causes": result.get("blocking_causes") or [(owner_label, field_label)],
+        }
+
+    def _results_for_form(self, form):
+        if form.id in self._results_cache:
+            return self._results_cache[form.id]
+
+        from app.modules.SUBMIT.service import _compose_sheet_results
+
+        fields, _sections, monthly_fields, sheet_result_fields, workbook_values, rows = self._shape_for(form)
+        self.resolution_order.append(form.code)
+        resolve_external = self.resolve_external_for(form)
+        sheet_results = _compose_sheet_results(
+            sheet_result_fields,
+            monthly_fields,
+            rows,
+            resolve_external=resolve_external,
+            own_sheet_label=self.label_by_form_id.get(form.id, form.code),
+            annual_fields=fields,
+            workbook_values=workbook_values,
+        )
+        self.finish_external_for(form, sheet_results)
+        return self._results_cache[form.id]
+
+def compose_preview_workbook_context(form_version_id):
+    version = get_form_version(form_version_id)
+    if not version:
+        raise ValueError("Form version not found.")
+
+    form = get_form(version.form_id)
+    if not form:
+        raise ValueError("Form not found.")
+
+    fields = _preview_fields_for_version(form_version_id)
+    sections = _preview_sections_for_version(form_version_id)
+    rows = _preview_rows(fields)
+    workbook_values = _preview_workbook_values(fields, sections)
 
     from app.modules.SUBMIT.service import is_sheet_result_field, _compose_sheet_results, monthly_table_fields
 
     sheet_result_fields = [field for field in fields if is_sheet_result_field(field)]
     table_fields = monthly_table_fields(fields, sections)
-    sheet_results = _compose_sheet_results(sheet_result_fields, table_fields, rows)
+    cross_sheet_resolver = _DraftPreviewCrossSheetResolver(form.id)
+    resolve_external = cross_sheet_resolver.resolve_external_for(form)
+    sheet_results = _compose_sheet_results(
+        sheet_result_fields,
+        table_fields,
+        rows,
+        resolve_external=resolve_external,
+        annual_fields=fields,
+        workbook_values=workbook_values,
+        own_sheet_label=form.name,
+    )
+    cross_sheet_resolver.finish_external_for(form, sheet_results)
 
     return {
         "financial_year": {
@@ -418,6 +590,7 @@ def compose_preview_workbook_context(form_version_id):
         "sheet_results": sheet_results,
         "preview_meta": {
             "sheet_result_field_count": len(sheet_result_fields),
+            "dependency_resolution_order": cross_sheet_resolver.resolution_order,
         },
         "rows": rows,
     }
