@@ -2252,6 +2252,10 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
     fields = _field_payload(resolved_form_version_id)
     sections = _sections_payload(resolved_form_version_id)
     monthly_fields = monthly_table_fields(fields, sections)
+    explicit_result_fields = [field for field in fields if is_sheet_result_field(field)]
+    sheet_result_fields = explicit_result_fields + synthesize_automatic_fy_totals(
+        monthly_fields, explicit_result_fields
+    )
     months = _fy_months(fy_start_year)
     month_keys = [(item["year"], item["month"]) for item in months]
 
@@ -2297,6 +2301,32 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
             "is_active_period": bool(period and active_period_id and period.id == active_period_id),
         })
 
+    # Cross-sheet formula resolution (e.g. GRI Summary reading Cargo/
+    # Electricity/Fuel Consumption's own FY totals) needs sibling sheets in
+    # the same workbook, same as compose_annual_workbook_data. This is a
+    # read-only review context, not a live-entry one, so it deliberately
+    # resolves the site's active workbook directly rather than going through
+    # _require_workbook_runtime_access (which gates on Workbook.status --
+    # review must work regardless of whether the workbook itself is
+    # currently published for live entry).
+    workbook_site = (
+        WorkbookSite.query.join(Workbook, Workbook.id == WorkbookSite.workbook_id)
+        .filter(WorkbookSite.site_id == site_id, Workbook.is_active == True)
+        .first()
+    )
+    sheet_rows = _workbook_sheet_rows(workbook_site.workbook_id) if workbook_site else []
+    workbook_values = workbook_values_payload(site.id, form.id, fy_start_year, fields)
+    cross_sheet_resolver = _CrossSheetResolver(site_id, fy_start_year, sheet_rows)
+    resolve_external = cross_sheet_resolver.resolve_external_for(form)
+    sheet_results = _compose_sheet_results(
+        sheet_result_fields, monthly_fields, rows,
+        resolve_external=resolve_external,
+        own_sheet_label=human_sheet_label(form),
+        annual_fields=fields,
+        workbook_values=workbook_values,
+    )
+    cross_sheet_resolver.finish_external_for(form, sheet_results)
+
     return {
         "financial_year": {
             "start_year": fy_start_year,
@@ -2314,7 +2344,8 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
         },
         "fields": monthly_fields,
         "sections": sections,
-        "workbook_values": workbook_values_payload(site.id, form.id, fy_start_year, fields),
+        "workbook_values": workbook_values,
+        "sheet_results": sheet_results,
         "rows": rows,
     }
 

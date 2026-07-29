@@ -20,6 +20,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const sheetFallbackLink = document.getElementById("sheet-fallback-link");
   const sheetHead = document.getElementById("sheet-head");
   const sheetValues = document.getElementById("sheet-values");
+  const sheetResultsSection = document.getElementById("sheet-results-section");
   const actionsPanel = document.getElementById("actions-panel");
   const actionsLocked = document.getElementById("actions-locked");
   const commentInput = document.getElementById("review-comment");
@@ -166,41 +167,79 @@ document.addEventListener("DOMContentLoaded", function () {
     const fields = [...(sheet.fields || [])].sort(
       (a, b) => (a.display_order || 0) - (b.display_order || 0)
     );
+    const sheetResults = sheet.sheet_results || [];
+    const hasMonthlyFields = fields.length > 0;
 
-    if (!fields.length) {
+    // A sheet can have zero monthly-table fields and still have published
+    // calculated results (e.g. GRI Summary, which is entirely FY-level
+    // fields) -- the empty state must only show when neither exists, same
+    // guard as the live workbook view uses.
+    if (!hasMonthlyFields && !sheetResults.length) {
       sheetHead.innerHTML = "";
       sheetValues.innerHTML = `
         <tr>
           <td colspan="2" class="px-5 py-8 text-center text-slate-400 italic">No fields configured for this form.</td>
         </tr>
       `;
+      renderSheetResultsSection([], false);
       return;
     }
 
-    window.WorkbookSheet.render({
-      mode: "review",
-      headEl: sheetHead,
-      bodyEl: sheetValues,
-      fields,
-      sections: sheet.sections || [],
-      workbookValues: sheet.workbook_values || {},
-      canEditWorkbookValues: false,
-      rows: sheet.rows || [{
-        row_key: `submission-${sheet.submission_id}`,
-        label: reviewData.package.period_label,
-        period_label: sheet.form_name,
-        status: sheet.status,
-        submission_status: sheet.status,
-        submission_id: sheet.submission_id,
-        submitted_at: sheet.submitted_at,
-        values: sheet.values || {},
-        proofs: sheet.proofs || {},
-        editable: false,
-        is_active_period: true,
-      }],
-      selectedRowKey: sheet.active_row_key || null,
-      onCellOpen: openCellIssueModal
-    });
+    if (hasMonthlyFields) {
+      window.WorkbookSheet.render({
+        mode: "review",
+        headEl: sheetHead,
+        bodyEl: sheetValues,
+        fields,
+        sections: sheet.sections || [],
+        workbookValues: sheet.workbook_values || {},
+        canEditWorkbookValues: false,
+        rows: sheet.rows || [{
+          row_key: `submission-${sheet.submission_id}`,
+          label: reviewData.package.period_label,
+          period_label: sheet.form_name,
+          status: sheet.status,
+          submission_status: sheet.status,
+          submission_id: sheet.submission_id,
+          submitted_at: sheet.submitted_at,
+          values: sheet.values || {},
+          proofs: sheet.proofs || {},
+          editable: false,
+          is_active_period: true,
+        }],
+        sheetResults,
+        selectedRowKey: sheet.active_row_key || null,
+        onCellOpen: openCellIssueModal
+      });
+    } else {
+      // No monthly table to show -- the sheet's fields are all annual, so
+      // the only thing to render is the calculated results below.
+      sheetHead.innerHTML = "";
+      sheetValues.innerHTML = "";
+    }
+
+    // With no monthly table, nothing renders these results into an in-table
+    // footer, so show all of them here instead of just the overflow subset
+    // (mirrors annual_workbook.js's identical guard).
+    renderSheetResultsSection(sheetResults, !hasMonthlyFields);
+  }
+
+  function renderSheetResultsSection(sheetResults, showAll) {
+    if (!sheetResultsSection) return;
+    const results = Array.isArray(sheetResults) ? sheetResults : [];
+    if (!window.WorkbookSheet || typeof window.WorkbookSheet.renderSheetResultsOverflowHtml !== "function") {
+      sheetResultsSection.classList.add("hidden");
+      sheetResultsSection.innerHTML = "";
+      return;
+    }
+    const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(results, { showAll });
+    if (!html) {
+      sheetResultsSection.classList.add("hidden");
+      sheetResultsSection.innerHTML = "";
+      return;
+    }
+    sheetResultsSection.innerHTML = html;
+    sheetResultsSection.classList.remove("hidden");
   }
 
   function renderTabs() {
