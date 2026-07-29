@@ -317,6 +317,7 @@ def compose_package_review_data(package_id, user_id):
             "fields": workbook_context["fields"],
             "sections": workbook_context.get("sections", []),
             "workbook_values": workbook_context.get("workbook_values", {}),
+            "sheet_results": workbook_context.get("sheet_results", []),
             "rows": workbook_context["rows"],
             "active_row_key": workbook_context.get("active_row_key") or (
                 active_row.get("row_key") if active_row else None
