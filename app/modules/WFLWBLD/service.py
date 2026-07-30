@@ -264,20 +264,11 @@ def save_site_chain_levels(workflow_version_id, site_id, steps, user_id):
         raise ValueError("Only Draft versions can be modified.")
 
     now = datetime.now(timezone.utc)
-    posted_level_numbers = {step["level_number"] for step in steps}
-
     existing_levels = WorkflowLevel.query.filter_by(
         workflow_version_id=workflow_version_id, is_deleted=False
     ).all()
 
-    for level in existing_levels:
-        if level.level_number not in posted_level_numbers:
-            level.is_deleted = True
-            level.deleted_by = user_id
-            level.deleted_at = now
-            level.delete_reason = "Removed from workbook chain editor"
-
-    level_map = {lvl.level_number: lvl for lvl in existing_levels if not lvl.is_deleted}
+    level_map = {lvl.level_number: lvl for lvl in existing_levels}
 
     for step in steps:
         level_number = step.get("level_number")

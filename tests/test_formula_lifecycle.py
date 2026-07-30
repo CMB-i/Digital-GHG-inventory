@@ -5,7 +5,7 @@ a new version of the published one. create_new_formula_draft is the one
 enforcement point for that rule.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -16,6 +16,7 @@ from app.modules.FRMULA.service import (
     delete_formula,
     publish_formula_version,
 )
+from app.modules.VALSET.model import ValueSet, ValueSetEntry, ValueSetVersion
 
 
 class TestFormulaFreezeAfterPublish:
@@ -232,6 +233,89 @@ class TestFormulaFormIdScoping:
         assert formula.form_id is None
 
         publish_formula_version(version.id, user.id)
+
+        assert version.published_at is not None
+
+
+class TestFormulaValueSetPublishValidation:
+    def _make_value_set(self, db_session, created_objects, system_user, author, status, entry_code):
+        suffix = uuid.uuid4().hex[:10]
+        value_set = ValueSet(
+            name=f"Test Value Set {suffix}",
+            code=f"test-vs-{suffix}",
+            created_by=system_user,
+            updated_by=system_user,
+        )
+        db_session.add(value_set)
+        db_session.flush()
+        created_objects.append(value_set)
+
+        version = ValueSetVersion(
+            value_set_id=value_set.id,
+            version_number=1,
+            status=status,
+            effective_from=date.today(),
+            created_by=author.id,
+        )
+        db_session.add(version)
+        db_session.flush()
+        created_objects.append(version)
+
+        entry = ValueSetEntry(
+            value_set_version_id=version.id,
+            entry_code=entry_code,
+            entry_label=entry_code,
+            display_order=1,
+            is_active=True,
+            created_by=author.id,
+            updated_by=author.id,
+        )
+        db_session.add(entry)
+        db_session.flush()
+        created_objects.append(entry)
+        value_set.current_version_id = version.id
+        db_session.flush()
+        return value_set, version, entry
+
+    @pytest.mark.parametrize("status", ["Draft", "Rejected"])
+    def test_publish_rejects_value_set_entries_from_unapproved_versions(
+        self, db_session, created_objects, system_user, make_user, status,
+    ):
+        author = make_user()
+        entry_code = f"VS_TOKEN_{uuid.uuid4().hex[:8]}"
+        self._make_value_set(db_session, created_objects, system_user, author, status, entry_code)
+        formula = create_formula(
+            "Unapproved Value Set Formula",
+            f"unapproved-vs-{uuid.uuid4().hex[:10]}",
+            f"{entry_code} + 1",
+            {entry_code: entry_code},
+            author.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id).one()
+        created_objects.append(version)
+
+        with pytest.raises(ValueError, match=entry_code):
+            publish_formula_version(version.id, author.id)
+
+    def test_publish_accepts_value_set_entries_from_approved_version(
+        self, db_session, created_objects, system_user, make_user,
+    ):
+        author = make_user()
+        entry_code = f"VS_TOKEN_{uuid.uuid4().hex[:8]}"
+        self._make_value_set(db_session, created_objects, system_user, author, "Approved", entry_code)
+        formula = create_formula(
+            "Approved Value Set Formula",
+            f"approved-vs-{uuid.uuid4().hex[:10]}",
+            f"{entry_code} + 1",
+            {entry_code: entry_code},
+            author.id,
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id).one()
+        created_objects.append(version)
+
+        publish_formula_version(version.id, author.id)
 
         assert version.published_at is not None
 

@@ -379,16 +379,17 @@ def publish_formula_version(version_id, user_id):
         for field in active_fields:
             field_forms_by_code.setdefault(field.field_code, set()).add(field.form_id)
 
-        from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
-        current_valsets = (
-            ValueSet.query.filter_by(is_deleted=False)
-            .join(ValueSetVersion, ValueSetVersion.id == ValueSet.current_version_id)
-            .all()
-        )
+        from app.modules.VALSET.model import ValueSet, ValueSetEntry
+        from app.modules.VALSET.service import get_active_approved_value_set_version
+
+        value_sets = ValueSet.query.filter_by(is_deleted=False).all()
         active_valset_codes = set()
-        for vs in current_valsets:
+        for vs in value_sets:
+            approved_version = get_active_approved_value_set_version(vs.id)
+            if not approved_version:
+                continue
             entries = ValueSetEntry.query.filter_by(
-                value_set_version_id=vs.current_version_id,
+                value_set_version_id=approved_version.id,
                 is_deleted=False,
                 is_active=True
             ).all()

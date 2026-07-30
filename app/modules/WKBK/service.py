@@ -5,7 +5,7 @@ from app.modules.WKBK.model import Workbook, WorkbookForm, WorkbookSite, Workboo
 from app.modules.FORMBLD.model import Form, FormVersion, FormSection, FieldVersion
 from app.modules.SITEMST.model import Site
 from app.modules.USRMGMT.model import User
-from app.modules.ACCESS.model import AccessMatrix
+from app.common.permissions import has_permission
 
 
 def _form_stats(form_id):
@@ -280,29 +280,33 @@ def get_eligible_submitters(workbook_id, site_id):
             workbook_id=workbook_id, site_id=site_id
         ).all()
     }
-    rows = AccessMatrix.query.filter(
-        AccessMatrix.entity_type == "submission",
-        AccessMatrix.can_submit == True,
-        AccessMatrix.is_deleted == False,
-        db.or_(
-            db.and_(
-                AccessMatrix.scope_type == "site",
-                AccessMatrix.scope_site_id == site_id,
-            ),
-            AccessMatrix.scope_type == "global",
-        ),
-    ).all()
-    seen = set()
     result = []
-    for row in rows:
-        if row.user_id in already_assigned or row.user_id in seen:
+    for user in User.query.filter_by(is_deleted=False, is_active=True).all():
+        if user.id in already_assigned:
             continue
-        seen.add(row.user_id)
-        user = User.query.filter_by(id=row.user_id, is_deleted=False, is_active=True).first()
-        if user:
+        if _can_submit_for_site(user.id, site_id):
             result.append({"id": user.id, "full_name": user.full_name, "email": user.email})
     result.sort(key=lambda u: u["full_name"].lower())
     return result
+
+
+def _can_submit_for_site(user_id, site_id):
+    return has_permission(user_id, "submission", "submit", scope_site_id=site_id)
+
+
+def _invalid_submitter_detail(workbook_id, site_id):
+    assignments = WorkbookSiteSubmitter.query.filter_by(workbook_id=workbook_id, site_id=site_id).all()
+    if not assignments:
+        return "Every assigned site needs at least one submitter"
+
+    site = Site.query.get(site_id)
+    site_label = site.name if site else f"site {site_id}"
+    for assignment in assignments:
+        user = User.query.filter_by(id=assignment.user_id, is_deleted=False, is_active=True).first()
+        user_label = user.email if user else f"user {assignment.user_id}"
+        if not user or not _can_submit_for_site(assignment.user_id, site_id):
+            return f"Invalid submitter assignment: {user_label} cannot submit for {site_label}."
+    return None
 
 
 def add_site_submitter(workbook_id, site_id, user_id, created_by):
@@ -318,6 +322,8 @@ def add_site_submitter(workbook_id, site_id, user_id, created_by):
     user = User.query.filter_by(id=user_id, is_deleted=False, is_active=True).first()
     if not user:
         raise ValueError("User not found or inactive.")
+    if not _can_submit_for_site(user_id, site_id):
+        raise ValueError("User does not have submission permission for this site.")
     existing = WorkbookSiteSubmitter.query.filter_by(
         workbook_id=workbook_id, site_id=site_id, user_id=user_id
     ).first()
@@ -360,9 +366,17 @@ def check_workbook_readiness(workbook_id):
     site_rows = WorkbookSite.query.filter_by(workbook_id=workbook_id).all()
     sites_ok = len(site_rows) > 0
 
-    submitters_ok = sites_ok and all(
-        WorkbookSiteSubmitter.query.filter_by(workbook_id=workbook_id, site_id=r.site_id).count() > 0
+    submitter_errors = [
+        detail
         for r in site_rows
+        for detail in [_invalid_submitter_detail(workbook_id, r.site_id)]
+        if detail
+    ]
+    submitters_ok = sites_ok and not submitter_errors
+    submitters_detail = (
+        "All sites have valid submitters"
+        if submitters_ok
+        else (submitter_errors[0] if submitter_errors else "Every assigned site needs at least one submitter")
     )
 
     approval_path_ok = False
@@ -396,7 +410,7 @@ def check_workbook_readiness(workbook_id):
         "submitters": {
             "ok": submitters_ok,
             "label": "Submitters",
-            "detail": "All sites have submitters" if submitters_ok else "Every assigned site needs at least one submitter",
+            "detail": submitters_detail,
         },
         "approval_path": {
             "ok": approval_path_ok,
