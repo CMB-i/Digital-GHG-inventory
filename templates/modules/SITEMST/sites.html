@@ -72,6 +72,7 @@
                     data-confirm="Deactivate {{ site.name }}?"
                     method="post"
                     action="{{ url_for('sitemst.deactivate', site_id=site.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="action-button action-button-secondary" type="submit">Deactivate</button>
               </form>
               {% endif %}
@@ -131,6 +132,7 @@
             <td class="whitespace-nowrap px-3 py-3 text-right">
               {% if perm_edit %}
               <form method="post" action="{{ url_for('sitemst.reactivate', site_id=site.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="action-button action-button-secondary" type="submit">Reactivate</button>
               </form>
               {% else %}
@@ -161,6 +163,7 @@
   <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5"
         method="post"
         action="{{ url_for('sitemst.create') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div>
       <label class="text-xs font-medium text-slate-600" for="create_name">Name</label>
       <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
@@ -205,6 +208,7 @@
   <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5"
         method="post"
         action="{{ url_for('sitemst.edit', site_id=selected_site.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div>
       <label class="text-xs font-medium text-slate-600" for="edit_name">Name</label>
       <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"

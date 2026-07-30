@@ -125,6 +125,7 @@
                 <form class="bulk-open-form inline" method="post"
                       action="{{ url_for('period.bulk_open_periods', **period_filter_args) }}"
                       data-confirm="Open {{ group.missing_count }} reporting period(s) for active sites that do not yet have a period for {{ group.month_name }} {{ group.year }}?">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="year" value="{{ group.year }}">
                   <input type="hidden" name="month" value="{{ group.month }}">
                   <button class="border border-[#1a3a6b] px-2.5 py-1 text-[11px] font-medium text-[#1a3a6b] hover:bg-[#dfeaf8]"
@@ -194,6 +195,7 @@
                           data-confirm="Move {{ site.name if site else 'this site' }} ({{ group.month_name }} {{ group.year }}) to '{{ status_labels.get(next_status, next_status) }}'?"
                           method="post"
                           action="{{ url_for('period.transition', period_id=period.id, **period_filter_args) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                       <input type="hidden" name="target_status" value="{{ next_status }}">
                       <button class="action-button btn-neutral" type="submit">
                         {{ transition_labels.get(period.status, "Advance") }}
@@ -250,6 +252,7 @@
 </div>
 
 <form class="hidden" id="bulk_transition_form" method="post" action="{{ bulk_transition_url }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="target_status" id="bulk_transition_target_status" value="">
 </form>
 
@@ -260,6 +263,7 @@
       <p class="mt-1 text-sm text-slate-600" id="bulk_reopen_modal_count"></p>
     </div>
     <form class="space-y-4 px-5 py-5" id="bulk_reopen_form" method="post" action="{{ bulk_transition_url }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="target_status" value="OPEN">
       <div>
         <label class="text-xs font-medium text-slate-600" for="bulk_reopen_reason_input">Reason for reopening</label>
@@ -282,6 +286,7 @@
       <p class="mt-1 text-sm text-slate-600" id="reopen_modal_period"></p>
     </div>
     <form class="space-y-4 px-5 py-5" id="reopen_form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="target_status" value="OPEN">
       <div>
         <label class="text-xs font-medium text-slate-600" for="reopen_reason_input">Reason for reopening</label>
@@ -304,6 +309,7 @@
       <p class="mt-1 text-sm text-slate-600" id="delete_period_modal_period"></p>
     </div>
     <form class="space-y-4 px-5 py-5" id="delete_period_form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <p class="text-xs text-slate-500">
         This permanently removes the reporting period. Only periods with no submissions
         of any status (including Approved and Locked) can be deleted.
@@ -336,6 +342,7 @@
   <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5"
         method="post"
         action="{{ url_for('period.create', **period_filter_args) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div>
       <label class="text-xs font-medium text-slate-600" for="create_site_id">Site</label>
       <select class="mt-1 w-full border border-slate-300 px-3 py-2 text-sm"
