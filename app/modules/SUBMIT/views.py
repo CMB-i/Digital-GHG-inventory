@@ -1,6 +1,6 @@
 import json
 
-from flask import Blueprint, current_app, redirect, render_template, request, jsonify, send_file
+from flask import Blueprint, current_app, redirect, render_template, request, jsonify, send_file, url_for
 from app.common.auth import current_user, require_login
 from app.common.permissions import has_permission
 from app.common.responses import success_response, error_response
@@ -42,12 +42,81 @@ def _page_no_access():
 @require_login
 def index():
     """
-    My Workbooks dashboard page.
+    My Workbooks dashboard page. Site count is resolved server-side so the
+    single-site vs multi-site grid is chosen at render time rather than by
+    hiding an empty panel client-side.
+
+    A user with exactly one live site has nothing to triage across -- send
+    them straight into that site's workbook (first tab by display_order,
+    i.e. whatever the site's lowest-display_order sheet is) instead of the
+    dashboard. Falls through to the normal dashboard render if the site has
+    no live workbook to land on (e.g. the needs-submitter-assignment case).
     """
     user = current_user()
     if not user_has_any_submission_access(user.id):
         return _page_no_access()
-    return render_template("modules/SUBMIT/my_sheets.html", module_code=MODULE_CODE)
+    options = get_annual_workbook_options(user.id)
+    sites = options.get("sites") or []
+    if len(sites) == 1:
+        workbooks = options.get("workbooks_by_site", {}).get(str(sites[0]["id"])) or []
+        if workbooks:
+            workbook_id = workbooks[0].get("id") or workbooks[0].get("workbook_id")
+            return redirect(url_for(
+                "submit.annual_workbook",
+                site_id=sites[0]["id"],
+                workbook_id=workbook_id,
+            ))
+    return render_template(
+        "modules/SUBMIT/my_sheets.html",
+        module_code=MODULE_CODE,
+        site_count=len(sites),
+        single_site=sites[0] if len(sites) == 1 else None,
+    )
+
+
+@bp.route("/drafts")
+@require_login
+def drafts_page():
+    user = current_user()
+    if not user_has_any_submission_access(user.id):
+        return _page_no_access()
+    return render_template(
+        "modules/SUBMIT/my_sheets_detail.html",
+        module_code=MODULE_CODE,
+        detail_type="drafts",
+        page_title="Drafts and Returned Items",
+        page_description="Editable monthly rows that still need attention.",
+    )
+
+
+@bp.route("/open-rows")
+@require_login
+def open_rows_page():
+    user = current_user()
+    if not user_has_any_submission_access(user.id):
+        return _page_no_access()
+    return render_template(
+        "modules/SUBMIT/my_sheets_detail.html",
+        module_code=MODULE_CODE,
+        detail_type="open-rows",
+        page_title="Open Monthly Rows",
+        page_description="Open monthly rows ready for first entry.",
+    )
+
+
+@bp.route("/submissions")
+@require_login
+def submissions_page():
+    user = current_user()
+    if not user_has_any_submission_access(user.id):
+        return _page_no_access()
+    return render_template(
+        "modules/SUBMIT/my_sheets_detail.html",
+        module_code=MODULE_CODE,
+        detail_type="submissions",
+        page_title="Submission History",
+        page_description="Submitted, reviewed, approved, and returned monthly records.",
+    )
 
 
 @bp.route("/annual")

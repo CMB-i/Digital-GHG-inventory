@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import text
 
-from app.common.auth import current_user, require_login
+from app.common.auth import current_user
 from app.config import Config
 from app.database import db
 from app.modules.ACCESS import bp as access_bp
@@ -12,22 +12,16 @@ from app.modules.ACCESS.model import AccessMatrix
 from app.modules.APPROV import bp as approv_bp
 from app.modules.AUDITL import bp as auditl_bp
 from app.modules.FORMBLD import bp as formbld_bp
-from app.modules.FORMBLD.model import FormVersion
 from app.modules.FRMULA import bp as frmula_bp
 from app.modules.NOTIFY import bp as notify_bp
 from app.modules.PERIOD import bp as period_bp
-from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.RPTBLD import bp as rptbld_bp
 from app.modules.SITEMST import bp as sitemst_bp
-from app.modules.SITEMST.model import Site
 from app.modules.SUBMIT import bp as submit_bp
-from app.modules.SUBMIT.model import Submission
 from app.modules.USRMGMT import auth_bp
-from app.modules.USRMGMT.model import User
 from app.modules.VALSET import bp as valset_bp
 from app.modules.WFLWBLD import bp as wflwbld_bp
 from app.modules.WKBK import bp as wkbk_bp
-from app.modules.WFLWBLD.model import WorkflowLevelApprover
 
 
 MODULE_BLUEPRINTS = [
@@ -97,143 +91,7 @@ def create_app(config_class=Config):
         user = current_user()
         if user is None:
             return redirect(url_for("auth.login"))
-        caps = build_user_capabilities(user)
-        if caps["can_contribute"]:
-            return redirect(url_for("submit.index"))
-        elif caps["can_review"]:
-            return redirect(url_for("approv.index"))
-        else:
-            return redirect(url_for("dashboard"))
-
-    @app.route("/dashboard")
-    @require_login
-    def dashboard():
-        user = current_user()
-
-        from app.modules.RPTBLD.service import _get_user_allowed_sites, get_missing_submissions
-        from app.modules.FORMBLD.model import Form
-        from app.modules.APPROV.service import get_approver_queue, get_actioned_history
-        from app.modules.SUBMIT.service import get_spoc_sheets_buckets, human_sheet_label
-
-        capabilities = build_user_capabilities(user)
-        allowed_site_ids, is_global = _get_user_allowed_sites(user.id, "submission")
-
-        total_sheets = 0
-        approved_sheets = 0
-        awaiting_review = 0
-
-        if allowed_site_ids:
-            total_sheets = Submission.query.filter(
-                Submission.site_id.in_(list(allowed_site_ids)),
-                Submission.is_deleted == False
-            ).count()
-
-            approved_sheets = Submission.query.filter(
-                Submission.site_id.in_(list(allowed_site_ids)),
-                Submission.status == "Approved",
-                Submission.is_deleted == False
-            ).count()
-
-            awaiting_review = Submission.query.filter(
-                Submission.site_id.in_(list(allowed_site_ids)),
-                Submission.status.in_(("Submitted", "Resubmitted", "Under Review")),
-                Submission.is_deleted == False
-            ).count()
-
-        missing_submissions = get_missing_submissions(user.id) if (
-            capabilities["can_manage_setup"] or capabilities["can_view_reports"]
-        ) else []
-        actual_missing = [
-            item
-            for item in missing_submissions
-            if item["status"] in ("Not Started", "Draft", "Changes Requested")
-        ]
-        for item in actual_missing:
-            item["status_text"] = human_status(item["status"])
-        missing_sheets_count = len(actual_missing)
-
-        recent_submissions = []
-        if allowed_site_ids:
-            recent_query = Submission.query.filter(
-                Submission.site_id.in_(list(allowed_site_ids)),
-                Submission.is_deleted == False
-            )
-            if capabilities["can_contribute"] and not (
-                capabilities["can_review"] or capabilities["can_manage_setup"]
-            ):
-                recent_query = recent_query.filter(Submission.submitted_by == user.id)
-            recent_submissions = recent_query.order_by(Submission.updated_at.desc()).limit(5).all()
-
-        sites_map = {s.id: s.name for s in Site.query.filter_by(is_deleted=False).all()}
-        forms_map = {f.id: human_sheet_label(f) for f in Form.query.filter_by(is_deleted=False).all()}
-
-        recent_activities = []
-        for sub in recent_submissions:
-            recent_activities.append({
-                "id": sub.id,
-                "site_name": sites_map.get(sub.site_id, "Unknown"),
-                "sheet_name": forms_map.get(sub.form_id, "Unknown sheet"),
-                "updated_at": sub.updated_at,
-                "status": sub.status,
-                "status_text": human_status(sub.status),
-            })
-
-        metrics = {
-            "total_sheets": total_sheets,
-            "approved_sheets": approved_sheets,
-            "awaiting_review": awaiting_review,
-            "missing_sheets": missing_sheets_count
-        }
-
-        my_work_items = []
-        if capabilities["can_contribute"]:
-            sheet_buckets = get_spoc_sheets_buckets(user.id)
-            my_work_items.extend(
-                dashboard_sheet_item(item, "Continue workbook")
-                for item in sheet_buckets.get("action_needed", [])
-            )
-            my_work_items.extend(
-                dashboard_sheet_item(item, "Start sheet")
-                for item in sheet_buckets.get("not_started", [])
-            )
-            my_work_items.extend(
-                dashboard_sheet_item(item, "View submitted sheet")
-                for item in sheet_buckets.get("submitted", [])[:3]
-            )
-            my_work_items = my_work_items[:8]
-
-        review_queue = []
-        review_history = []
-        if capabilities["can_review"]:
-            review_queue = [dashboard_review_item(item) for item in get_approver_queue(user.id)[:8]]
-            review_history = [
-                {
-                    "site_name": item["site_name"],
-                    "period_label": item["period_label"],
-                    "sheet_name": item["form_name"],
-                    "status_text": item.get("current_status_text") or human_status(item["current_status"]),
-                    "acted_at": item["acted_at"],
-                    "href": (
-                        f"/module/APPROV/packages/{item['package_id']}"
-                        if item.get("package_id") else
-                        f"/module/APPROV/submissions/{item['submission_id']}"
-                    ),
-                }
-                for item in get_actioned_history(user.id)[:5]
-            ]
-
-        return render_template(
-            "dashboard.html",
-            capabilities=capabilities,
-            dashboard_cards=build_dashboard_cards(user),
-            setup_checklist=build_setup_checklist() if capabilities["can_manage_setup"] else [],
-            metrics=metrics,
-            my_work_items=my_work_items,
-            review_queue=review_queue,
-            review_history=review_history,
-            recent_activities=recent_activities,
-            missing_submissions=actual_missing
-        )
+        return redirect(default_landing_url(user))
 
     @app.route("/health")
     def health():
@@ -287,6 +145,20 @@ def user_has_access(user, entity_type, action):
     ).first() is not None
 
 
+def _submitter_site_count(user_id):
+    """
+    Number of sites this user actually has a live, assigned workbook to
+    submit into (AccessMatrix scope intersected with a real
+    WorkbookSiteSubmitter row) -- the same check my_sheets uses to pick its
+    single-site vs multi-site layout. Distinct from the "submission" entity's
+    can_view/can_create/can_edit/can_submit AccessMatrix flags, which a
+    reviewer can also hold (they need can_view to see what they're
+    approving) without ever being assigned a workbook.
+    """
+    from app.modules.SUBMIT.service import get_annual_workbook_options
+    return len(get_annual_workbook_options(user_id).get("sites") or [])
+
+
 def build_user_capabilities(user):
     can_contribute = user_can(user, "submission", "view", "create", "edit", "submit")
     can_review = user_can(user, "submission", "approve", "reject")
@@ -308,6 +180,25 @@ def build_user_capabilities(user):
     }
 
 
+def default_landing_url(user):
+    """
+    Where a logged-in user should land with no more specific destination in
+    play (root "/", and straight after login -- both call this so the two
+    entry points can't drift apart). Contributor-with-an-actual-workbook
+    wins if a user somehow has both (matches the one such account in
+    current data, the global admin seed user); a reviewer-only user (no
+    workbook assignment) goes straight to Review Queue instead of an empty
+    My Workbooks dashboard.
+    """
+    caps = build_user_capabilities(user)
+    if caps["can_contribute"] and _submitter_site_count(user.id) > 0:
+        return url_for("submit.index")
+    elif caps["can_review"]:
+        return url_for("approv.index")
+    else:
+        return url_for("submit.index")
+
+
 def human_status(status):
     return {
         "Approved": "Approved and locked",
@@ -323,69 +214,33 @@ def human_status(status):
     }.get(status, status or "Unknown")
 
 
-def dashboard_sheet_item(item, action_label):
-    fy_start = item["year"] if item["month"] >= 4 else item["year"] - 1
-    href = (
-        f"/module/SUBMIT/annual?site_id={item['site_id']}"
-        f"&form_id={item['form_id']}&fy={fy_start}&month={item['month']}"
-    )
-    return {
-        "site_name": item["site_name"],
-        "period_label": item["period_label"],
-        "sheet_name": item["form_name"],
-        "status": item.get("status", "Not Started"),
-        "status_text": human_status(item.get("status", "Not Started")),
-        "action_label": action_label,
-        "href": href,
-    }
-
-
-def dashboard_review_item(item):
-    included = item.get("included_submissions", [])
-    submitted_statuses = ("Submitted", "Resubmitted", "Under Review", "Approved")
-    submitted_count = len([
-        sub for sub in included if sub.get("status") in submitted_statuses
-    ]) if included else item.get("included_submission_count")
-    waiting_on = ", ".join(
-        sub["form_name"] for sub in included if sub.get("status") not in submitted_statuses
-    )
-    package_status = item["status"]
-    if item.get("item_type") == "package" and included:
-        package_status = "Ready for Review" if not waiting_on else "Partially Submitted"
-    return {
-        "site_name": item["site_name"],
-        "period_label": item["period_label"],
-        "status": package_status,
-        "status_text": human_status(package_status),
-        "submitted_count": submitted_count,
-        "sheet_count": len(included) if included else item.get("included_submission_count"),
-        "waiting_on": waiting_on,
-        "action_label": "Review package" if item.get("is_my_turn") else "View package",
-        "href": (
-            f"/module/APPROV/packages/{item['package_id']}"
-            if item.get("item_type") == "package" and item.get("package_id") else
-            f"/module/APPROV/submissions/{item['submission_id']}"
-        ),
-    }
-
-
 def build_nav_items(user):
     if not user:
         return []
 
     capabilities = build_user_capabilities(user)
+    # A single-site contributor's "/module/SUBMIT/" now redirects straight
+    # into their one workbook rather than a dashboard -- a nav item pointing
+    # at a dashboard that no longer renders for them would be redundant, so
+    # it's dropped for that case only. Multi-site users keep it unchanged.
+    # A user with zero assigned sites (e.g. a reviewer who only has can_view
+    # on "submission" to see what they're approving, never a workbook
+    # assignment) has nothing behind that link at all, so it's dropped too.
+    has_submitter_sites = False
+    single_site_only = False
+    if capabilities["can_contribute"]:
+        site_count = _submitter_site_count(user.id)
+        has_submitter_sites = site_count > 0
+        single_site_only = site_count == 1
+
     groups = [
-        {
-            "label": None,
-            "items": [{"label": "Home", "href": "/dashboard", "visible": True}],
-        },
         {
             "label": None,
             "items": [
                 {
                     "label": "My Workbooks",
                     "href": "/module/SUBMIT/",
-                    "visible": capabilities["can_contribute"],
+                    "visible": capabilities["can_contribute"] and has_submitter_sites and not single_site_only,
                 },
                 {
                     "label": "Review Queue",
@@ -456,72 +311,3 @@ def build_nav_items(user):
         if items:
             visible_groups.append({"label": group["label"], "items": items})
     return visible_groups
-
-
-def build_dashboard_cards(user):
-    capabilities = build_user_capabilities(user)
-    cards = [
-        {
-            "title": "People",
-            "href": "/module/ACCESS/",
-            "description": "Add and manage users who contribute, review, or manage reporting.",
-            "visible": capabilities["can_manage_setup"] and user_can(user, "user", "manage_users"),
-        },
-        {
-            "title": "Sites",
-            "href": "/module/SITEMST/",
-            "description": "Manage ports and sites included in GHG reporting.",
-            "visible": capabilities["can_manage_setup"] and user_can(user, "site", "view"),
-        },
-        {
-            "title": "Workbooks",
-            "href": "/workbooks/",
-            "description": "Build reusable workbook and sheet structures for site reporting.",
-            "visible": capabilities["can_manage_setup"] and user_can(user, "form", "manage_forms"),
-        },
-        {
-            "title": "Reports",
-            "href": "/module/RPTBLD/",
-            "description": "View and export approved GHG data.",
-            "visible": user_can(user, "report", "export", "view"),
-        },
-    ]
-    return [card for card in cards if card["visible"]]
-
-
-def build_setup_checklist():
-    from app.modules.VALSET.model import ValueSetVersion
-    from app.modules.FRMULA.model import FormulaVersion
-    checks = [
-        (
-            "People and access configured",
-            User.query.filter_by(is_deleted=False).count() > 0
-            and AccessMatrix.query.filter_by(is_deleted=False).count() > 0,
-        ),
-        ("Sites ready", Site.query.filter_by(is_deleted=False).count() > 0),
-        (
-            "Reporting months opened",
-            ReportingPeriod.query.filter_by(is_deleted=False, status="OPEN").count() > 0,
-        ),
-        (
-            "Value Sets approved",
-            ValueSetVersion.query.filter_by(status="Approved").count() > 0,
-        ),
-        (
-            "Formula Builder rules published",
-            FormulaVersion.query.filter(FormulaVersion.published_at.is_not(None)).count() > 0,
-        ),
-        (
-            "Sheets configured",
-            FormVersion.query.filter(FormVersion.published_at.is_not(None)).count() > 0,
-        ),
-        (
-            "Workflow Paths assigned",
-            WorkflowLevelApprover.query.filter_by(is_deleted=False).count() > 0,
-        ),
-        (
-            "Approved monthly package available",
-            Submission.query.filter_by(is_deleted=False, status="Approved").count() > 0,
-        ),
-    ]
-    return [{"label": label, "done": done} for label, done in checks]
