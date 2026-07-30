@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Digital GHG Inventory{% endblock %}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -162,6 +163,7 @@
   <!-- Toast Container for sliding notifications -->
   <div id="toast-container" class="fixed bottom-5 right-5 z-[9999] flex flex-col gap-3 w-80 max-w-[calc(100vw-2rem)] pointer-events-none"></div>
 
+  <script src="{{ url_for('static', filename='js/csrf.js') }}"></script>
   <script src="{{ url_for('static', filename='js/sidebar.js') }}"></script>
   <script src="{{ url_for('static', filename='js/phone_input.js') }}"></script>
   <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>

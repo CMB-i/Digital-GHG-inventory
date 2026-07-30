@@ -5,6 +5,7 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import text
 
 from app.common.auth import current_user
+from app.common.csrf import csrf_token, validate_csrf
 from app.config import Config
 from app.database import db
 from app.modules.ACCESS import bp as access_bp
@@ -47,6 +48,8 @@ def create_app(config_class=Config):
 
     db.init_app(app)
 
+    app.before_request(validate_csrf)
+
     @app.template_filter("local_datetime")
     def local_datetime(value):
         if value is None:
@@ -84,6 +87,7 @@ def create_app(config_class=Config):
         return {
             "current_user": user,
             "nav_items": build_nav_items(user),
+            "csrf_token": csrf_token,
         }
 
     @app.route("/")

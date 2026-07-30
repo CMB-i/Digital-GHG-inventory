@@ -117,6 +117,7 @@
                 {% endif %}
                 {% if perm_manage_users %}
                 <form class="user-status-form" data-confirm="{{ 'Deactivate' if user.is_active else 'Activate' }} {{ user.full_name }}?" method="post" action="{{ url_for('access.toggle_active', user_id=user.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="is_active" value="{{ 'false' if user.is_active else 'true' }}">
                   <button class="action-menu-item" type="submit" role="menuitem">{{ "Deactivate" if user.is_active else "Activate" }}</button>
                 </form>
@@ -155,6 +156,7 @@
       <p class="mt-1 text-sm text-slate-600" id="password_modal_user"></p>
     </div>
     <form class="space-y-4 px-5 py-5" id="password_reset_form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div>
         <label class="text-xs font-medium text-slate-600" for="reset_temporary_password">Temporary password</label>
         <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="reset_temporary_password" name="temporary_password" type="password" minlength="8" maxlength="128" required>
@@ -178,6 +180,7 @@
     <a class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" href="{{ url_for('access.index') }}">Cancel</a>
   </div>
   <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5" method="post" action="{{ url_for('access.create') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div>
       <label class="text-xs font-medium text-slate-600" for="create_full_name">Full name</label>
       <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="create_full_name" name="full_name" maxlength="255" pattern="[A-Za-z0-9 .,'_-]+" required>
@@ -214,6 +217,7 @@
     <a class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" href="{{ url_for('access.index') }}">Cancel</a>
   </div>
   <form class="flex-1 space-y-4 overflow-y-auto px-5 py-5" method="post" action="{{ url_for('access.edit', user_id=selected_user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div>
       <label class="text-xs font-medium text-slate-600" for="edit_full_name">Full name</label>
       <input class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" id="edit_full_name" name="full_name" value="{{ selected_user.full_name }}" maxlength="255" pattern="[A-Za-z0-9 .,'_-]+" required>
@@ -292,6 +296,7 @@
     </div>
 
     <form class="mt-5 space-y-4" method="post" action="{{ url_for('access.assign_matrix') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="user_id" value="{{ selected_user.id }}">
       <input type="hidden" name="scope_type" value="{{ selected_scope_type }}">
       <input type="hidden" name="scope_site_id" value="{{ selected_scope_site_id or '' }}">
