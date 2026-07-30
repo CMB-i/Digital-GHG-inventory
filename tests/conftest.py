@@ -160,7 +160,7 @@ def created_objects(db_session):
     from app.modules.APPROV.model import ApprovalAction
     from app.modules.AUDITL.model import AuditLog
     from app.modules.SUBMIT.model import Submission, SubmissionValue
-    from app.modules.USRMGMT.model import User
+    from app.modules.USRMGMT.model import PasswordResetOTP, User
 
     submission_ids = [obj.id for obj in objects if isinstance(obj, Submission)]
     user_ids = [obj.id for obj in objects if isinstance(obj, User)]
@@ -175,6 +175,7 @@ def created_objects(db_session):
         db_session.flush()
 
     if user_ids:
+        PasswordResetOTP.query.filter(PasswordResetOTP.user_id.in_(user_ids)).delete(synchronize_session=False)
         AuditLog.query.filter(AuditLog.actor_user_id.in_(user_ids)).delete(synchronize_session=False)
         db_session.flush()
 
