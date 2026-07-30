@@ -54,7 +54,11 @@ class TestAnnualWorkbookEndpointFormulaResolution:
         make_field(
             electricity_form, electricity_version, "fy_total_electricity_gj",
             field_type="calculated", frequency="annual",
-            field_config={"formula_version_id": electricity_formula.id, "display_region": "below_monthly_table"},
+            field_config={
+                "formula_version_id": electricity_formula.id,
+                "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
+            },
         )
 
         ofr_form, ofr_version = make_form()
@@ -66,12 +70,20 @@ class TestAnnualWorkbookEndpointFormulaResolution:
         make_field(
             ofr_form, ofr_version, "ofr_acetylene_gj",
             field_type="calculated", frequency="annual",
-            field_config={"formula_version_id": ofr_energy_formula.id, "display_region": "below_monthly_table"},
+            field_config={
+                "formula_version_id": ofr_energy_formula.id,
+                "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
+            },
         )
         make_field(
             ofr_form, ofr_version, "ofr_total_emissions_tco2",
             field_type="calculated", frequency="annual",
-            field_config={"formula_version_id": ofr_emissions_formula.id, "display_region": "below_monthly_table"},
+            field_config={
+                "formula_version_id": ofr_emissions_formula.id,
+                "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
+            },
         )
 
         fuel_form, fuel_version = make_form()
@@ -88,17 +100,29 @@ class TestAnnualWorkbookEndpointFormulaResolution:
         make_field(
             fuel_form, fuel_version, "diesel_energy_gj",
             field_type="calculated", frequency="annual",
-            field_config={"formula_version_id": diesel_formula.id, "display_region": "below_monthly_table"},
+            field_config={
+                "formula_version_id": diesel_formula.id,
+                "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
+            },
         )
         make_field(
             fuel_form, fuel_version, "fy_total_fuel_energy_gj",
             field_type="calculated", frequency="annual",
-            field_config={"formula_version_id": fuel_energy_formula.id, "display_region": "below_monthly_table"},
+            field_config={
+                "formula_version_id": fuel_energy_formula.id,
+                "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
+            },
         )
         make_field(
             fuel_form, fuel_version, "fy_total_fuel_emissions_tco2e",
             field_type="calculated", frequency="annual",
-            field_config={"formula_version_id": fuel_emissions_formula.id, "display_region": "below_monthly_table"},
+            field_config={
+                "formula_version_id": fuel_emissions_formula.id,
+                "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
+            },
         )
 
         gri_form, gri_version = make_form()
@@ -113,12 +137,20 @@ class TestAnnualWorkbookEndpointFormulaResolution:
         make_field(
             gri_form, gri_version, "total_energy_gj",
             field_type="calculated", frequency="annual",
-            field_config={"formula_version_id": gri_energy_formula.id, "display_region": "below_monthly_table"},
+            field_config={
+                "formula_version_id": gri_energy_formula.id,
+                "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
+            },
         )
         make_field(
             gri_form, gri_version, "total_emissions_tco2e",
             field_type="calculated", frequency="annual",
-            field_config={"formula_version_id": gri_emissions_formula.id, "display_region": "below_monthly_table"},
+            field_config={
+                "formula_version_id": gri_emissions_formula.id,
+                "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
+            },
         )
 
         site = make_site()
@@ -233,18 +265,18 @@ class TestAnnualWorkbookEndpointFormulaResolution:
 
         ofr_results = _results_by_code(_annual_get(client, ctx["site"], ctx["workbook"], 2026, ctx["ofr_form"]))
         assert ofr_results["ofr_acetylene_gj"]["status"] == "calculated"
-        assert ofr_results["ofr_acetylene_gj"]["value"] == round(0.026 * 47.3, 3)
+        assert ofr_results["ofr_acetylene_gj"]["value"] == round(0.026 * 47.3, 4)
 
         fuel_results = _results_by_code(_annual_get(client, ctx["site"], ctx["workbook"], 2026, ctx["fuel_form"]))
         assert fuel_results["fy_total_fuel_energy_gj"]["status"] == "calculated"
-        assert fuel_results["fy_total_fuel_energy_gj"]["value"] == round(12 * 2 * 10 + 0.026 * 47.3, 3)
+        assert fuel_results["fy_total_fuel_energy_gj"]["value"] == round(12 * 2 * 10 + 0.026 * 47.3, 4)
         assert fuel_results["fy_total_fuel_emissions_tco2e"]["status"] == "calculated"
 
         gri_payload = _annual_get(client, ctx["site"], ctx["workbook"], 2026, ctx["gri_form"])
         assert "Unknown formula variable" not in str(gri_payload)
         gri_results = _results_by_code(gri_payload)
         assert gri_results["total_energy_gj"]["status"] == "calculated"
-        assert gri_results["total_energy_gj"]["value"] == round(12 * 10 + 12 * 2 * 10 + 0.026 * 47.3, 3)
+        assert gri_results["total_energy_gj"]["value"] == round(12 * 10 + 12 * 2 * 10 + 0.026 * 47.3, 4)
         assert gri_results["total_emissions_tco2e"]["status"] == "calculated"
 
 
