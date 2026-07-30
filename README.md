@@ -95,7 +95,15 @@ Password: ChangeMe123!
 
 The seed script also grants global admin permissions through AccessMatrix.
 
-### 6. Start the development server
+### 6. Seed default notification configuration
+
+```bash
+flask seed-notifications
+```
+
+Notification configuration seeding is now explicit. `create_app()` does not write notification defaults during startup.
+
+### 7. Start the development server
 
 ```bash
 python run.py
@@ -151,6 +159,9 @@ Always inspect the generated migration before running it. The migration chain mu
 | Script | Purpose |
 |---|---|
 | `scripts/seed.py` | Seeds a development admin account and global AccessMatrix permissions |
+| `scripts/_script_safety.py` | Required safety convention for any new mutating operational script: explicit environment, dry-run support, and confirmed commits. See `scripts/README.md`. |
+
+No `scripts/test_*.py` files are permitted. Real tests belong in `tests/`; manual smoke scripts must use a non-`test_` name and follow the script-safety pattern.
 
 ### Running Tests
 
@@ -197,7 +208,13 @@ Every calculated field carries an explicit `calc_status` (`ok` / `error` / `pend
 
 Site/workbook visibility for a submitter requires **both** an AccessMatrix `submission` grant at that site **and** an explicit `WorkbookSiteSubmitter` row for that specific workbook/site — there is no fallback either way, by design: `WorkbookSiteSubmitter` is a deliberate, explicit assignment ("this exact person submits this exact workbook"), and AccessMatrix site permission alone is never sufficient on its own. A user with AccessMatrix access but no `WorkbookSiteSubmitter` row for that site gets an empty dashboard/workbook list, but `get_annual_workbook_options` and `get_spoc_sheets_buckets` both flag this case explicitly (`needs_submitter_assignment` in their JSON response, surfaced in the UI as "you haven't been assigned as a submitter yet — contact your admin") so it reads distinctly from having no access at all.
 
+The legacy row-level write routes now use the same workbook-assignment boundary as the annual workbook path. `create_draft_submission`, `autosave_submission_values`, proof upload, and submit all reject a site-authorized user who is not assigned to the relevant workbook when the submission is workbook-scoped; genuinely non-workbook submissions keep the older site-permission behavior. Draft creation also validates that `reporting_period_id` belongs to the selected `site_id`, closing the cross-site period/submission mismatch.
+
 `submit_submission` locks the submission row (`SELECT ... FOR UPDATE`) before checking/transitioning its status, and re-checks the reporting period's status under its own lock right before the transition rather than only at the start — so two concurrent submits of the same submission, or a submit racing a concurrent period lock, can no longer both pass their preconditions before either commits. `get_or_create_submission_package` is backed by a real unique constraint (`uq_active_submission_package`) with retry-on-conflict, so two concurrent package-submits for the same site/period/type can no longer create two live packages.
+
+Autosaved values, annual workbook values, and proof uploads now emit audit events through AUDITL (`AUTOSAVE_VALUE`, `SAVE_WORKBOOK_VALUE`, `UPLOAD_PROOF`) with before/after metadata scoped to the field/value/proof, not uploaded file bytes.
+
+Proof uploads enforce both the global upload allowlist and the field contract: uploads are accepted only for `field_type == "file"`, and a field's configured `accepted_mime_types` and `max_file_size_bytes` are enforced server-side. Flask also has a global request-size cap (`MAX_CONTENT_LENGTH` / `MAX_PROOF_UPLOAD_BYTES`). Re-uploading a proof supersedes older active proof rows for the same `(submission_id, field_id)` by soft-deleting them, and normal review/download/reporting reads use deterministic newest-active ordering (`uploaded_at DESC, id DESC`) rather than whichever row the database happens to return first. If metadata persistence fails after a file write, the just-written stored file is removed during rollback cleanup.
 
 ### APPROV — approval queue, review, multi-level approval progression
 
@@ -214,6 +231,8 @@ Submission-level `Issue` and cell-level `SubmissionValueIssue` now share the sam
 ### WKBK — workbook management (group sheets, assign sites, submitters, approval path)
 
 A workbook groups published sheets (`WorkbookForm`), is assigned to sites (`WorkbookSite`), has submitters per site (`WorkbookSiteSubmitter`), and links to an approval path (`Workbook.workflow_id`). Publish readiness requires: ≥1 published sheet, ≥1 assigned site, submitters for every assigned site, and a published approval-path version. This checklist (`check_workbook_readiness`) is real and enforced.
+
+Readiness now revalidates each assigned submitter's actual `submission` permission at that workbook's site via `has_permission()`, not just the existence of a `WorkbookSiteSubmitter` row. An invalid assignment blocks readiness with a specific message naming the user/site that needs fixing.
 
 **WKBK's simplified chain editor (`api_save_site_chain` in `WKBK/views.py`) is currently the only accessible way to configure approval chains.** The standalone Approval Path Builder (WFLWBLD, below) still exists in code, and its service layer (`save_workflow_draft_levels`, `publish_workflow_version`, etc.) is still used internally — WKBK's chain editor calls into it directly rather than duplicating its validation. But WFLWBLD's own UI has been disabled, since multi-level/`SEQUENTIAL` chains aren't needed at the current complexity level. It can be re-enabled by removing the `before_request` block at the top of `WFLWBLD/views.py` (and restoring its nav/dashboard links) if that need arises — see [Consistency Guidelines](#consistency-guidelines).
 
@@ -239,13 +258,15 @@ The real, validated writer for workflow levels/approvers (`save_workflow_draft_l
 
 `update_details` (the workflow-detail edit endpoint) no longer reads or writes `form.description["workflow_id"]` / `["sites"]` — the legacy write path that fed the standalone builder's "Covered Sites" checkbox has been removed (it only ever updates `Workflow.name` now). Site-eligibility routing runs exclusively through `WorkbookSite`, which this never affected either way; the checkbox UI itself still exists in `workflow_builder.js`, but since the module's UI is fully disabled (see above), it's unreachable and its data no longer goes anywhere.
 
+The WKBK per-site chain editor no longer soft-deletes shared `WorkflowLevel` rows simply because one site's submitted level list omits them. It replaces only that site's `WorkflowLevelApprover.scope_site_id` assignments, leaving levels and other sites' approver assignments intact.
+
 `delete_workflow` now refuses to delete a `Workflow` that an active `Workbook` still points to via `workflow_id`, raising a clear error instead of silently stranding that workbook.
 
 ### FRMULA — formula definitions and evaluation
 
 Formula delete (`delete_formula`) mirrors the Field-delete guard in the other direction: it blocks if any live calculated field's `field_config["formula_version_id"]` still points at one of the formula's versions, scanning every version a field could hold (not just its current one), and asks the caller to repoint or edit those fields first.
 
-Formulas are versioned and validated against currently-active field/value-set codes at publish time, using `simpleeval`. There is no re-validation when a field a published formula references is later renamed or soft-deleted, and FORMBLD's own "delete fields not present in a re-saved sheet" logic (this is literally what a field rename looks like under the hood) does not check formula references before deleting. How this manifests, once it happens, is inconsistent — SUBMIT alone has four different behaviors ranging from fully silent to a specific error message, depending on which of its five calculated-field code paths hits it first (see [Consistency Guidelines](#consistency-guidelines)).
+Formulas are versioned and validated against currently-active field/value-set codes at publish time, using `simpleeval`. Value-set tokens are resolved through `get_active_approved_value_set_version()`, so formula publication validates against the active Approved value-set version rather than trusting `ValueSet.current_version_id` if that points at a draft or superseded version. There is no re-validation when a field a published formula references is later renamed or soft-deleted, and FORMBLD's own "delete fields not present in a re-saved sheet" logic (this is literally what a field rename looks like under the hood) does not check formula references before deleting. How this manifests, once it happens, is inconsistent — SUBMIT alone has four different behaviors ranging from fully silent to a specific error message, depending on which of its five calculated-field code paths hits it first (see [Consistency Guidelines](#consistency-guidelines)).
 
 The client-side formula evaluator (`static/js/formula_runtime.js`) is a materially narrower grammar than the backend's (no unary minus, no exponent), and its `SUM_MONTHS` implementation is still a literal no-op internally — it can only ever see one row's values client-side, so it can't compute a real cross-month sum. Rather than trying to fake that computation in the browser, every call site now checks `FormulaRuntime.usesAggregate(expression)` first and shows an explicit "preview unavailable" message instead of a number: the Formula Builder's live preview (`formula_builder.js`) and the inline recalculation run during data entry (`form_renderer.js`, used by `spoc_entry`) both do this consistently. The real value is still computed correctly server-side at save/submit time.
 
@@ -254,6 +275,8 @@ The client-side formula evaluator (`static/js/formula_runtime.js`) is a material
 ### VALSET — value sets (reference data for dropdowns/lookups)
 
 Draft → Submitted → Approved lifecycle. `reject_value_set_version` blocks self-rejection (`submitted_by == user_id`); `approve_value_set_version` now has an equivalent self-approval check, covering both routes that can reach it — `/publish` (gated by `manage_forms`, the same permission that lets you create the draft) and `/approve` (gated by a distinct `approve` permission). Since `/publish` can approve a version straight from `Draft` (before it's ever been through `/submit`, when `submitted_by` is still unset), the check falls back to `created_by` in that case so a draft's own author can't self-approve through either route.
+
+The active Approved version is resolved by `get_active_approved_value_set_version()`: `status == "Approved"`, `effective_to IS NULL`, newest version/id wins. FRMULA publish validation and SUBMIT runtime calculation snapshots both use this resolver, so draft/current-pointer drift cannot feed formula validation or runtime calculations.
 
 ### PERIOD — reporting period lifecycle
 
@@ -265,7 +288,7 @@ Straightforward CRUD for sites.
 
 ### RPTBLD — cross-site/period reporting
 
-Filters submissions to `Approved` + `is_locked=True` before reporting, correctly matching the "reports use only approved and locked values" rule (see [Key Design Rules](#key-design-rules)). Its site/permission-scoping logic (`list_report_templates`, `_get_user_allowed_sites`) now calls the shared `get_user_permissions()` instead of hand-rolling its own `AccessMatrix` query — the same fix NOTIFY's `resolve_recipients` got (see NOTIFY below) — so a user with a blanket "all entities" permission grant is no longer silently excluded from reports they should be able to see.
+Filters submissions to `Approved` + `is_locked=True` before reporting, correctly matching the "reports use only approved and locked values" rule (see [Key Design Rules](#key-design-rules)). Its site/permission-scoping logic (`list_report_templates`, `_get_user_allowed_sites`) now calls the shared `get_user_permissions()` instead of hand-rolling its own `AccessMatrix` query — the same fix NOTIFY's `resolve_recipients` got (see NOTIFY below) — so a user with a blanket "all entities" permission grant is no longer silently excluded from reports they should be able to see. Template read/export and mutation routes also use resource-aware scoped checks: global report grants still work, and site-scoped grants can create/update/delete templates for their own site without opening access to other sites.
 
 `get_missing_submissions` batch-fetches workbook-assignment and existing-submission data up front (two queries total, keyed by set) instead of running two queries per (period, form) pair inside a doubly-nested loop — the same fix applied to SUBMIT's `get_spoc_sheets_buckets` and APPROV's `get_approver_queue`, which had the same O(n×m) pattern.
 
@@ -279,9 +302,9 @@ Records status changes and resolves human-readable entity descriptions for the a
 
 ### NOTIFY — notifications (in-app, desktop, email, WhatsApp)
 
-Multi-channel routing with per-user preferences. **`resolve_recipients`'s role-based and dynamic (`site_admins`) recipient resolution now calls the shared `get_user_permissions()` / `has_permission()`** instead of hand-rolling its own `AccessMatrix` query — the same bug pattern RPTBLD still has (see [Consistency Guidelines](#consistency-guidelines)) — so a user with a blanket "all entities" grant is no longer silently skipped as a notification recipient.
+Multi-channel routing with per-user preferences. **`resolve_recipients`'s role-based and dynamic (`site_admins`) recipient resolution now calls the shared `get_user_permissions()` / `has_permission()`** instead of hand-rolling its own `AccessMatrix` query, matching the RPTBLD permission-resolver remediation (see [Consistency Guidelines](#consistency-guidelines)) — so a user with a blanket "all entities" grant is no longer silently skipped as a notification recipient.
 
-Email/WhatsApp delivery failures are caught and only printed to console — no persisted record exists for a failed email/WhatsApp send, so a failure is invisible to everyone, including the intended recipient and any admin.
+Email/WhatsApp delivery attempts are persisted as `Notification` rows with `channel == "email"` / `"whatsapp"`. Their outcome is stored in `delivery_status` (`"sent"` or `"failed"`) and `delivery_error`; in-app and desktop rows default to `"sent"` because they are database inserts rather than external-provider sends.
 
 ### ACCESS — AccessMatrix, the permission source of truth
 
@@ -289,11 +312,21 @@ Email/WhatsApp delivery failures are caught and only printed to console — no p
 
 `count_global_user_managers(exclude_user_id=None)` is the shared helper for "how many active users currently resolve global `can_manage_users`" — it counts via `get_user_permissions()` per user rather than a raw `AccessMatrix` column scan, so an `entity_type == "all"` wildcard grant is correctly counted as admin access. Both zero-global-admin guards below (`upsert_access_row` here, and `USRMGMT.can_deactivate_user`) call this one function, so they can't quietly disagree with each other. `upsert_access_row` — the single write path both `/assign` and `/assign-matrix` (via `save_permission_matrix`, which calls it once per entity type) funnel through — now blocks a global `user`/`all`-entity save that would revoke `can_manage_users` from a user who currently holds it, if `count_global_user_managers` (excluding that user) is `0`. This closes the loophole where the last admin's access could be zeroed out through the permission matrix even though deactivating that same user outright was already blocked — a site-scoped grant never counts toward or is blocked by this check, only `scope_type == "global"`.
 
+Active AccessMatrix rows are uniqueness-scoped by user, scope, entity type, and entity id. The migration soft-deletes duplicate active rows before adding the partial unique index, and `upsert_access_row()` resolves all matching active rows in newest-updated order, soft-deletes duplicates, and applies the update/revoke to the survivor. This means revoking a permission can no longer update one duplicate while another active duplicate silently preserves access.
+
+The wildcard `entity_type == "all"` grant is now a first-class row in the ACCESS matrix UI/API, not just a runtime behavior. It appears as "All Entities", supports the same permission flags, and can be created, edited, or revoked through the canonical ACCESS screen.
+
+Creating a user through ACCESS/USRMGMT now emits a `USER_CREATED` audit event after the user row is flushed. The payload is the non-sensitive user snapshot (`id`, `full_name`, `email`, `phone`, `is_active`) and does not include temporary passwords, password hashes, or reset material.
+
 `toggle_active` is now gated by `@require_permission("user", "manage_users")`, matching every other admin action on this blueprint (create/edit/password/assign/assign-matrix) — it previously accepted the weaker `("edit", "delete")` grant, a mismatch with an action that flips whether an account can log in at all. `access_matrix.html`'s toggle-active button, its "Reset password" menu item, and the row's action-cell/menu-toggle wrappers around them were updated to gate on `perm_manage_users` alone, so what's visible in the UI now matches what the backend actually allows. One consequence, left as-is here: `can_edit` / `can_delete` on the `"user"` entity_type are not consumed by any route or permission check anywhere in the app today — a known inert-permission-flag observation, not something fixed in this change.
 
 ### USRMGMT — user management and auth
 
 Password hashing uses bcrypt. Session handling correctly clears the session before setting a new user on login. `USRMGMT/views.py` now holds only `auth_bp` (`/login`, `/logout`) — its own user CRUD blueprint (`bp`: index/create/edit/password/toggle-active, plus `users.html`) was removed as the unreachable duplicate of ACCESS's (see ACCESS above); `USRMGMT/service.py` is untouched and still the shared implementation both ACCESS and the login flow call into.
+
+Post-login `next` redirects are allowed only when `is_safe_internal_path()` confirms a relative, same-origin application path: no scheme, no netloc, no protocol-relative `//`, no backslash-normalization tricks, no encoded external variants, and no CR/LF characters. Unsafe values fall back to `default_landing_url(user)`.
+
+Password reset OTPs are rate-limited and locked after repeated failed verification attempts. A locked/expired/wrong OTP uses the same generic error text, and issuing a new OTP invalidates older unused ones and starts with a clean attempt counter. Successful password reset increments `User.session_version`; `current_user()` compares it with `session["user_session_version"]`, so existing logged-in sessions for that user are invalidated. The reset form also posts `confirm_password`, and the server checks it against `new_password` before consuming the OTP or changing the password.
 
 `can_deactivate_user` now resolves through ACCESS's `get_user_permissions()` / `count_global_user_managers()` instead of hand-rolling its own raw `AccessMatrix` join/filter — the same anti-pattern class Consistency Guideline #3 flags (RPTBLD, and until recently NOTIFY) — so it can never quietly disagree with the equivalent guard on the permission-matrix side (see ACCESS above). Semantics are unchanged: a user who isn't currently active, or doesn't currently hold global `can_manage_users`, can always be deactivated; one who does can only be deactivated if at least one other active user still retains it. `set_user_active` also now refuses self-deactivation outright (`user_id == actor_id`) as its very first check, before `can_deactivate_user` or anything else runs — an admin can no longer lock themselves out even while other admins remain.
 
@@ -304,6 +337,7 @@ Password hashing uses bcrypt. Session handling correctly clears the session befo
 These are enforced (or intended to be enforced) throughout the codebase. Violations should be flagged in code review.
 
 - **AccessMatrix is the permission source of truth.** Call `has_permission()` / `get_user_permissions()` from the `ACCESS` module for every authorization check. Do not hand-roll a narrower `AccessMatrix` query and do not use hardcoded roles — see [Known Gaps](#known-gaps) for where this is currently violated.
+- **Every state-changing request needs CSRF.** Application-wide CSRF validation covers `POST`, `PUT`, `PATCH`, and `DELETE` with a session token rendered into the page as `<meta name="csrf-token">` and sent by `static/js/csrf.js` as `X-CSRFToken` for same-origin fetch mutations. There are no route or blueprint exemptions.
 - **`WorkbookSite` is the authoritative source for workbook-site assignment.** The legacy `form.description["sites"]` field must never be read for runtime routing (it is still, unfortunately, actively *written* by one dead-end UI — see the WFLWBLD module notes and [Known Gaps](#known-gaps)).
 - **`WorkbookSiteSubmitter` gates submitter workbook visibility, with no AccessMatrix fallback.** Seeing/submitting a workbook at a site requires both an AccessMatrix `submission` grant at that site *and* an explicit `WorkbookSiteSubmitter` row for that workbook/site — AccessMatrix access alone is never enough. `WorkbookSiteSubmitter` is a deliberate, explicit assignment ("this exact person submits this exact workbook"), not a permission proxy. When a user has the AccessMatrix grant but no `WorkbookSiteSubmitter` row, this is surfaced explicitly (`needs_submitter_assignment` from `get_annual_workbook_options` / `get_spoc_sheets_buckets`) rather than left as an unexplained empty state.
 - **`Workbook.workflow_id` is the approval path source.** Form-level workflow metadata (`form.description["workflow_id"]`) must never be used for submission routing — it is also still actively written by the same dead-end UI noted above, but never read for routing.
@@ -348,6 +382,8 @@ Honest, short list of things known to be wrong or unfinished today. If you fix o
 - **There is no single "correct" default for which group a `%` Contribution/Variation computed column divides against.** The real source workbook this feature was modeled on always divided its `% Contribution`/`Variation` columns by the Core group's subtotal, even for non-Core rows — that was a hardcoded assumption in a spreadsheet formula, not a deliberate design decision. This system doesn't reproduce that assumption as a default; instead, which group's subtotal a `pct_of_group`/`variation_from_group_avg`-style computed column references is an explicit, per-formula choice, made by whichever `{group_id}__{metric_key}` token the formula's author picks when building it in FRMULA. Don't assume "divide by the reference-base group" is the intended behavior when reading or writing one of these formulas — read the actual token.
 - **`metric_aliases` keyed by a computed column's own `id` (rather than a canonical metric key) is a deliberate per-site override escape hatch, not an inconsistency.** It exists because the real source workbook had specific sites (referred to during development as the PNP/MELT case) that sourced a value like Energy Intensity directly from upstream instead of it being computed from other cells. `pivot_report_data` honors an override entry over formula evaluation for that site/column and marks the cell `"source": "override"` (vs `"computed"`) precisely so this is visible at every layer above it — in the API response, the Excel export's cell, and the preview table — rather than silently indistinguishable from a normal computed value. This phase (4) doesn't expose UI for authoring override entries — they can currently only arrive via a template's `config_json` written directly or carried over from an earlier config — so it renders correctly wherever it already exists but isn't yet editable from the drawer.
 - **RPTBLD's "Add computed column" round trip to FRMULA requires the report template to already be saved.** Unlike FORMBLD (whose Form/Field rows are persisted before its own "Open Formula Builder" button is ever reachable), RPTBLD's create-template drawer holds every panel — General/Scoping/Forms/Sites/Row Groups/Metric Aliasing — in browser memory only until a single final save. Building a computed column's formula means navigating away to a different page, so "Add Computed Column" stays disabled until the template has a real id: a brand-new template must be saved once (row groups and metric aliases included, computed columns still empty) before its computed columns can be added via the FRMULA round trip. This is the reason `create_report_template`/`update_report_template` gained no new "draft" concept in this phase — the existing create-then-edit flow was reused rather than inventing incremental autosave.
+- **Three calculated-result tests still encode the superseded three-decimal expectation.** The stale assertions are `round(0.026 * 47.3, 3)`-style checks that fail by about `0.0002` now that calculated fields are expected to use four-decimal precision (`1.2298`). This is unrelated to the security/correctness remediation batches and still needs a separate precision-policy cleanup.
+- **Two data-cleanup migrations have not been exercised against real data yet.** The proof-document active-uniqueness migration (`e1f2a3b4c5d6`) and AccessMatrix active-uniqueness migration (`f6a7b8c9d0e2`) are written to soft-delete duplicate active rows before adding partial unique indexes, but they still need staging-first verification before production.
 
 ---
 
