@@ -1,3 +1,7 @@
+# Historical one-off script: not safe to re-run blindly.
+# Future mutable operational scripts must use scripts/_script_safety.py
+# with explicit --env, --dry-run, and confirmed commit handling.
+
 """
 fix_blank_policy_default.py — One-time cleanup: removes the leftover
 "strict" blank_policy that normalize_calculated_field_config (and its JS
