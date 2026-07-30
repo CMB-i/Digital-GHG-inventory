@@ -1,5 +1,6 @@
 import io
 from pathlib import Path
+from datetime import date
 
 from app.modules.AUDITL.model import AuditLog
 from app.modules.SUBMIT.model import ProofDocument, Submission, WorkbookFieldValue
@@ -359,6 +360,36 @@ def test_workbook_assigned_user_can_create_initial_draft(
     assert submission.reporting_period_id == period.id
 
 
+def test_create_initial_draft_rejects_reporting_period_from_different_site(
+    client, make_user, make_site, make_access_grant, make_form, make_field,
+    make_reporting_period, make_workflow, make_workbook,
+):
+    submitter = make_user()
+    approver = make_user()
+    site = make_site()
+    other_site = make_site()
+    form, form_version = make_form()
+    make_field(form, form_version, "field_a", field_type="number")
+    other_site_period = make_reporting_period(other_site)
+    workflow_version = make_workflow([approver])
+    workbook = make_workbook(form, site, workflow_version=workflow_version, submitters=[submitter])
+    make_access_grant(submitter, "submission", scope_type="site", scope_site_id=site.id, can_create=True, can_submit=True)
+    _login(client, submitter)
+
+    resp = client.post(
+        "/module/SUBMIT/api/submissions",
+        json={
+            "site_id": site.id,
+            "form_id": form.id,
+            "reporting_period_id": other_site_period.id,
+            "workbook_id": workbook.id,
+        },
+    )
+
+    assert resp.status_code == 400
+    assert "Reporting period does not belong to the selected site" in resp.get_json()["error"]
+
+
 def test_non_workbook_scoped_submission_still_uses_site_permission_only(
     client, make_user, make_site, make_access_grant, make_form, make_field,
     make_reporting_period, make_workflow, make_submission,
@@ -451,6 +482,74 @@ def test_annual_workbook_value_save_creates_traceable_audit_entry(
     assert "12.5" not in str(audit.old_values)
     assert "12.5" not in str(audit.new_values)
     assert "12.5" not in str(audit.metadata_json)
+
+
+def test_runtime_value_set_snapshot_uses_only_active_approved_version(
+    db_session, created_objects, make_user, system_user,
+):
+    from app.modules.FRMULA.service import evaluate_formula
+    from app.modules.SUBMIT.service import get_approved_valsets_snapshot
+    from app.modules.VALSET.model import ValueSet, ValueSetEntry, ValueSetVersion
+
+    author = make_user()
+    value_set = ValueSet(
+        name="Runtime Snapshot Value Set",
+        code=f"runtime-snapshot-{author.id}",
+        created_by=system_user,
+        updated_by=system_user,
+    )
+    db_session.add(value_set)
+    db_session.flush()
+    created_objects.append(value_set)
+
+    old_version = ValueSetVersion(
+        value_set_id=value_set.id,
+        version_number=1,
+        status="Approved",
+        effective_from=date(2025, 1, 1),
+        effective_to=date(2026, 1, 1),
+        created_by=author.id,
+    )
+    new_version = ValueSetVersion(
+        value_set_id=value_set.id,
+        version_number=2,
+        status="Approved",
+        effective_from=date(2026, 1, 1),
+        effective_to=None,
+        created_by=author.id,
+    )
+    db_session.add_all([old_version, new_version])
+    db_session.flush()
+    created_objects.extend([old_version, new_version])
+
+    old_entry = ValueSetEntry(
+        value_set_version_id=old_version.id,
+        entry_code="RUNTIME_FACTOR",
+        entry_label="1",
+        display_order=1,
+        is_active=True,
+        created_by=author.id,
+        updated_by=author.id,
+    )
+    new_entry = ValueSetEntry(
+        value_set_version_id=new_version.id,
+        entry_code="RUNTIME_FACTOR",
+        entry_label="2",
+        display_order=1,
+        is_active=True,
+        created_by=author.id,
+        updated_by=author.id,
+    )
+    db_session.add_all([old_entry, new_entry])
+    db_session.flush()
+    created_objects.extend([old_entry, new_entry])
+    value_set.current_version_id = new_version.id
+    db_session.flush()
+
+    snapshot = get_approved_valsets_snapshot()
+
+    assert snapshot["RUNTIME_FACTOR"] == "2"
+    assert evaluate_formula("RUNTIME_FACTOR * 3", {}, snapshot) == 6
 
 
 def test_proof_upload_creates_audit_entry_without_file_bytes(

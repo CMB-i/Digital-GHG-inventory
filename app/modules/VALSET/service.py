@@ -11,6 +11,15 @@ def get_value_set(value_set_id):
 def get_value_set_by_code(code):
     return ValueSet.query.filter_by(code=code, is_deleted=False).one_or_none()
 
+
+def get_active_approved_value_set_version(value_set_id):
+    return (
+        ValueSetVersion.query.filter_by(value_set_id=value_set_id, status="Approved")
+        .filter(ValueSetVersion.effective_to.is_(None))
+        .order_by(ValueSetVersion.version_number.desc(), ValueSetVersion.id.desc())
+        .first()
+    )
+
 def create_value_set(name, code, description, user_id):
     if not name or not name.strip():
         raise ValueError("Value set name is required.")

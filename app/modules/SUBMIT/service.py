@@ -3016,24 +3016,23 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
 
 def get_approved_valsets_snapshot():
     """
-    Returns a dictionary of all active approved value set entries mapping entry_code -> entry_label.
+    Returns entry_code -> entry_label for each value set's active Approved version.
     """
-    from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
+    from app.modules.VALSET.model import ValueSet, ValueSetEntry
+    from app.modules.VALSET.service import get_active_approved_value_set_version
+
     snapshot = {}
-    approved_entries = (
-        db.session.query(ValueSetEntry)
-        .join(ValueSetVersion, ValueSetVersion.id == ValueSetEntry.value_set_version_id)
-        .join(ValueSet, ValueSet.id == ValueSetVersion.value_set_id)
-        .filter(
-            ValueSet.is_deleted == False,
-            ValueSetVersion.status == "Approved",
-            ValueSetEntry.is_deleted == False,
-            ValueSetEntry.is_active == True
-        )
-        .all()
-    )
-    for entry in approved_entries:
-        snapshot[entry.entry_code] = entry.entry_label
+    for value_set in ValueSet.query.filter_by(is_deleted=False).all():
+        approved_version = get_active_approved_value_set_version(value_set.id)
+        if not approved_version:
+            continue
+        entries = ValueSetEntry.query.filter_by(
+            value_set_version_id=approved_version.id,
+            is_deleted=False,
+            is_active=True,
+        ).all()
+        for entry in entries:
+            snapshot[entry.entry_code] = entry.entry_label
     return snapshot
 
 def get_spoc_sheets_buckets(user_id):
@@ -3272,6 +3271,8 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id, work
         raise ValueError("Reporting period not found.")
     if period.status != "OPEN":
         raise ValueError(f"Cannot create a submission for a reporting period that is {period.status}.")
+    if period.site_id != site_id:
+        raise ValueError("Reporting period does not belong to the selected site.")
         
     workbook = None
 
