@@ -6,10 +6,10 @@ from sqlalchemy import text
 
 from app.common.auth import current_user
 from app.common.csrf import csrf_token, validate_csrf
+from app.common.permissions import has_permission
 from app.config import Config
 from app.database import db
 from app.modules.ACCESS import bp as access_bp
-from app.modules.ACCESS.model import AccessMatrix
 from app.modules.APPROV import bp as approv_bp
 from app.modules.AUDITL import bp as auditl_bp
 from app.modules.FORMBLD import bp as formbld_bp
@@ -134,19 +134,7 @@ def user_can(user, entity_type, *actions):
 def user_has_access(user, entity_type, action):
     if not user:
         return False
-    flag = f"can_{action}"
-    if action == "manage_forms":
-        flag = "can_manage_forms"
-    elif action == "manage_users":
-        flag = "can_manage_users"
-    if not hasattr(AccessMatrix, flag):
-        return False
-    return AccessMatrix.query.filter(
-        AccessMatrix.user_id == user.id,
-        AccessMatrix.entity_type == entity_type,
-        AccessMatrix.is_deleted == False,
-        getattr(AccessMatrix, flag) == True,
-    ).first() is not None
+    return has_permission(user.id, entity_type, action)
 
 
 def _submitter_site_count(user_id):

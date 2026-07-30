@@ -3,7 +3,8 @@ import io
 from flask import Blueprint, render_template, jsonify, request, send_file
 
 from app.common.decorators import require_permission
-from app.common.auth import current_user
+from app.common.auth import current_user, require_login
+from app.common.permissions import has_permission
 from app.database import db
 from app.modules.RPTBLD.service import (
     list_report_templates,
@@ -27,10 +28,101 @@ MODULE_CODE = "RPTBLD"
 bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}")
 
 
+def _has_any_report_access(user, *actions):
+    if not user:
+        return False
+    if any(has_permission(user.id, "report", action) for action in actions):
+        return True
+    for site_id, in db.session.query(Site.id).filter(Site.is_deleted == False).all():
+        if any(
+            has_permission(user.id, "report", action, scope_site_id=site_id)
+            for action in actions
+        ):
+            return True
+    return False
+
+
+def _template_site_ids(template):
+    config = template.config_json or {}
+    site_ids = set()
+    if template.scope_site_id:
+        site_ids.add(template.scope_site_id)
+    site_ids.update(config.get("site_ids") or [])
+    for group in config.get("row_groups") or []:
+        site_ids.update(group.get("site_ids") or [])
+    for entries in (config.get("metric_aliases") or {}).values():
+        for entry in entries or []:
+            if entry.get("site_id"):
+                site_ids.add(entry["site_id"])
+    return site_ids
+
+
+def _can_access_report_template(user, template, *actions):
+    if any(has_permission(user.id, "report", action) for action in actions):
+        return True
+    site_ids = _template_site_ids(template)
+    if not site_ids:
+        return False
+    return any(
+        has_permission(user.id, "report", action, scope_site_id=site_id)
+        for site_id in site_ids
+        for action in actions
+    )
+
+
+def _site_id_from_payload(data):
+    if (data or {}).get("scope_type") != "site":
+        return None
+    try:
+        return int(data.get("scope_site_id"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _can_create_report_template(user, data):
+    site_id = _site_id_from_payload(data)
+    if site_id is None:
+        return has_permission(user.id, "report", "create")
+    return (
+        has_permission(user.id, "report", "create")
+        or has_permission(user.id, "report", "create", scope_site_id=site_id)
+    )
+
+
+def _can_mutate_report_template(user, template, action, data=None):
+    site_id = template.scope_site_id
+    allowed = (
+        has_permission(user.id, "report", action)
+        if site_id is None
+        else (
+            has_permission(user.id, "report", action)
+            or has_permission(user.id, "report", action, scope_site_id=site_id)
+        )
+    )
+    if not allowed:
+        return False
+
+    requested_site_id = _site_id_from_payload(data)
+    if data is not None and data.get("scope_type") and requested_site_id is None:
+        return has_permission(user.id, "report", action)
+    if requested_site_id is not None:
+        return (
+            has_permission(user.id, "report", action)
+            or has_permission(user.id, "report", action, scope_site_id=requested_site_id)
+        )
+    return True
+
+
+def _json_no_access():
+    return jsonify({"error": "Permission denied."}), 403
+
+
 @bp.route("/")
-@require_permission("report", ("export", "view"))
+@require_login
 def index():
     user = current_user()
+    if not _has_any_report_access(user, "export", "view"):
+        return render_template("no_access.html"), 403
 
     # List templates for the user
     templates = list_report_templates(user.id)
@@ -59,9 +151,11 @@ def index():
 
 
 @bp.route("/api/templates")
-@require_permission("report", "view")
+@require_login
 def api_list_templates():
     user = current_user()
+    if not _has_any_report_access(user, "view", "export"):
+        return _json_no_access()
     templates = list_report_templates(user.id)
     return jsonify([{
         "id": t.id,
@@ -75,10 +169,12 @@ def api_list_templates():
 
 
 @bp.route("/api/templates", methods=["POST"])
-@require_permission("report", "create")
+@require_login
 def api_create_template():
     user = current_user()
     data = request.json or {}
+    if not _can_create_report_template(user, data):
+        return _json_no_access()
     try:
         t = create_report_template(
             name=data.get("name"),
@@ -111,11 +207,14 @@ def api_create_template():
 
 
 @bp.route("/api/templates/<int:template_id>")
-@require_permission("report", "view")
+@require_login
 def api_get_template(template_id):
+    user = current_user()
     t = get_report_template(template_id)
     if not t:
         return jsonify({"status": "error", "message": "Template not found."}), 404
+    if not _can_access_report_template(user, t, "view"):
+        return _json_no_access()
     return jsonify({
         "id": t.id,
         "name": t.name,
@@ -128,10 +227,15 @@ def api_get_template(template_id):
 
 
 @bp.route("/api/templates/<int:template_id>", methods=["PUT"])
-@require_permission("report", "edit")
+@require_login
 def api_update_template(template_id):
     user = current_user()
     data = request.json or {}
+    existing = get_report_template(template_id)
+    if not existing:
+        return jsonify({"status": "error", "message": "Report template not found."}), 400
+    if not _can_mutate_report_template(user, existing, "edit", data):
+        return _json_no_access()
     try:
         t = update_report_template(
             template_id=template_id,
@@ -164,9 +268,14 @@ def api_update_template(template_id):
 
 
 @bp.route("/api/templates/<int:template_id>", methods=["DELETE"])
-@require_permission("report", "delete")
+@require_login
 def api_delete_template(template_id):
     user = current_user()
+    existing = get_report_template(template_id)
+    if not existing:
+        return jsonify({"status": "error", "message": "Report template not found."}), 400
+    if not _can_mutate_report_template(user, existing, "delete"):
+        return _json_no_access()
     try:
         delete_report_template(template_id, user.id)
         db.session.commit()
@@ -180,9 +289,14 @@ def api_delete_template(template_id):
 
 
 @bp.route("/api/templates/<int:template_id>/preview")
-@require_permission("report", "view")
+@require_login
 def api_preview_template(template_id):
     user = current_user()
+    t = get_report_template(template_id)
+    if t and not _can_access_report_template(user, t, "view"):
+        return _json_no_access()
+    if not t and not _has_any_report_access(user, "view"):
+        return _json_no_access()
     try:
         data = generate_report_data(template_id, user.id)
         return jsonify({"status": "success", "data": data})
@@ -193,9 +307,14 @@ def api_preview_template(template_id):
 
 
 @bp.route("/api/templates/<int:template_id>/pivot-preview")
-@require_permission("report", "view")
+@require_login
 def api_pivot_preview_template(template_id):
     user = current_user()
+    t = get_report_template(template_id)
+    if t and not _can_access_report_template(user, t, "view"):
+        return _json_no_access()
+    if not t and not _has_any_report_access(user, "view"):
+        return _json_no_access()
     try:
         data = pivot_report_data(template_id, user.id)
         return jsonify({"status": "success", "data": data})
@@ -206,7 +325,7 @@ def api_pivot_preview_template(template_id):
 
 
 @bp.route("/api/templates/<int:template_id>/cross-site-preview")
-@require_permission("report", "view")
+@require_login
 def api_cross_site_preview_template(template_id):
     """
     Read-only preview for the cross-site GHG intensity summary report
@@ -218,6 +337,8 @@ def api_cross_site_preview_template(template_id):
     t = get_report_template(template_id)
     if not t:
         return jsonify({"status": "error", "message": "Template not found."}), 404
+    if not _can_access_report_template(user, t, "view"):
+        return _json_no_access()
 
     try:
         allowed_site_ids, _is_global = _get_user_allowed_sites(user.id, "report")
@@ -251,8 +372,11 @@ def api_cross_site_preview_template(template_id):
 
 
 @bp.route("/api/canonical-metrics")
-@require_permission("report", "view")
+@require_login
 def api_canonical_metrics():
+    user = current_user()
+    if not _has_any_report_access(user, "view"):
+        return _json_no_access()
     # sheet1_columns: the cross-site composer's real column order/labels --
     # served from here (not hardcoded a second time in reports.js) so the
     # web preview and the Excel export can never drift apart the way they
@@ -264,12 +388,16 @@ def api_canonical_metrics():
 
 
 @bp.route("/api/templates/<int:template_id>/export")
-@require_permission("report", "export")
+@require_login
 def api_export_template(template_id):
     user = current_user()
+    t = get_report_template(template_id)
+    if t and not _can_access_report_template(user, t, "export"):
+        return _json_no_access()
+    if not t and not _has_any_report_access(user, "export"):
+        return _json_no_access()
     try:
         excel_data = export_report_to_excel(template_id, user.id)
-        t = get_report_template(template_id)
         filename = f"report_{t.code}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         return send_file(
             io.BytesIO(excel_data),

@@ -3,7 +3,8 @@ from app.database import db
 from app.common.auth import current_user, require_login
 from app.common.permissions import has_permission
 from app.common.responses import success_response, error_response
-from app.modules.ACCESS.model import AccessMatrix
+from app.modules.ACCESS.service import get_user_permissions
+from app.modules.SITEMST.model import Site
 from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument, SubmissionPackage
 from app.modules.FORMBLD.service import get_form_version_fields
 from app.modules.APPROV.model import ApprovalAction, Issue
@@ -39,12 +40,23 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 
 
 def _has_any_review_access(user):
-    return AccessMatrix.query.filter(
-        AccessMatrix.user_id == user.id,
-        AccessMatrix.entity_type == "submission",
-        AccessMatrix.is_deleted == False,
-        (AccessMatrix.can_approve == True) | (AccessMatrix.can_reject == True),
-    ).first() is not None
+    global_perms = get_user_permissions(
+        user_id=user.id,
+        scope_type="global",
+        entity_type="submission",
+    )
+    if global_perms["can_approve"] or global_perms["can_reject"]:
+        return True
+    for site_id, in db.session.query(Site.id).filter(Site.is_deleted == False).all():
+        site_perms = get_user_permissions(
+            user_id=user.id,
+            scope_type="site",
+            scope_site_id=site_id,
+            entity_type="submission",
+        )
+        if site_perms["can_approve"] or site_perms["can_reject"]:
+            return True
+    return False
 
 
 def _can_review_submission(user, submission, *actions):
