@@ -139,6 +139,66 @@ def _require_workbook_runtime_access(user_id, workbook_id, site_id):
     return workbook, site
 
 
+def _active_workbook_ids_for_site_form(site_id, form_id):
+    rows = (
+        db.session.query(Workbook.id)
+        .join(WorkbookForm, WorkbookForm.workbook_id == Workbook.id)
+        .join(WorkbookSite, WorkbookSite.workbook_id == Workbook.id)
+        .filter(
+            WorkbookForm.form_id == form_id,
+            WorkbookSite.site_id == site_id,
+            Workbook.is_active == True,
+        )
+        .distinct()
+        .all()
+    )
+    return {row.id for row in rows}
+
+
+def require_legacy_submission_write_access(user_id, site_id, form_id, actions, workbook_id=None):
+    actions = actions if isinstance(actions, (tuple, list, set)) else (actions,)
+    if not any(has_permission(user_id, "submission", action, scope_site_id=site_id) for action in actions):
+        raise ValueError("Permission denied: You do not have permission to edit submissions for this site.")
+
+    if workbook_id:
+        workbook, _site = _require_workbook_runtime_access(user_id, workbook_id, site_id)
+        _require_form_in_workbook(workbook.id, form_id)
+        return workbook.id
+
+    workbook_ids = _active_workbook_ids_for_site_form(site_id, form_id)
+    if not workbook_ids:
+        return None
+
+    assigned = WorkbookSiteSubmitter.query.filter(
+        WorkbookSiteSubmitter.workbook_id.in_(workbook_ids),
+        WorkbookSiteSubmitter.site_id == site_id,
+        WorkbookSiteSubmitter.user_id == user_id,
+    ).first()
+    if not assigned:
+        raise ValueError(
+            "Permission denied: You are not assigned to submit this workbook for this site."
+        )
+    return assigned.workbook_id
+
+
+def _audit_value_snapshot(value):
+    if value in (None, ""):
+        return {"present": False}
+    if isinstance(value, dict):
+        return {"present": True, "type": "object", "keys": sorted(str(key) for key in value)}
+    if isinstance(value, list):
+        return {"present": True, "type": "array", "length": len(value)}
+    return {"present": True, "type": type(value).__name__}
+
+
+def _audit_submission_value_payload(raw_value, calculated_value, cell_state):
+    return {
+        "raw_value": _audit_value_snapshot(raw_value),
+        "calculated_value": _audit_value_snapshot(calculated_value),
+        "cell_state": cell_state,
+    }
+
+
 def _workbook_sheet_rows(workbook_id):
     return (
         db.session.query(WorkbookForm, Form)
@@ -2731,6 +2791,8 @@ def save_annual_workbook_values(user_id, site_id, workbook_id, form_id, fy_start
             fy_start_year=fy_start_year,
             is_deleted=False,
         ).first()
+        old_snapshot = None
+        old_values = None
         if not value_row:
             value_row = WorkbookFieldValue(
                 site_id=site_id,
@@ -2741,6 +2803,18 @@ def save_annual_workbook_values(user_id, site_id, workbook_id, form_id, fy_start
                 created_by=user_id,
             )
             db.session.add(value_row)
+        else:
+            old_values = {
+                "value_text": value_row.value_text,
+                "numeric_value": value_row.numeric_value,
+                "value_json": value_row.value_json,
+                "cell_state": value_row.cell_state,
+            }
+            old_snapshot = _audit_submission_value_payload(
+                value_row.value_json if value_row.value_json is not None else value_row.value_text,
+                value_row.numeric_value,
+                value_row.cell_state,
+            )
 
         value_row.value_text = None
         value_row.numeric_value = None
@@ -2757,6 +2831,37 @@ def save_annual_workbook_values(user_id, site_id, workbook_id, form_id, fy_start
         value_row.is_locked = False
         value_row.updated_by = user_id
         saved[field_code] = value_row
+        new_values = {
+            "value_text": value_row.value_text,
+            "numeric_value": value_row.numeric_value,
+            "value_json": value_row.value_json,
+            "cell_state": value_row.cell_state,
+        }
+        if old_values != new_values:
+            db.session.flush()
+            from app.modules.AUDITL.service import log_audit
+            new_snapshot = _audit_submission_value_payload(
+                value_row.value_json if value_row.value_json is not None else value_row.value_text,
+                value_row.numeric_value,
+                value_row.cell_state,
+            )
+            log_audit(
+                actor_user_id=user_id,
+                entity_type="workbook_field_value",
+                entity_id=value_row.id,
+                action="SAVE_WORKBOOK_VALUE",
+                old_values=old_snapshot,
+                new_values=new_snapshot,
+                metadata={
+                    "site_id": site_id,
+                    "workbook_id": workbook.id,
+                    "form_id": form_id,
+                    "field_id": field["field_id"],
+                    "field_code": field_code,
+                    "field_version_id": field["field_version_id"],
+                    "fy_start_year": fy_start_year,
+                },
+            )
 
     db.session.flush()
     payload = workbook_values_payload(site_id, form_id, fy_start_year, fields)
@@ -3141,12 +3246,7 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id, work
     """
     Creates a new draft submission for the given site, form, and period.
     """
-    # 1. Authorization check
-    if not has_permission(user_id, "submission", "create", scope_site_id=site_id) and \
-       not has_permission(user_id, "submission", "submit", scope_site_id=site_id):
-        raise ValueError("Permission denied: You cannot create submissions for this site.")
-        
-    # 2. Period check
+    # 1. Period check
     period = ReportingPeriod.query.get(reporting_period_id)
     if not period or period.is_deleted:
         raise ValueError("Reporting period not found.")
@@ -3155,19 +3255,26 @@ def create_draft_submission(site_id, form_id, reporting_period_id, user_id, work
         
     workbook = None
 
-    # 3. Form check
+    # 2. Form check
     form = Form.query.filter_by(id=form_id, is_deleted=False).first()
     if not form or not form.current_version_id:
         raise ValueError("Published form version not found.")
 
     if workbook_id:
-        workbook, _site = _require_workbook_runtime_access(user_id, workbook_id, site_id)
-        _require_form_in_workbook(workbook.id, form_id)
-    elif not _is_form_assigned_to_site(form_id, site_id):
-        raise ValueError(
-            "This form is not assigned to the selected site. "
-            "Check the workbook's Sites tab."
+        workbook_id = require_legacy_submission_write_access(
+            user_id, site_id, form_id, ("create", "submit"), workbook_id=workbook_id
         )
+        workbook = Workbook.query.get(workbook_id)
+        _require_form_in_workbook(workbook.id, form_id)
+    else:
+        workbook_id = require_legacy_submission_write_access(user_id, site_id, form_id, ("create", "submit"))
+        if workbook_id:
+            workbook = Workbook.query.get(workbook_id)
+        if not workbook and not _is_form_assigned_to_site(form_id, site_id) and not _active_workbook_ids_for_site_form(site_id, form_id):
+            raise ValueError(
+                "This form is not assigned to the selected site. "
+                "Check the workbook's Sites tab."
+            )
 
     # 4. Workflow assignment
     wf_id = workbook.workflow_id if workbook else _get_workflow_id_for_form(form_id)
@@ -3745,8 +3852,7 @@ def autosave_submission_values(submission_id, values_dict, user_id):
     if submission.status not in EDITABLE_SUBMISSION_STATUSES:
         raise ValueError(f"Cannot edit submission in status: {submission.status}")
 
-    if not has_permission(user_id, "submission", "edit", scope_site_id=submission.site_id):
-        raise ValueError("Permission denied: You do not have permission to edit submissions for this site.")
+    require_legacy_submission_write_access(user_id, submission.site_id, submission.form_id, "edit")
 
     submission.updated_by = user_id
 
@@ -3776,6 +3882,8 @@ def autosave_submission_values(submission_id, values_dict, user_id):
             submission_id=submission_id,
             field_id=f_id
         ).first()
+        old_snapshot = None
+        old_values = None
 
         if not val_row:
             val_row = SubmissionValue(
@@ -3785,6 +3893,17 @@ def autosave_submission_values(submission_id, values_dict, user_id):
                 created_by=user_id
             )
             db.session.add(val_row)
+        else:
+            old_values = {
+                "raw_value": val_row.raw_value,
+                "calculated_value": val_row.calculated_value,
+                "cell_state": val_row.cell_state,
+            }
+            old_snapshot = _audit_submission_value_payload(
+                val_row.raw_value,
+                val_row.calculated_value,
+                val_row.cell_state,
+            )
 
         val_row.raw_value = str(raw_value) if raw_value is not None and raw_value != "" else None
         val_row.calculated_value = None
@@ -3793,6 +3912,32 @@ def autosave_submission_values(submission_id, values_dict, user_id):
             CELL_STATE_DRAFT_FILLED if val_row.raw_value is not None else CELL_STATE_BLANK_EDITABLE,
         )
         val_row.updated_by = user_id
+        new_values = {
+            "raw_value": val_row.raw_value,
+            "calculated_value": val_row.calculated_value,
+            "cell_state": val_row.cell_state,
+        }
+        if old_values != new_values:
+            db.session.flush()
+            from app.modules.AUDITL.service import log_audit
+            new_snapshot = _audit_submission_value_payload(
+                val_row.raw_value,
+                val_row.calculated_value,
+                val_row.cell_state,
+            )
+            log_audit(
+                actor_user_id=user_id,
+                entity_type="submission",
+                entity_id=submission.id,
+                action="AUTOSAVE_VALUE",
+                old_values=old_snapshot,
+                new_values=new_snapshot,
+                metadata={
+                    "submission_value_id": val_row.id,
+                    "field_id": f_id,
+                    "field_code": field_code,
+                },
+            )
 
     db.session.flush()
 
@@ -3818,8 +3963,7 @@ def submit_submission(submission_id, user_id):
     if submission.status not in EDITABLE_SUBMISSION_STATUSES:
         raise ValueError(f"Cannot submit submission in status: {submission.status}")
         
-    if not has_permission(user_id, "submission", "submit", scope_site_id=submission.site_id):
-        raise ValueError("Permission denied: You do not have permission to submit this sheet.")
+    require_legacy_submission_write_access(user_id, submission.site_id, submission.form_id, "submit")
 
     form = Form.query.get(submission.form_id)
     if not submission.workflow_version_id:

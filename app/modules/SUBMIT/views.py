@@ -21,6 +21,7 @@ from app.modules.SUBMIT.service import (
     submit_submission,
     submit_monthly_workbook_package,
     human_sheet_label,
+    require_legacy_submission_write_access,
     set_submission_value_state,
     user_has_any_submission_access,
     fy_start_year_for,
@@ -527,8 +528,10 @@ def upload_proof_endpoint(submission_id, field_code):
         return error_response("Submission not found.", 404)
 
     user = current_user()
-    if not has_permission(user.id, "submission", "edit", scope_site_id=submission.site_id):
-        return error_response("Permission denied.", 403)
+    try:
+        require_legacy_submission_write_access(user.id, submission.site_id, submission.form_id, "edit")
+    except ValueError as e:
+        return error_response(str(e), 403)
 
     if submission.status not in ("Draft", "Changes Requested"):
         return error_response(f"Cannot edit submission in status: {submission.status}", 400)
@@ -549,6 +552,11 @@ def upload_proof_endpoint(submission_id, field_code):
         return error_response("Field version not found.", 404)
 
     try:
+        prior_proof = ProofDocument.query.filter_by(
+            submission_id=submission_id,
+            field_id=field.id,
+            is_deleted=False,
+        ).order_by(ProofDocument.uploaded_at.desc(), ProofDocument.id.desc()).first()
         saved_info = save_file(file)
         
         # Save ProofDocument metadata
@@ -563,6 +571,31 @@ def upload_proof_endpoint(submission_id, field_code):
         )
         db.session.add(proof)
         db.session.flush()
+        from app.modules.AUDITL.service import log_audit
+        log_audit(
+            actor_user_id=user.id,
+            entity_type="proof_document",
+            entity_id=proof.id,
+            action="UPLOAD_PROOF",
+            old_values={
+                "proof_id": prior_proof.id,
+                "original_name": prior_proof.original_name,
+                "field_id": prior_proof.field_id,
+            } if prior_proof else None,
+            new_values={
+                "proof_id": proof.id,
+                "original_name": proof.original_name,
+                "field_id": field.id,
+                "field_code": field_code,
+                "mime_type": proof.mime_type,
+                "file_size_bytes": proof.file_size_bytes,
+            },
+            metadata={
+                "submission_id": submission_id,
+                "field_id": field.id,
+                "field_code": field_code,
+            },
+        )
         
         # Save SubmissionValue field link
         val_row = SubmissionValue.query.filter_by(
