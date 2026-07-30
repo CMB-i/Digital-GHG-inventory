@@ -27,4 +27,15 @@ class AccessMatrix(FullLifecycleMixin, db.Model):
     __table_args__ = (
         db.Index("idx_access_matrix_user", "user_id"),
         db.Index("idx_access_matrix_scope", "scope_type", "scope_site_id"),
+        db.Index(
+            "uq_active_access_matrix_permission_scope",
+            "user_id",
+            "scope_type",
+            db.func.coalesce(scope_site_id, 0),
+            db.func.coalesce(scope_region_id, 0),
+            "entity_type",
+            db.func.coalesce(entity_id, 0),
+            unique=True,
+            postgresql_where=db.text("is_deleted = false"),
+        ),
     )

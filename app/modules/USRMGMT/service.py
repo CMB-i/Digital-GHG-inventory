@@ -170,11 +170,20 @@ def create_user(full_name, email, phone, temporary_password, actor_id):
         created_by=actor_id,
     )
     db.session.add(user)
+    db.session.flush()
+    log_audit(
+        actor_id,
+        "user",
+        user.id,
+        "USER_CREATED",
+        new_values=_user_snapshot(user),
+    )
     return user
 
 
 def _user_snapshot(user):
     return {
+        "id": user.id,
         "full_name": user.full_name,
         "email": user.email,
         "phone": user.phone,

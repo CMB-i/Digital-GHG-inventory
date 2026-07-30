@@ -254,19 +254,33 @@ def make_site(db_session, created_objects, system_user):
 def make_access_grant(db_session, created_objects, system_user):
     def _make(user, entity_type, scope_type="global", scope_site_id=None, **flags):
         from app.modules.ACCESS.model import AccessMatrix
+        from app.modules.ACCESS.service import PERMISSION_FLAGS, upsert_access_row
 
-        grant = AccessMatrix(
+        normalized_scope_site_id = scope_site_id if scope_type == "site" else None
+        existing = AccessMatrix.query.filter_by(
+            user_id=user.id,
+            scope_type=scope_type,
+            scope_site_id=normalized_scope_site_id,
+            scope_region_id=None,
+            entity_type=entity_type,
+            entity_id=None,
+            is_deleted=False,
+        ).one_or_none()
+        permission_values = {
+            flag: bool(getattr(existing, flag, False)) or bool(flags.get(flag))
+            for flag in PERMISSION_FLAGS
+        }
+        grant = upsert_access_row(
             user_id=user.id,
             scope_type=scope_type,
             scope_site_id=scope_site_id,
             entity_type=entity_type,
-            created_by=system_user,
-            updated_by=system_user,
-            **flags,
+            permission_values=permission_values,
+            actor_id=system_user,
         )
-        db_session.add(grant)
         db_session.flush()
-        created_objects.append(grant)
+        if grant not in created_objects:
+            created_objects.append(grant)
         return grant
 
     return _make
