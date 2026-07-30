@@ -610,6 +610,12 @@ class TestGenerateReportDataUnchanged:
             status="Approved", is_locked=True,
         )
         make_submission_value(sub, field, fv, raw_value="42")
+        draft_period = make_reporting_period(site, year=2026, month=4)
+        draft_sub = make_submission(
+            site, form, form_version, draft_period, workflow_version,
+            status="Draft", is_locked=False,
+        )
+        make_submission_value(draft_sub, field, fv, raw_value="999.99")
 
         user = make_user()
         make_access_grant(user, "report", scope_type="global", can_view=True)
@@ -623,6 +629,7 @@ class TestGenerateReportDataUnchanged:
         rows = generate_report_data(template.id, user.id)
         assert len(rows) == 1
         row = rows[0]
+        assert [item["value"] for item in rows] == [42.0]
         assert row["site_id"] == site.id
         assert row["field_id"] == field.id
         assert row["value"] == 42.0
