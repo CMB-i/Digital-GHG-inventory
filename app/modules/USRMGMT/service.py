@@ -1,5 +1,6 @@
 import bcrypt
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from app.common.validators import (
     ValidationError,
@@ -11,7 +12,13 @@ from app.common.validators import (
 from app.database import db
 from app.modules.AUDITL.service import log_audit
 from app.modules.ACCESS.service import count_global_user_managers, get_user_permissions
-from app.modules.USRMGMT.model import User
+from app.modules.NOTIFY.service import send_mock_email
+from app.modules.USRMGMT.model import PasswordResetOTP, User
+
+
+OTP_EXPIRY_MINUTES = 10
+OTP_RATE_LIMIT_MAX_REQUESTS = 3
+OTP_RATE_LIMIT_WINDOW_MINUTES = 15
 
 
 def hash_password(plain_text):
@@ -35,6 +42,104 @@ def authenticate_user(email, password):
 
 def record_successful_login(user):
     user.last_login_at = datetime.now(timezone.utc)
+
+
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+
+def _normalize_db_datetime(value):
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _generate_otp_code():
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+def request_password_reset_otp(email):
+    validated_email = validate_email(email)
+    now = _utc_now()
+    window_start = now - timedelta(minutes=OTP_RATE_LIMIT_WINDOW_MINUTES)
+
+    recent_count = PasswordResetOTP.query.filter(
+        PasswordResetOTP.email == validated_email,
+        PasswordResetOTP.created_at >= window_start,
+    ).count()
+    if recent_count >= OTP_RATE_LIMIT_MAX_REQUESTS:
+        raise ValidationError("Too many reset code requests. Try again in 15 minutes.")
+
+    user = User.query.filter_by(email=validated_email, is_deleted=False).one_or_none()
+    if not user or not user.is_active:
+        return False, None
+
+    PasswordResetOTP.query.filter(
+        PasswordResetOTP.email == validated_email,
+        PasswordResetOTP.used.is_(False),
+    ).update({"used": True, "used_at": now}, synchronize_session=False)
+
+    otp_code = _generate_otp_code()
+    reset_otp = PasswordResetOTP(
+        user_id=user.id,
+        email=validated_email,
+        otp_hash=hash_password(otp_code),
+        created_at=now,
+        expires_at=now + timedelta(minutes=OTP_EXPIRY_MINUTES),
+        used=False,
+    )
+    db.session.add(reset_otp)
+    db.session.flush()
+
+    subject = "Digital GHG Inventory password reset code"
+    body = (
+        f"Your password reset code is {otp_code}.\n\n"
+        f"This code expires in {OTP_EXPIRY_MINUTES} minutes. If you did not request it, ignore this email."
+    )
+    sent, error = send_mock_email(validated_email, subject, body)
+    if not sent:
+        raise ValidationError(f"Could not send reset code: {error}")
+    return True, reset_otp
+
+
+def reset_password_with_otp(email, otp_code, new_password):
+    validated_email = validate_email(email)
+    otp_value = (otp_code or "").strip()
+    if not otp_value.isdigit() or len(otp_value) != 6:
+        raise ValidationError("Enter the 6-digit reset code.")
+
+    validated_password = validate_temporary_password(new_password)
+    now = _utc_now()
+    reset_otp = PasswordResetOTP.query.filter(
+        PasswordResetOTP.email == validated_email,
+        PasswordResetOTP.used.is_(False),
+    ).order_by(PasswordResetOTP.created_at.desc()).first()
+
+    if not reset_otp:
+        raise ValidationError("Invalid or expired reset code.")
+    if _normalize_db_datetime(reset_otp.expires_at) <= now:
+        reset_otp.used = True
+        reset_otp.used_at = now
+        raise ValidationError("Invalid or expired reset code.")
+    if not verify_password(otp_value, reset_otp.otp_hash):
+        raise ValidationError("Invalid or expired reset code.")
+
+    user = User.query.filter_by(id=reset_otp.user_id, is_deleted=False).one_or_none()
+    if not user or not user.is_active:
+        raise ValidationError("Invalid or expired reset code.")
+
+    user.password_hash = hash_password(validated_password)
+    user.updated_by = user.id
+    reset_otp.used = True
+    reset_otp.used_at = now
+    log_audit(
+        user.id,
+        "user",
+        user.id,
+        "USER_PASSWORD_RESET",
+        metadata={"password_reset": True, "source": "forgot_password"},
+    )
+    return user
 
 
 def list_users():
