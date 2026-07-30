@@ -65,6 +65,7 @@ from app.database import db
 from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion
 from app.modules.FRMULA.model import Formula, FormulaVersion
 from app.modules.WKBK.model import Workbook, WorkbookForm
+from scripts._script_safety import add_safety_arguments, build_safety, guarded_commit
 
 
 FORM_COPY_SUFFIX_RE = re.compile(r"_COPY\d*$")
@@ -402,7 +403,7 @@ def print_plan(plan, apply_mode):
         print(f"    tokens: {u['old_tokens']!r} -> {u['new_tokens']!r}")
 
 
-def apply_plan(plan, user_id=None):
+def apply_plan(plan, safety, user_id=None):
     form = plan["form"]
     form.code = plan["new_form_code"]
     form.name = plan["new_form_name"]
@@ -425,7 +426,7 @@ def apply_plan(plan, user_id=None):
         config["tokens"] = u["new_tokens"]
         fv.field_config = config
 
-    db.session.commit()
+    return guarded_commit(db.session, safety, f"rename copied sheet form_id={form.id}")
 
 
 def run_pg_dump(db_uri, out_path):
@@ -465,7 +466,9 @@ def run():
     )
     parser.add_argument("--backup-path", default=None, help="Override the default backup file path.")
     parser.add_argument("--apply", action="store_true", help="Execute the plan. Omit for a dry run.")
+    add_safety_arguments(parser)
     args = parser.parse_args()
+    safety = build_safety(args)
 
     field_map_override = json.loads(args.field_map) if args.field_map else {}
     formula_map_override = json.loads(args.formula_map) if args.formula_map else {}
@@ -517,8 +520,8 @@ def run():
                     run_pg_dump(db_uri, backup_path)
                     print(f"\nBackup written to {backup_path}")
                     print(f'Restore with: psql "{db_uri}" -f {backup_path}')
-                apply_plan(plan)
-                print("\n=== APPLIED: changes committed. ===")
+                if apply_plan(plan, safety):
+                    print("\n=== APPLIED: changes committed. ===")
             else:
                 if args.backup:
                     print("\n(--backup ignored: dry run makes no changes to back up.)")

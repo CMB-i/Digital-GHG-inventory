@@ -1,3 +1,5 @@
+# Read-only regression check: this script must not commit data. If it gains a
+# persisted mutation path, use scripts/_script_safety.py before committing.
 """
 regression_check_formula.py — Functional regression check for a form's
 calculated fields: computes actual output NUMBERS (not formula text) using

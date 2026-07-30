@@ -1,4 +1,5 @@
 import os
+import argparse
 from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
@@ -20,6 +21,7 @@ from app.modules.SITEMST.model import Site
 from app.modules.USRMGMT.service import hash_password
 from app.modules.USRMGMT.model import User
 from app.modules.VALSET.model import ValueSet, ValueSetVersion, ValueSetEntry
+from scripts._script_safety import add_safety_arguments, build_safety, guarded_commit
 
 
 ADMIN_EMAIL = os.getenv("SEED_ADMIN_EMAIL", "admin@example.com")
@@ -303,6 +305,11 @@ def seed_value_sets(admin):
 
 
 def run():
+    parser = argparse.ArgumentParser(description="Seed core application data.")
+    add_safety_arguments(parser)
+    args = parser.parse_args()
+    safety = build_safety(args)
+
     app = create_app()
     with app.app_context():
         admin = seed_admin_user()
@@ -313,8 +320,8 @@ def run():
         seed_app_config(admin)
         print("Seeding pre-built GHG value sets...")
         seed_value_sets(admin)
-        db.session.commit()
-        print("Seed complete.")
+        if guarded_commit(db.session, safety, "seed core application data"):
+            print("Seed complete.")
         if app.config.get("FLASK_ENV") == "development":
             print(f"Dev admin email: {ADMIN_EMAIL}")
             print(f"Dev admin password: {ADMIN_PASSWORD}")
