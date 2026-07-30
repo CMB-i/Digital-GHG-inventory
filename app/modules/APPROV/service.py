@@ -804,16 +804,17 @@ def get_approver_queue(user_id):
     queue.sort(key=lambda x: x["days_waiting"], reverse=True)
     return queue
 
-def get_actioned_history(user_id):
+def get_actioned_history(user_id, limit=50):
     """
     Returns list of submissions the user recently actioned.
     """
-    actions = (
+    query = (
         ApprovalAction.query.filter_by(actor_id=user_id, is_deleted=False)
         .order_by(ApprovalAction.acted_at.desc())
-        .limit(50)
-        .all()
     )
+    if limit:
+        query = query.limit(limit)
+    actions = query.all()
 
     from app.modules.FORMBLD.model import Form
     from app.modules.SITEMST.model import Site

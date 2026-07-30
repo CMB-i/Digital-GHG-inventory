@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }} - Digital GHG Inventory{% endblock %}
+
+{% block content %}
+<div id="my-workbooks-detail" data-dashboard-mode="detail" data-detail-type="{{ detail_type }}" class="space-y-4">
+  <div class="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-end md:justify-between">
+    <div>
+      <a href="/module/SUBMIT/" class="text-xs font-bold uppercase tracking-wide text-[#1a3a6b] hover:underline">← My Workbooks</a>
+      <h1 class="page-title mt-2">{{ page_title }}</h1>
+      <p class="mt-1 text-sm text-slate-500">{{ page_description }}</p>
+    </div>
+    <div id="detail-total-badge" class="rounded border border-slate-200 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-600">Loading</div>
+  </div>
+
+  <section class="rounded-lg border border-slate-200 bg-white">
+    <div class="flex flex-col gap-3 border-b border-slate-200 bg-slate-50/70 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+      <div class="flex flex-1 flex-col gap-2 sm:flex-row">
+        <input id="detail-search" type="search" placeholder="Search sheet, site, period, status" class="min-w-0 flex-1 rounded border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#1a3a6b]">
+        <select id="detail-site-filter" class="rounded border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#1a3a6b]">
+          <option value="">All sites</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2 text-xs text-slate-500">
+        <span>Rows per page</span>
+        <select id="detail-page-size" class="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold outline-none focus:border-[#1a3a6b]">
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-200">
+        <thead id="detail-table-head" class="bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500"></thead>
+        <tbody id="detail-table-body" class="divide-y divide-slate-100 text-sm text-slate-700">
+          <tr><td class="px-6 py-8 text-center text-slate-400">Loading rows...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div id="detail-page-summary" class="text-xs font-medium text-slate-500">Loading...</div>
+      <div class="flex items-center justify-end gap-2">
+        <button id="detail-prev" type="button" class="btn btn-outline btn-sm">Previous</button>
+        <span id="detail-page-number" class="min-w-16 text-center text-xs font-bold text-slate-600">1 / 1</span>
+        <button id="detail-next" type="button" class="btn btn-outline btn-sm">Next</button>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/ui_helpers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/spoc_sheets.js') }}"></script>
+{% endblock %}

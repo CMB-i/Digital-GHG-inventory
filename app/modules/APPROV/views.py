@@ -66,6 +66,37 @@ def index():
         return _page_no_access()
     return render_template("modules/APPROV/approval_queue.html", module_code=MODULE_CODE)
 
+
+@bp.route("/pending")
+@require_login
+def pending_page():
+    user = current_user()
+    if not _has_any_review_access(user):
+        return _page_no_access()
+    return render_template(
+        "modules/APPROV/approval_queue_detail.html",
+        module_code=MODULE_CODE,
+        detail_type="pending",
+        page_title="Pending Review",
+        page_description="Review items currently assigned to you.",
+    )
+
+
+@bp.route("/history")
+@require_login
+def history_page():
+    user = current_user()
+    if not _has_any_review_access(user):
+        return _page_no_access()
+    return render_template(
+        "modules/APPROV/approval_queue_detail.html",
+        module_code=MODULE_CODE,
+        detail_type="history",
+        page_title="Recently Reviewed",
+        page_description="Review actions you completed recently.",
+    )
+
+
 @bp.route("/api/queue")
 @require_login
 def api_queue():
@@ -74,7 +105,7 @@ def api_queue():
         return error_response("Permission denied.", 403)
     try:
         pending = get_approver_queue(user.id)
-        history = get_actioned_history(user.id)
+        history = get_actioned_history(user.id, limit=None)
         return success_response(data={
             "pending": pending,
             "history": history

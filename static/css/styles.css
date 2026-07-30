@@ -50,6 +50,14 @@ body[data-theme="jsw-excel"],
   transition: transform 180ms ease-out;
 }
 
+.review-panel {
+  height: fit-content;
+}
+
+.review-panel-list {
+  max-height: min(22rem, calc(100vh - 17rem));
+}
+
 .nav-link {
   display: block;
   border-radius: 0;

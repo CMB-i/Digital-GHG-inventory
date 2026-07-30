@@ -110,7 +110,13 @@ class TestSiteScopedSubmitterAccess:
         with client.session_transaction() as sess:
             sess["user_id"] = ctx["submitter"].id
 
+        # Single-site users skip the dashboard entirely and land straight in
+        # their one workbook (see app/modules/SUBMIT/views.py::index).
         resp = client.get("/module/SUBMIT/")
+        assert resp.status_code == 302
+        assert resp.headers["Location"].startswith("/module/SUBMIT/annual?")
+
+        resp = client.get(resp.headers["Location"])
         assert resp.status_code == 200
 
         resp = client.get("/module/SUBMIT/api/sheets")
