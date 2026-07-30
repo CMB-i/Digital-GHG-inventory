@@ -6,7 +6,7 @@ aliasing/computed-column panels) and GET /api/templates/<id>/pivot-preview
 route's error handling). Existing routes in this file have no prior test
 coverage, so this is the first file for it.
 """
-from app.modules.RPTBLD.service import METRIC_KEY_DISPLAY_ORDER, pivot_report_data
+from app.modules.RPTBLD.service import METRIC_KEY_DISPLAY_ORDER, CROSS_SITE_SHEET1_COLUMNS, pivot_report_data
 
 
 class TestCanonicalMetricsRoute:
@@ -28,7 +28,34 @@ class TestCanonicalMetricsRoute:
 
         resp = client.get("/module/RPTBLD/api/canonical-metrics")
         assert resp.status_code == 200
-        assert resp.get_json() == {"metrics": list(METRIC_KEY_DISPLAY_ORDER)}
+        assert resp.get_json() == {
+            "metrics": list(METRIC_KEY_DISPLAY_ORDER),
+            "sheet1_columns": list(CROSS_SITE_SHEET1_COLUMNS),
+        }
+
+    def test_sheet1_columns_is_the_same_source_the_excel_export_uses(
+        self, client, make_user, make_access_grant,
+    ):
+        """The whole point of serving this from the backend: reports.js
+        fetches this instead of hardcoding its own copy, so the web preview
+        and the Excel export (_write_pivot_sheet, which imports
+        CROSS_SITE_SHEET1_COLUMNS directly) can never drift apart again."""
+        user = make_user()
+        make_access_grant(user, "report", scope_type="global", can_view=True)
+        with client.session_transaction() as sess:
+            sess["user_id"] = user.id
+
+        resp = client.get("/module/RPTBLD/api/canonical-metrics")
+        sheet1_columns = resp.get_json()["sheet1_columns"]
+        assert [c["label"] for c in sheet1_columns] == [
+            "Cargo Handled (MT)", "Energy (GJ) - Electrical", "Energy Intensity Electrical (KJ/MT)",
+            "Energy (GJ) - Fossil Fuels", "Energy Intensity Fossil Fuels (KJ/MT)", "Energy (GJ)",
+            "Energy Intensity (000' GJ/Mn MT)", "GHG Emission Scope-1 (tCO2e)", "Scope-1 GHG Intensity (KgCO2e/MT)",
+            "GHG Emission Scope-2 (tCO2e)", "Scope-2 GHG Intensity (KgCO2e/MT)", "Total GHG Emission (tCO2e)",
+            "% Contribution of Total Emissions", "GHG Intensity (KgCO2e/MT)", "Variation from Average Intensity",
+            "Electrical Power (MWH/MnT)", "Diesel (KL/MnT)", "Petrol (KL/MnT)", "IFO/HFHSD (KL/MnT)",
+            "Power Consumption MWH", "Diesel Consumption KL",
+        ]
 
 
 class TestPivotPreviewRoute:

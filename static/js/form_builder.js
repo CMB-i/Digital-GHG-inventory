@@ -1874,7 +1874,7 @@ document.addEventListener("DOMContentLoaded", function () {
       const calcUnitInput = document.getElementById("prop-calc-unit");
       const calcDecimalsInput = document.getElementById("prop-calc-decimals");
       if (calcDecimalsInput) {
-        calcDecimalsInput.value = config.round_off_decimals !== undefined ? config.round_off_decimals : 3;
+        calcDecimalsInput.value = config.round_off_decimals !== undefined ? config.round_off_decimals : 4;
       }
       if (propCalcPlacement) {
         if (!isSheetResultField(field)) {
@@ -2023,7 +2023,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }
         field.field_config.round_off_decimals = decVal;
       } else {
-        field.field_config.round_off_decimals = field.field_config.round_off_decimals !== undefined ? field.field_config.round_off_decimals : 3;
+        field.field_config.round_off_decimals = field.field_config.round_off_decimals !== undefined ? field.field_config.round_off_decimals : 4;
       }
 
       // field_config.formula_version_id (and expression/tokens) is NOT
@@ -2148,7 +2148,7 @@ document.addEventListener("DOMContentLoaded", function () {
         newField.field_config.field_scope = "monthly";
         newField.field_config.result_role = "monthly_calculated";
         newField.field_config.display_region = "monthly_table";
-        newField.field_config.round_off_decimals = 3;
+        newField.field_config.round_off_decimals = 4;
       }
 
       currentFields.push(newField);

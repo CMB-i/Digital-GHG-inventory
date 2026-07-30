@@ -28,6 +28,18 @@ REPORT_CONTEXT_METRIC_KEYS = {
     "diesel_specific",
     "petrol_specific",
     "ifo_specific",
+    # Raw FY-total consumption columns (Power/Diesel Consumption) --
+    # deliberately separate keys from power_specific/diesel_specific (the
+    # MWH-or-KL-per-million-MT ratios) even though they resolve to the same
+    # underlying field_ids per site: Combined_JSW_Infra_YTD's U/V columns are
+    # algebraically Q*B/1e6 and R*B/1e6, which -- since Q and R are
+    # themselves power_specific*1e6/cargo and diesel_specific*1e6/cargo --
+    # reduce exactly back to power_specific/diesel_specific. Kept as their
+    # own metric keys (not a computed_column referencing Q/R, which
+    # _evaluate_computed_columns can't do -- one computed column can't
+    # reference another's result) so they read as plain aliased metrics.
+    "power_consumption_mwh",
+    "diesel_consumption_kl",
 }
 
 REPORT_CONTEXT_GROUP_TOKEN_PATTERN = re.compile(r"^[a-z0-9_]+__[a-z0-9_]+$")

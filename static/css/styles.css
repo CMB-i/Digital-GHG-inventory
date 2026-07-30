@@ -18,6 +18,9 @@ body[data-theme="jsw-excel"],
   --ghg-info-bg: #dfeaf8;
   --ghg-success-bg: #def0e2;
   --ghg-warning-bg: #fcf3d7;
+  --ghg-tab-gold: #d97706;
+  --ghg-chart-navy: #1B2A4E;
+  --ghg-chart-gold: #8B7355;
   --ghg-danger-bg: #fbe3e6;
   --ghg-neutral-bg: #e9eef4;
   --ghg-purple-bg: #ece2f5;
@@ -26,6 +29,25 @@ body[data-theme="jsw-excel"],
   --ghg-danger-text: #9a1224;
   --ghg-neutral-text: #5b6677;
   --ghg-purple-text: #5b3a86;
+}
+
+.scope-breakdown-panel {
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 220ms ease-out, transform 220ms ease-out;
+}
+
+.scope-breakdown-panel.is-open {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.scope-breakdown-toggle[aria-expanded="true"] .scope-breakdown-chevron {
+  transform: rotate(180deg);
+}
+
+.scope-breakdown-chevron {
+  transition: transform 180ms ease-out;
 }
 
 .nav-link {

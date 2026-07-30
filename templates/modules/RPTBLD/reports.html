@@ -23,8 +23,9 @@
   <div id="feedback_container" class="hidden rounded-md border px-4 py-3 text-sm"></div>
 
   <!-- Main Grid Layout -->
-  <div class="grid gap-6 lg:grid-cols-3">
-    <!-- Templates List Card (left col) -->
+  <div class="grid gap-6 lg:grid-cols-4">
+    <!-- Templates List Card (left col) -- 1/4 width now (was 1/3): it's just
+         a list of template cards, the wide pivot table needs the room more. -->
     <div class="lg:col-span-1 space-y-6">
       <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 class="text-lg font-bold text-slate-900 mb-4">Saved Report Templates</h2>
@@ -32,42 +33,60 @@
         <div id="templates_list" class="space-y-4">
           {% for t in templates %}
           <div class="template-card border border-slate-100 rounded-lg p-4 bg-slate-50 hover:bg-white hover:border-indigo-200 transition duration-150 relative group shadow-sm" data-template-id="{{ t.id }}">
-            <div class="flex items-start justify-between">
-              <div>
-                <h3 class="font-bold text-slate-900 group-hover:text-indigo-600 transition">{{ t.name }}</h3>
-                <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600 mt-1 uppercase">
-                  {{ t.code }}
-                </span>
-                {% if t.scope_type == 'site' %}
-                <span class="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 mt-1 uppercase">
-                  Site Scoped
-                </span>
-                {% else %}
-                <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 mt-1 uppercase">
-                  Global
-                </span>
-                {% endif %}
+            <!-- Single wrapping row: title+badges and the icon actions sit
+                 together as one compact header. flex-wrap (not a fixed
+                 stacked layout) lets the icons drop to their own line only
+                 when the column is actually too narrow for both -- at any
+                 reasonable sidebar width they share the title's row. -->
+            <div class="flex flex-wrap items-start justify-between gap-x-2 gap-y-1.5">
+              <!-- min-w-[140px], not min-w-0: the sidebar narrowed to 1/4
+                   width, and min-w-0 let this block get squeezed down to
+                   almost nothing by the shrink-0 icon row sharing its line,
+                   which forced break-words to break titles mid-word. A real
+                   floor width means flex-wrap moves the icon row to its own
+                   line instead of crushing the title. -->
+              <div class="min-w-[140px] flex-1">
+                <h3 class="break-words font-bold leading-snug text-slate-900 group-hover:text-indigo-600 transition">{{ t.name }}</h3>
+                <div class="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
+                  <!-- truncate + title tooltip, not break-all: break-all
+                       chops long machine codes one character per line
+                       regardless of available width. Matches the truncate+
+                       title pattern already used for long identifiers
+                       elsewhere (SITEMST, ACCESS, FRMULA, WFLWBLD). -->
+                  <span class="inline-flex max-w-full items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-600" title="{{ t.code }}">
+                    <span class="truncate max-w-[160px]">{{ t.code }}</span>
+                  </span>
+                  {% if t.scope_type == 'site' %}
+                  <span class="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 uppercase">
+                    Site Scoped
+                  </span>
+                  {% else %}
+                  <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 uppercase">
+                    Global
+                  </span>
+                  {% endif %}
+                </div>
               </div>
 
               <!-- Quick actions -->
-              <div class="flex items-center gap-1.5">
-                <button class="preview-template-btn text-slate-500 hover:text-indigo-600 p-1 rounded hover:bg-indigo-50 transition" title="Preview Report" data-template-id="{{ t.id }}">
+              <div class="flex shrink-0 items-center gap-1">
+                <button class="preview-template-btn inline-flex h-7 w-7 items-center justify-center rounded text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition" title="Preview Report" data-template-id="{{ t.id }}">
                   <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                   </svg>
                 </button>
-                <button class="edit-template-btn text-slate-500 hover:text-slate-800 p-1 rounded hover:bg-slate-100 transition" title="Edit Template" data-template-id="{{ t.id }}">
+                <button class="edit-template-btn inline-flex h-7 w-7 items-center justify-center rounded text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition" title="Edit Template" data-template-id="{{ t.id }}">
                   <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
                 </button>
-                <a href="/module/RPTBLD/api/templates/{{ t.id }}/export" class="export-template-btn text-slate-500 hover:text-emerald-600 p-1 rounded hover:bg-emerald-50 transition" title="Export Excel" data-template-id="{{ t.id }}">
+                <a href="/module/RPTBLD/api/templates/{{ t.id }}/export" class="export-template-btn inline-flex h-7 w-7 items-center justify-center rounded text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 transition" title="Export Excel" data-template-id="{{ t.id }}">
                   <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
                 </a>
-                <button class="delete-template-btn text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition" title="Delete Template" data-template-id="{{ t.id }}">
+                <button class="delete-template-btn inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition" title="Delete Template" data-template-id="{{ t.id }}">
                   <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
@@ -118,9 +137,9 @@
       </div>
     </div>
 
-    <!-- Preview Pane (right col) -->
-    <div class="lg:col-span-2 space-y-6">
-      <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm min-h-[400px] flex flex-col">
+    <!-- Preview Pane (right col) -- 3/4 width now (was 2/3) -->
+    <div class="lg:col-span-3 space-y-6 min-w-0">
+      <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm min-h-[400px] flex flex-col min-w-0">
         <!-- Preview Panel Header -->
         <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between border-b border-slate-100 pb-4 mb-4">
           <div>
@@ -128,7 +147,20 @@
             <p id="preview_subtitle" class="text-xs text-slate-500">Select a report template to preview aggregated data.</p>
           </div>
           <div id="preview_actions" class="hidden flex items-center gap-2">
+            <div class="hidden items-center gap-1.5" id="preview_fy_year_container">
+              <label for="preview_fy_year_select" class="text-xs font-medium text-slate-500">FY</label>
+              <select id="preview_fy_year_select" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500">
+                {% for y in years %}
+                <option value="{{ y }}">{{ y }}-{{ (y + 1) % 100 }}</option>
+                {% endfor %}
+              </select>
+            </div>
             <input type="text" id="preview_search" placeholder="Search preview..." class="rounded-md border border-slate-300 px-3 py-1.5 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" />
+            <button type="button" id="preview_fullscreen_btn" title="Expand to fullscreen" class="inline-flex items-center rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition">
+              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-5v4m0-4h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+            </button>
             <a id="preview_export_btn" href="#" class="inline-flex items-center rounded-md bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition">
               <svg class="mr-1 h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -139,7 +171,7 @@
         </div>
 
         <!-- Preview State Container -->
-        <div class="flex-1 flex flex-col justify-center" id="preview_data_container">
+        <div class="flex-1 flex flex-col justify-center min-w-0" id="preview_data_container">
           <!-- Default Empty State -->
           <div class="text-center py-12" id="preview_empty_state">
             <svg class="mx-auto h-12 w-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -159,7 +191,7 @@
           </div>
 
           <!-- Data Grid (flat mode -- templates without row_groups) -->
-          <div class="hidden overflow-x-auto" id="preview_table_wrapper">
+          <div class="hidden overflow-x-auto min-w-0" id="preview_table_wrapper">
             <table class="w-full text-left text-sm text-slate-600" id="preview_table">
               <thead>
                 <tr class="border-b border-slate-200 text-xs font-bold uppercase text-slate-500">
@@ -178,17 +210,106 @@
             </table>
           </div>
 
+          <!-- Draft-data banner -- shown when the source data includes
+               unapproved/Draft submissions (include_unapproved reports),
+               so viewers never mistake a pre-lock demo view for reviewed data. -->
+          <div class="hidden mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800" id="preview_draft_banner">
+            ⚠ This preview includes Draft (unapproved) submissions -- data has not yet been reviewed or locked.
+          </div>
+
           <!-- Pivot Data Grid (row_groups mode -- structure built dynamically since
-               columns depend on the template's configured metrics/computed columns) -->
-          <div class="hidden overflow-x-auto" id="preview_pivot_wrapper">
-            <table class="w-full text-left text-sm text-slate-600" id="preview_pivot_table">
+               columns depend on the template's configured metrics/computed columns).
+               overflow-x-auto + min-w-0 (needed because this sits inside a chain of
+               flex containers -- flex items default to min-width:auto, which lets a
+               wide child overflow instead of triggering the scrollbar) keeps a wide
+               (20+ column) table scrolling within its own box, never the page. The
+               border here visually frames that scroll box. -->
+          <div class="hidden overflow-x-auto min-w-0 max-w-full rounded-lg border border-slate-200" id="preview_pivot_wrapper">
+            <table class="w-full text-left text-sm text-slate-600 border-collapse" id="preview_pivot_table">
               <thead id="preview_pivot_thead"></thead>
-              <tbody class="divide-y divide-slate-100" id="preview_pivot_tbody">
+              <tbody id="preview_pivot_tbody">
                 <!-- Rendered dynamically -->
               </tbody>
             </table>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Fullscreen Preview Overlay -- the split "Saved Report Templates" /
+     "Report Preview" grid never gives a 20+ column table enough room. This
+     reuses the exact same render functions (renderPivotPreviewTable /
+     renderPreviewTable) against whatever data is already loaded in the main
+     preview pane -- no separate fetch, always in sync -- just aimed at a
+     full-viewport panel instead of the constrained lg:col-span-3 column. -->
+<div id="preview_fullscreen_overlay" class="hidden fixed inset-0 z-[60] bg-slate-900/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label="Report preview, fullscreen">
+  <div class="mx-auto flex h-full w-full max-w-[1600px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
+    <!-- Header (fixed, does not scroll with the table) -->
+    <div class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between flex-shrink-0">
+      <div>
+        <h2 id="fullscreen_preview_title" class="text-lg font-bold text-slate-900">Report Preview</h2>
+        <p id="fullscreen_preview_subtitle" class="text-xs text-slate-500"></p>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="hidden items-center gap-1.5" id="fullscreen_fy_year_container">
+          <label for="fullscreen_fy_year_select" class="text-xs font-medium text-slate-500">FY</label>
+          <select id="fullscreen_fy_year_select" class="rounded-md border border-slate-300 px-2 py-1.5 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500">
+            {% for y in years %}
+            <option value="{{ y }}">{{ y }}-{{ (y + 1) % 100 }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <input type="text" id="fullscreen_preview_search" placeholder="Search preview..." class="rounded-md border border-slate-300 px-3 py-1.5 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" />
+        <a id="fullscreen_export_btn" href="#" class="inline-flex items-center rounded-md bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition">
+          <svg class="mr-1 h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          Export
+        </a>
+        <button type="button" id="preview_fullscreen_close_btn" title="Close (Esc)" class="inline-flex items-center rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="hidden mx-5 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 flex-shrink-0" id="fullscreen_draft_banner">
+      ⚠ This preview includes Draft (unapproved) submissions -- data has not yet been reviewed or locked.
+    </div>
+
+    <!-- Scrollable content -- this single div (not the page) is the sticky
+         positioning context here, since a modal has no page-level vertical
+         scroll to lean on the way the normal split-panel view does. It
+         alone handles both scroll axes -- the table wrappers below
+         deliberately don't nest a second overflow-x-auto context, which
+         would fight this one over which ancestor sticky positioning binds
+         to. -->
+    <div class="flex-1 overflow-auto min-w-0 p-5">
+      <div class="hidden min-w-0" id="fullscreen_table_wrapper">
+        <table class="w-full text-left text-sm text-slate-600" id="fullscreen_table">
+          <thead>
+            <tr class="border-b border-slate-200 text-xs font-bold uppercase text-slate-500">
+              <th class="pb-3 pr-3">Period</th>
+              <th class="pb-3 pr-3">Site Name</th>
+              <th class="pb-3 pr-3">Form Name</th>
+              <th class="pb-3 pr-3">Field Code</th>
+              <th class="pb-3 pr-3">Field Name</th>
+              <th class="pb-3 pr-3 text-right">Aggregated Value</th>
+              <th class="pb-3 pl-3">Unit</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100" id="fullscreen_tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="hidden min-w-0 rounded-lg border border-slate-200" id="fullscreen_pivot_wrapper">
+        <table class="w-full text-left text-sm text-slate-600 border-collapse" id="fullscreen_pivot_table">
+          <thead id="fullscreen_pivot_thead"></thead>
+          <tbody id="fullscreen_pivot_tbody"></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -435,10 +556,14 @@
           </table>
         </div>
 
-        <div class="hidden overflow-x-auto" id="review_preview_pivot_wrapper">
-          <table class="w-full text-left text-sm text-slate-600">
+        <div class="hidden mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800" id="review_draft_banner">
+          ⚠ This preview includes Draft (unapproved) submissions -- data has not yet been reviewed or locked.
+        </div>
+
+        <div class="hidden overflow-x-auto min-w-0 max-w-full rounded-lg border border-slate-200" id="review_preview_pivot_wrapper">
+          <table class="w-full text-left text-sm text-slate-600 border-collapse">
             <thead id="review_preview_pivot_thead"></thead>
-            <tbody class="divide-y divide-slate-100" id="review_preview_pivot_tbody"></tbody>
+            <tbody id="review_preview_pivot_tbody"></tbody>
           </table>
         </div>
       </div>

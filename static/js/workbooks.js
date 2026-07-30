@@ -404,20 +404,23 @@ document.addEventListener("DOMContentLoaded", function () {
       previewAggregateHint.textContent = AGGREGATE_PREVIEW_HINT;
     }
 
-    function renderPreviewResultsOverflow(sheetResults) {
+    function renderPreviewResultsOverflow(sheetResults, options) {
       if (!previewResultsOverflow) return;
       if (!window.WorkbookSheet || typeof window.WorkbookSheet.renderSheetResultsOverflowHtml !== "function") {
         previewResultsOverflow.classList.add("hidden");
         previewResultsOverflow.innerHTML = "";
         return;
       }
-      const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(sheetResults || []);
+      const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(sheetResults || [], options || {});
       if (!html) {
         previewResultsOverflow.classList.add("hidden");
         previewResultsOverflow.innerHTML = "";
         return;
       }
       previewResultsOverflow.innerHTML = html;
+      if (window.WorkbookSheet && typeof window.WorkbookSheet.initializeScopeBreakdowns === "function") {
+        window.WorkbookSheet.initializeScopeBreakdowns(previewResultsOverflow);
+      }
       previewResultsOverflow.classList.remove("hidden");
     }
 
@@ -442,9 +445,10 @@ document.addEventListener("DOMContentLoaded", function () {
             workbookValues: ctx.workbook_values || {},
             rows: ctx.rows || [],
             sheetResults: ctx.sheet_results || [],
+            sheetName: sheet.sheet_label || sheet.name || sheet.form_name || "",
             selectedRowKey: null,
           });
-          renderPreviewResultsOverflow(ctx.sheet_results || []);
+          renderPreviewResultsOverflow(ctx.sheet_results || [], { sheetName: sheet.sheet_label || sheet.name || sheet.form_name || "" });
           renderPreviewAggregateHint(ctx.sheet_results || []);
         })
         .catch(err => { resetPreview(err.message || "Failed to load sheet preview."); });

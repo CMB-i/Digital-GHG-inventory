@@ -9,6 +9,18 @@
   };
 
   const escapeHtml = window.UIHelpers.escapeHtml;
+  function cssToken(name, fallback) {
+    if (typeof document === "undefined" || !document.documentElement || !window.getComputedStyle) return fallback;
+    const value = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  }
+
+  const SCOPE_CHART_COLORS = {
+    navy: cssToken("--ghg-chart-navy", "#1B2A4E"),
+    gold: cssToken("--ghg-chart-gold", "#8B7355"),
+  };
+  const GRI_GRID_COLOR = "rgba(100, 116, 139, 0.18)";
+  let chartJsPromise = null;
 
   function getMonthName(month) {
     const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -542,6 +554,564 @@
     return result.unit ? `${value} ${result.unit}` : value;
   }
 
+  function sheetNameFromOptions(options) {
+    return String((options && (options.sheetName || options.formName || options.selectedFormName)) || "").trim();
+  }
+
+  function isGriSheet(options) {
+    return /gri\s*summary/i.test(sheetNameFromOptions(options));
+  }
+
+  function isCargoHandledSheet(options) {
+    return /cargo\s+handled/i.test(sheetNameFromOptions(options));
+  }
+
+  function isElectricitySheet(options) {
+    return /^electricity$/i.test(sheetNameFromOptions(options));
+  }
+
+  function resultLabel(result) {
+    return String((result && (result.label || result.field_name || result.field_code)) || "Result").trim();
+  }
+
+  function titleCaseWords(value) {
+    return String(value || "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\b\w/g, (char) => char.toUpperCase())
+      .replace(/\bEqp\b/g, "EQP")
+      .replace(/\bGhg\b/g, "GHG")
+      .replace(/\bCh4\b/g, "CH4")
+      .replace(/\bN2o\b/g, "N2O")
+      .replace(/\bCo2\b/g, "CO2")
+      .replace(/\bTco2e\b/g, "tCO2e")
+      .replace(/\bTco2\b/g, "tCO2");
+  }
+
+  function metricPartsFromLabel(result, options) {
+    const label = resultLabel(result);
+    const code = normalizeFieldCode(result && result.field_code);
+
+    if (isGriSheet(options)) {
+      if (/intensity/i.test(label)) {
+        return {
+          group: "Intensity",
+          metric: /ghg|emissions/i.test(label) ? "GHG Intensity" : "Energy Intensity",
+        };
+      }
+      if (/total/i.test(label) && /energy/i.test(label)) {
+        return { group: "Total", metric: "Energy" };
+      }
+      if (/total/i.test(label) && /emissions?/i.test(label)) {
+        return { group: "Total", metric: "Emissions" };
+      }
+    }
+
+    let working = label.replace(/^FY\s+Total\s+/i, "FY Total ");
+    let metric = "";
+
+    const parenMatch = working.match(/\(([^)]+)\)\s*$/);
+    if (parenMatch) {
+      metric = parenMatch[1].trim();
+      working = working.slice(0, parenMatch.index).trim();
+    }
+
+    const suffixRules = [
+      [/^(.*?)(?:\s+GHG\s+Emission)$/i, "GHG Emission"],
+      [/^(.*?)(?:\s+CH4)$/i, "CH4"],
+      [/^(.*?)(?:\s+N2O)$/i, "N2O"],
+      [/^(.*?)(?:\s+Consumption)$/i, "Consumption"],
+      [/^(.*?)(?:\s+Intensity)$/i, "Intensity"],
+    ];
+    for (const [pattern, suffix] of suffixRules) {
+      const match = working.match(pattern);
+      if (match && match[1]) {
+        working = match[1].trim();
+        metric = metric ? `${suffix} (${metric})` : suffix;
+        break;
+      }
+    }
+
+    if (!metric) {
+      if (code.includes("ghg_emission") || code.includes("emissions") || code.includes("emission")) metric = "GHG Emission";
+      else if (code.includes("ch4")) metric = "CH4";
+      else if (code.includes("n2o")) metric = "N2O";
+      else if (code.includes("gj") || /\bgj\b/i.test(label)) metric = "GJ";
+      else if (code.includes("tco2")) metric = "tCO2e";
+      else metric = "Value";
+    }
+
+    let group = working
+      .replace(/\s+Energy$/i, "")
+      .replace(/\s+Emissions?$/i, "")
+      .replace(/\s+GHG$/i, "")
+      .trim();
+
+    if (!group) group = label;
+    if (/^fy\s+total\s+fuel$/i.test(group)) group = "FY Total Fuel";
+    if (/^fy\s+total\s+electricity$/i.test(group)) group = "FY Total Electricity";
+    if (/^other\s+fuels$/i.test(group)) group = "Other Fuels";
+    if (/^total$/i.test(group) && code.includes("electricity")) group = "Total Electricity";
+    if (/^total$/i.test(group) && code.includes("emissions")) group = "Total Emissions";
+
+    return {
+      group: titleCaseWords(group),
+      metric: titleCaseWords(metric),
+    };
+  }
+
+  function groupSheetResults(results, options) {
+    const groups = [];
+    const byName = new Map();
+    (results || []).forEach((result) => {
+      const parts = metricPartsFromLabel(result, options);
+      const key = normalizeFieldCode(parts.group);
+      if (!byName.has(key)) {
+        const group = {
+          name: parts.group,
+          isTotal: /\btotal\b|\bfy total\b/i.test(parts.group),
+          rows: [],
+        };
+        byName.set(key, group);
+        groups.push(group);
+      }
+      byName.get(key).rows.push({ result, metric: parts.metric });
+    });
+    return groups.sort((a, b) => {
+      if (isGriSheet(options) && a.isTotal !== b.isTotal) return a.isTotal ? -1 : 1;
+      if (a.isTotal !== b.isTotal) return a.isTotal ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  function shouldGroupCombinedResults(results, options) {
+    const list = Array.isArray(results) ? results : [];
+    if (!list.length) return false;
+    const groups = groupSheetResults(list, options);
+    return groups.length > 0;
+  }
+
+  function filterDisplayOnlyCombinedResults(results, options) {
+    const list = Array.isArray(results) ? results : [];
+    if (!isElectricitySheet(options)) return list;
+
+    const codes = new Set(list.map(result => normalizeFieldCode(result && result.field_code)));
+    const hasCanonicalGJ = codes.has("electricity_gj") || codes.has("total_electricity_gj");
+    const hasCanonicalTco2e = codes.has("electricity_ghg_emission") || codes.has("total_electricity_ghg_emission");
+
+    return list.filter((result) => {
+      const code = normalizeFieldCode(result && result.field_code);
+      if (hasCanonicalGJ && code === "fy_total_electricity_gj") return false;
+      if (hasCanonicalTco2e && code === "fy_total_electricity_tco2e") return false;
+      return true;
+    });
+  }
+
+  function renderSheetResultCardBadge(group) {
+    const statuses = new Set(group.rows.map(row => (row.result && row.result.status) || ""));
+    const representative = group.rows.find(row => row.result && row.result.status === "calculated")
+      || group.rows.find(row => row.result && row.result.status === "partial")
+      || group.rows[0];
+    const meta = sheetResultStatusMeta(representative ? representative.result : {});
+    const label = statuses.size === 1 ? meta.label : "Mixed";
+    const badgeClass = statuses.size === 1 ? meta.badgeClass : "border-slate-200 bg-slate-100 text-slate-600";
+    return `<span class="whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase ${badgeClass}">${escapeHtml(label)}</span>`;
+  }
+
+  function renderGroupedResultCard(group) {
+    const cardBorder = group.isTotal ? "border-[#1a3a6b] ring-1 ring-[#1a3a6b]/10" : "border-slate-200";
+    return `
+      <div class="min-w-[240px] flex-1 rounded-lg border ${cardBorder} bg-white px-3 py-3 shadow-sm">
+        <div class="mb-2 flex items-start justify-between gap-3">
+          <div class="min-w-0 text-xs font-extrabold uppercase tracking-wide text-slate-700">${escapeHtml(group.name)}</div>
+          ${renderSheetResultCardBadge(group)}
+        </div>
+        <div class="divide-y divide-slate-100">
+          ${group.rows.map(({ result, metric }) => {
+            const meta = sheetResultStatusMeta(result);
+            const tooltipParts = [meta.label];
+            if (result.message) tooltipParts.push(result.message);
+            return `
+              <div class="flex items-start justify-between gap-4 py-2 first:pt-0 last:pb-0" title="${escapeHtml(tooltipParts.filter(Boolean).join(" · "))}">
+                <div class="min-w-0 text-xs font-semibold text-slate-500">${escapeHtml(metric || resultLabel(result))}</div>
+                <div class="shrink-0 text-right text-sm tabular-nums ${meta.valueClass}">${escapeHtml(formatSheetResultValue(result))}</div>
+              </div>
+              ${renderResultBreakdowns(result)}
+              ${result.message && meta.showInlineMessage ? `<div class="-mt-1 pb-2 text-[10px] font-medium ${meta.messageClass}">${escapeHtml(result.message)}</div>` : ""}
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function formatBreakdownValue(value, unit) {
+    return formatSheetResultValue({ value, unit: unit || "tCO2e" });
+  }
+
+  function donutChartPayload(breakdown) {
+    const slices = Array.isArray(breakdown && breakdown.slices)
+      ? breakdown.slices
+      : Array.isArray(breakdown && breakdown.scopes)
+        ? breakdown.scopes
+        : [];
+    return JSON.stringify({
+      labels: slices.map(slice => slice.label || ""),
+      values: slices.map(slice => Number(slice.value) || 0),
+      unit: (breakdown && breakdown.unit) || "",
+    });
+  }
+
+  function renderBreakdownToggle(breakdown, fallbackLabel) {
+    const slices = Array.isArray(breakdown && breakdown.slices)
+      ? breakdown.slices
+      : Array.isArray(breakdown && breakdown.scopes)
+        ? breakdown.scopes
+        : [];
+    if (!breakdown || !slices.length) return "";
+    const unit = breakdown.unit || "tCO2e";
+    const chartPayload = escapeHtml(donutChartPayload(breakdown));
+    const toggleLabel = breakdown.toggle_label || fallbackLabel || "Show breakdown";
+    const chartLabel = breakdown.chart_label || toggleLabel;
+    return `
+      <div class="mt-2">
+        <button type="button" class="scope-breakdown-toggle inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-[#1a3a6b] hover:text-[#102a50]" aria-expanded="false">
+          <span>${escapeHtml(toggleLabel)}</span>
+          <svg class="scope-breakdown-chevron h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"></path>
+          </svg>
+        </button>
+        <div class="scope-breakdown-panel mt-2 rounded border border-slate-200 bg-slate-50 p-3" hidden>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
+            <div class="flex items-center justify-center">
+              <div class="h-24 w-24">
+                <canvas data-gri-donut="${chartPayload}" width="96" height="96" aria-label="${escapeHtml(chartLabel)}"></canvas>
+              </div>
+            </div>
+            <div class="space-y-2">
+              ${slices.map((slice, index) => `
+                <div>
+                  <div class="flex items-center justify-between gap-3 text-xs">
+                    <span class="inline-flex items-center gap-1.5 font-bold text-slate-700">
+                      <span class="h-2.5 w-2.5 rounded-full" style="background:${index === 0 ? SCOPE_CHART_COLORS.navy : SCOPE_CHART_COLORS.gold}"></span>
+                      ${escapeHtml(slice.label)}
+                    </span>
+                    <span class="font-bold tabular-nums text-[#1a3a6b]">${escapeHtml(formatBreakdownValue(slice.value, unit))}</span>
+                  </div>
+                  <div class="mt-1 space-y-1 border-l border-slate-200 pl-3">
+                    ${(slice.rows || []).map((row) => `
+                      <div class="flex items-center justify-between gap-3 text-[11px] text-slate-500">
+                        <span>${escapeHtml(row.label)}</span>
+                        <span class="tabular-nums text-slate-700">${escapeHtml(formatBreakdownValue(row.value, unit))}</span>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+              `).join("")}
+              ${breakdown.reconciles === false ? `
+                <div class="text-[10px] font-semibold text-amber-700">Scope rows do not reconcile to the displayed total.</div>
+              ` : ""}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderResultBreakdowns(result) {
+    return [
+      renderBreakdownToggle(result && result.energy_breakdown, "Show energy breakdown"),
+      renderBreakdownToggle(result && result.scope_breakdown, "Show scope breakdown"),
+    ].join("");
+  }
+
+  function griTrendPayload(results) {
+    const owner = (results || []).find(result => result && result.gri_trend_charts);
+    return owner ? owner.gri_trend_charts : null;
+  }
+
+  function chartDataAttr(payload) {
+    return escapeHtml(JSON.stringify(payload || {}));
+  }
+
+  function renderGriTrendCharts(results, options) {
+    if (!isGriSheet(options)) return "";
+    const charts = griTrendPayload(results);
+    if (!charts || !Array.isArray(charts.labels) || !charts.labels.length) return "";
+    const monthlyEmissions = charts.monthly_emissions || {};
+    const cargoVsEmissions = charts.cargo_vs_emissions || {};
+    if (!Array.isArray(monthlyEmissions.values) || !Array.isArray(cargoVsEmissions.cargo_values)) return "";
+    return `
+      <div class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div class="mb-3">
+            <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Monthly emissions trend</div>
+            <div class="text-sm font-extrabold text-slate-800">Total Emissions (tCO2e)</div>
+          </div>
+          <div class="h-64">
+            <canvas data-gri-line-chart="${chartDataAttr({
+              labels: charts.labels,
+              values: monthlyEmissions.values,
+              unit: monthlyEmissions.unit || "tCO2e",
+            })}" aria-label="Monthly total emissions trend line chart"></canvas>
+          </div>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div class="mb-3">
+            <div class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Cargo vs emissions</div>
+            <div class="text-sm font-extrabold text-slate-800">Cargo Handled and Total Emissions</div>
+          </div>
+          <div class="h-64">
+            <canvas data-gri-dual-chart="${chartDataAttr({
+              labels: charts.labels,
+              cargoValues: cargoVsEmissions.cargo_values,
+              emissionsValues: cargoVsEmissions.emissions_values,
+              cargoUnit: cargoVsEmissions.cargo_unit || "MT",
+              emissionsUnit: cargoVsEmissions.emissions_unit || "tCO2e",
+            })}" aria-label="Cargo handled bars and total emissions line chart"></canvas>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderGroupedSheetResults(results, options) {
+    const groups = groupSheetResults(results, options);
+    if (!groups.length) return "";
+    return `<div class="flex flex-wrap gap-3">${groups.map(renderGroupedResultCard).join("")}</div>`;
+  }
+
+  function ensureChartJs() {
+    if (window.Chart) return Promise.resolve(window.Chart);
+    if (chartJsPromise) return chartJsPromise;
+    chartJsPromise = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-chartjs-loader="true"]');
+      if (existing) {
+        existing.addEventListener("load", () => resolve(window.Chart));
+        existing.addEventListener("error", reject);
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js";
+      script.async = true;
+      script.dataset.chartjsLoader = "true";
+      script.onload = () => resolve(window.Chart);
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+    return chartJsPromise;
+  }
+
+  function initializeScopeCharts(root) {
+    const container = root || document;
+    const canvases = container.querySelectorAll("canvas[data-gri-donut]:not([data-chart-initialized])");
+    if (!canvases.length) return;
+    ensureChartJs().then((Chart) => {
+      canvases.forEach((canvas) => {
+        if (canvas.dataset.chartInitialized) return;
+        let payload = null;
+        try {
+          payload = JSON.parse(canvas.getAttribute("data-gri-donut") || "{}");
+        } catch (_err) {
+          payload = null;
+        }
+        if (!payload || !Array.isArray(payload.values)) return;
+        canvas.dataset.chartInitialized = "true";
+        new Chart(canvas, {
+          type: "doughnut",
+          data: {
+            labels: payload.labels || ["Scope 1", "Scope 2"],
+            datasets: [{
+              data: payload.values,
+              backgroundColor: [SCOPE_CHART_COLORS.navy, SCOPE_CHART_COLORS.gold],
+              borderColor: "#ffffff",
+              borderWidth: 2,
+              hoverOffset: 2,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: "68%",
+            animation: {
+              animateRotate: true,
+              animateScale: true,
+              duration: 850,
+              easing: "easeOutCubic",
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (context) => `${context.label}: ${formatBreakdownValue(context.raw, payload.unit || "tCO2e")}`,
+                },
+              },
+            },
+          },
+        });
+      });
+    }).catch(() => {});
+  }
+
+  function chartTickFormatter(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric)
+      ? numeric.toLocaleString("en-IN", { maximumFractionDigits: 1 })
+      : value;
+  }
+
+  function initializeGriTrendCharts(root) {
+    const container = root || document;
+    const lineCanvases = container.querySelectorAll("canvas[data-gri-line-chart]:not([data-chart-initialized])");
+    const dualCanvases = container.querySelectorAll("canvas[data-gri-dual-chart]:not([data-chart-initialized])");
+    if (!lineCanvases.length && !dualCanvases.length) return;
+    ensureChartJs().then((Chart) => {
+      lineCanvases.forEach((canvas) => {
+        if (canvas.dataset.chartInitialized) return;
+        let payload = null;
+        try {
+          payload = JSON.parse(canvas.getAttribute("data-gri-line-chart") || "{}");
+        } catch (_err) {
+          payload = null;
+        }
+        if (!payload || !Array.isArray(payload.values)) return;
+        canvas.dataset.chartInitialized = "true";
+        new Chart(canvas, {
+          type: "line",
+          data: {
+            labels: payload.labels || [],
+            datasets: [{
+              label: `Total Emissions (${payload.unit || "tCO2e"})`,
+              data: payload.values,
+              borderColor: SCOPE_CHART_COLORS.navy,
+              backgroundColor: "rgba(27, 42, 78, 0.08)",
+              borderWidth: 2,
+              pointRadius: 2.5,
+              pointHoverRadius: 4,
+              pointBackgroundColor: SCOPE_CHART_COLORS.navy,
+              tension: 0.32,
+              fill: true,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 750, easing: "easeOutCubic" },
+            scales: {
+              x: { grid: { display: false }, ticks: { color: "#64748b", font: { size: 10 } } },
+              y: { beginAtZero: true, grid: { color: GRI_GRID_COLOR }, ticks: { color: "#64748b", callback: chartTickFormatter } },
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: { callbacks: { label: (context) => `${formatBreakdownValue(context.raw, payload.unit || "tCO2e")}` } },
+            },
+          },
+        });
+      });
+      dualCanvases.forEach((canvas) => {
+        if (canvas.dataset.chartInitialized) return;
+        let payload = null;
+        try {
+          payload = JSON.parse(canvas.getAttribute("data-gri-dual-chart") || "{}");
+        } catch (_err) {
+          payload = null;
+        }
+        if (!payload || !Array.isArray(payload.cargoValues) || !Array.isArray(payload.emissionsValues)) return;
+        canvas.dataset.chartInitialized = "true";
+        new Chart(canvas, {
+          data: {
+            labels: payload.labels || [],
+            datasets: [
+              {
+                type: "bar",
+                label: `Cargo Handled (${payload.cargoUnit || "MT"})`,
+                data: payload.cargoValues,
+                yAxisID: "yCargo",
+                backgroundColor: "rgba(139, 115, 85, 0.42)",
+                borderColor: SCOPE_CHART_COLORS.gold,
+                borderWidth: 1,
+                borderRadius: 2,
+              },
+              {
+                type: "line",
+                label: `Total Emissions (${payload.emissionsUnit || "tCO2e"})`,
+                data: payload.emissionsValues,
+                yAxisID: "yEmissions",
+                borderColor: SCOPE_CHART_COLORS.navy,
+                backgroundColor: SCOPE_CHART_COLORS.navy,
+                borderWidth: 2,
+                pointRadius: 2.5,
+                pointHoverRadius: 4,
+                tension: 0.32,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 750, easing: "easeOutCubic" },
+            scales: {
+              x: { grid: { display: false }, ticks: { color: "#64748b", font: { size: 10 } } },
+              yCargo: {
+                type: "linear",
+                position: "left",
+                beginAtZero: true,
+                grid: { color: GRI_GRID_COLOR },
+                ticks: { color: "#64748b", callback: chartTickFormatter },
+              },
+              yEmissions: {
+                type: "linear",
+                position: "right",
+                beginAtZero: true,
+                grid: { drawOnChartArea: false },
+                ticks: { color: "#64748b", callback: chartTickFormatter },
+              },
+            },
+            plugins: {
+              legend: { labels: { boxWidth: 10, color: "#475569", font: { size: 11, weight: "bold" } } },
+              tooltip: {
+                callbacks: {
+                  label: (context) => {
+                    const unit = context.dataset.yAxisID === "yCargo" ? payload.cargoUnit || "MT" : payload.emissionsUnit || "tCO2e";
+                    return `${context.dataset.label}: ${formatBreakdownValue(context.raw, unit)}`;
+                  },
+                },
+              },
+            },
+          },
+        });
+      });
+    }).catch(() => {});
+  }
+
+  function initializeScopeBreakdowns(root) {
+    const container = root || document;
+    initializeGriTrendCharts(container);
+    container.querySelectorAll(".scope-breakdown-toggle:not([data-bound])").forEach((button) => {
+      button.dataset.bound = "true";
+      button.addEventListener("click", () => {
+        const panel = button.parentElement ? button.parentElement.querySelector(".scope-breakdown-panel") : null;
+        if (!panel) return;
+        const isExpanded = button.getAttribute("aria-expanded") === "true";
+        if (isExpanded) {
+          button.setAttribute("aria-expanded", "false");
+          panel.classList.remove("is-open");
+          window.setTimeout(() => {
+            if (button.getAttribute("aria-expanded") !== "true") panel.hidden = true;
+          }, 220);
+        } else {
+          button.setAttribute("aria-expanded", "true");
+          panel.hidden = false;
+          window.requestAnimationFrame(() => {
+            panel.classList.add("is-open");
+            initializeScopeCharts(panel);
+          });
+        }
+      });
+    });
+  }
+
   function normalizeFieldCode(code) {
     return String(code || "").trim().toLowerCase();
   }
@@ -647,7 +1217,12 @@
     // happens to match a display column. Everything else ("under_input_column",
     // covering both manual per-field totals and every automatic one) aggregates
     // exactly one source field by construction, so it's safe to bucket by column.
-    const combinedResults = allResults.filter((result) => result.display_region === "below_monthly_table");
+    const combinedResults = isCargoHandledSheet(options)
+      ? []
+      : filterDisplayOnlyCombinedResults(
+        allResults.filter((result) => result.display_region === "below_monthly_table"),
+        options,
+      );
     const perColumnResults = allResults.filter((result) => result.display_region !== "below_monthly_table");
 
     // Each column now holds at most one result, so no per-result label is
@@ -693,13 +1268,15 @@
         <tr class="sheet-aggregate-row bg-slate-50 border-t border-slate-200">
           <td colspan="${displayFields.length + (isCalcMode ? 1 : 2)}" class="border border-slate-200 px-4 py-3">
             <div class="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-600">Combined totals</div>
-            <div class="flex flex-wrap gap-4">
-              ${combinedResults.map((result) => `
-                <div class="min-w-[160px] rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
-                  ${renderSheetResultFooterCell(result, true)}
-                </div>
-              `).join("")}
-            </div>
+            ${shouldGroupCombinedResults(combinedResults, options)
+              ? renderGroupedSheetResults(combinedResults, options)
+              : `<div class="flex flex-wrap gap-4">
+                ${combinedResults.map((result) => `
+                  <div class="min-w-[160px] rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                    ${renderSheetResultFooterCell(result, true)}
+                  </div>
+                `).join("")}
+              </div>`}
           </td>
         </tr>
       ` : ""}
@@ -732,8 +1309,10 @@
     return `
       <div class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
         <div class="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-600">Sheet results</div>
-        <div class="flex flex-wrap gap-x-6 gap-y-2">
-          ${results.map((result) => {
+        ${shouldGroupCombinedResults(results, options)
+          ? renderGroupedSheetResults(results, options)
+          : `<div class="flex flex-wrap gap-x-6 gap-y-2">
+            ${results.map((result) => {
             // Same status meta as the in-table FY TOTAL footer cell
             // (renderSheetResultFooterCell) -- badge color/label and
             // "needs_input hides its message inline, error doesn't" both
@@ -755,8 +1334,9 @@
                 ${result.message && meta.showInlineMessage ? `<div class="mt-1 text-[10px] font-medium ${meta.messageClass}">${escapeHtml(result.message)}</div>` : ""}
               </div>
             `;
-          }).join("")}
-        </div>
+            }).join("")}
+          </div>`}
+        ${renderGriTrendCharts(results, options)}
       </div>
     `;
   }
@@ -933,6 +1513,8 @@
       ...options,
       totalColumns: displayFields.length + 2,
     })).join(""));
+    initializeScopeBreakdowns(bodyEl);
+    initializeGriTrendCharts(bodyEl);
 
     const overflowResults = splitSheetResults(sheetResults).overflowResults;
 
@@ -1002,6 +1584,7 @@
     isEditableWorkbookField,
     formatSheetResultValue,
     renderSheetResultsOverflowHtml,
+    initializeScopeBreakdowns,
     splitSheetResults,
     aggregateOperandNames,
     render,

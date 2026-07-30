@@ -9,6 +9,7 @@ per-site override case.
 import pytest
 
 from app.modules.RPTBLD.service import (
+    _evaluate_computed_columns,
     pivot_report_data,
     validate_computed_columns,
     validate_metric_aliases,
@@ -157,6 +158,23 @@ class TestComputedColumnFormulaContextValidation:
     def test_nonexistent_formula_id_raises(self):
         with pytest.raises(ValueError, match="does not exist"):
             validate_computed_columns([{"id": "H", "label": "H", "formula_id": 999999999}])
+
+    def test_cross_site_kind_does_not_require_formula_id(self):
+        validate_computed_columns([
+            {"id": "pct_contribution_total_ghg", "label": "% Contribution", "kind": "cross_site"},
+            {"id": "variation_from_avg_intensity", "label": "Variation", "kind": "cross_site"},
+        ])
+
+    def test_cross_site_kind_is_not_evaluated_as_formula(self):
+        result = _evaluate_computed_columns(
+            [{"id": "pct_contribution_total_ghg", "label": "% Contribution", "kind": "cross_site"}],
+            metric_aliases={},
+            flat_index={},
+            site_id=None,
+            own_metrics={},
+            group_subtotal_names={},
+        )
+        assert result == {}
 
 
 class TestPivotReportDataFidelity:
@@ -355,10 +373,18 @@ class TestPivotReportDataFidelity:
         assert core["subtotal"]["computed"]["H"]["source"] == "computed"
         assert result["grand_total"]["computed"]["H"]["source"] == "computed"
 
-    def test_erroring_computed_column_produces_explicit_per_cell_error(
+    def test_computed_column_referencing_unaliased_metric_renders_blank_not_error(
         self, make_site, make_form, make_field, make_workflow, make_reporting_period,
         make_submission, make_submission_value, make_user, make_access_grant, created_objects,
     ):
+        """
+        power_specific is never aliased for either site here -- a genuinely-
+        absent metric (the same shape as a real site with no petrol/IFO
+        consumption). This must degrade to a blank cell (value=None,
+        error=None), same as kind="cross_site" columns already do for a
+        missing dependency -- not raise "Unknown formula variable", which
+        would be indistinguishable from an actual formula bug.
+        """
         template, user, site_a, site_b = self._setup(
             make_site, make_form, make_field, make_workflow, make_reporting_period,
             make_submission, make_submission_value, make_user, make_access_grant, created_objects,
@@ -372,13 +398,112 @@ class TestPivotReportDataFidelity:
             n_cell = row["computed"]["N"]
             assert n_cell["value"] is None
             assert n_cell["source"] == "computed"
-            assert n_cell["error"] is not None
-            assert "power_specific" in n_cell["error"]
+            assert n_cell["error"] is None
 
-        # One cell erroring doesn't take down the rest of the report.
+        # A blank cell elsewhere doesn't take down the rest of the report.
         row_a = rows_by_site[site_a.id]
         assert row_a["computed"]["H"]["error"] is None
         assert row_a["metrics"]["cargo"]["value"] == 24572656.0
+
+    def test_genuine_formula_evaluation_error_still_produces_explicit_error(
+        self, make_site, make_form, make_field, make_user, make_access_grant, created_objects,
+    ):
+        """
+        Distinguishes "missing token -> blank" (tested above) from "every
+        token present but evaluation itself fails" -- e.g. a division by
+        zero -- which must still surface as an explicit per-cell error, not
+        silently blank. Both metrics are aliased and non-None here, so this
+        exercises the try/except FormulaValidationError path in
+        _evaluate_computed_columns, not the missing-token guard.
+        """
+        from app.modules.FRMULA.model import FormulaVersion
+        from app.modules.FRMULA.service import create_formula, publish_formula_version
+        from app.modules.RPTBLD.service import create_report_template
+
+        site = make_site()
+        form, form_version = make_form()
+        cargo_field, cargo_fv = make_field(form, form_version, "cargo_code")
+        zero_field, zero_fv = make_field(form, form_version, "zero_code")
+
+        user = make_user()
+        make_access_grant(user, "report", scope_type="global", can_view=True)
+
+        formula = create_formula(
+            "Div By Zero", f"test-divzero-{user.id}", "cargo / scope2",
+            {"cargo": {}, "scope2": {}}, user.id, context="report",
+        )
+        created_objects.append(formula)
+        version = FormulaVersion.query.filter_by(formula_id=formula.id, version_number=1).one()
+        created_objects.append(version)
+        publish_formula_version(version.id, user.id)
+
+        config_json = {
+            "form_ids": [form.id],
+            "site_ids": [site.id],
+            "row_groups": [
+                {
+                    "id": "core", "label": "Core", "subtotal_label": "Total",
+                    "site_ids": [site.id], "include_in_grand_total": True, "is_reference_base": True,
+                },
+            ],
+            "metric_aliases": {
+                "cargo": [{"site_id": site.id, "field_ids": [cargo_field.id], "op": "single", "verified": True}],
+                "scope2": [{"site_id": site.id, "field_ids": [zero_field.id], "op": "single", "verified": True}],
+            },
+            "computed_columns": [{"id": "DIV0", "label": "Div By Zero", "formula_id": formula.id}],
+        }
+        # zero_field needs a real submitted value of 0 (not left blank) so
+        # this exercises an actual evaluation-time error, not the missing-
+        # token guard tested above.
+        from datetime import datetime, timezone
+        from app.modules.WFLWBLD.model import Workflow, WorkflowVersion
+        wf = Workflow(name="wf", code=f"wf-{user.id}", created_by=user.id, updated_by=user.id)
+        from app.database import db as _db
+        _db.session.add(wf)
+        _db.session.flush()
+        created_objects.append(wf)
+        wfv = WorkflowVersion(workflow_id=wf.id, version_number=1, published_at=datetime.now(timezone.utc), created_by=user.id)
+        _db.session.add(wfv)
+        _db.session.flush()
+        created_objects.append(wfv)
+        wf.current_version_id = wfv.id
+        _db.session.flush()
+
+        from app.modules.PERIOD.model import ReportingPeriod
+        from app.modules.SUBMIT.model import Submission, SubmissionValue
+
+        period = ReportingPeriod(site_id=site.id, year=2026, month=3, status="OPEN", created_by=user.id, updated_by=user.id)
+        _db.session.add(period)
+        _db.session.flush()
+        created_objects.append(period)
+
+        submission = Submission(
+            site_id=site.id, form_id=form.id, form_version_id=form_version.id,
+            reporting_period_id=period.id, workflow_version_id=wfv.id,
+            status="Approved", is_locked=True, current_level=1,
+            created_by=user.id, updated_by=user.id,
+        )
+        _db.session.add(submission)
+        _db.session.flush()
+        created_objects.append(submission)
+
+        cargo_value = SubmissionValue(submission_id=submission.id, field_id=cargo_field.id, field_version_id=cargo_fv.id, raw_value="1000", created_by=user.id, updated_by=user.id)
+        zero_value = SubmissionValue(submission_id=submission.id, field_id=zero_field.id, field_version_id=zero_fv.id, raw_value="0", created_by=user.id, updated_by=user.id)
+        _db.session.add_all([cargo_value, zero_value])
+        _db.session.flush()
+        created_objects.extend([cargo_value, zero_value])
+
+        template = create_report_template(
+            "Div Zero Report", f"test-divzero-tpl-{user.id}", None, "global", None, config_json, user.id,
+        )
+        created_objects.append(template)
+
+        result = pivot_report_data(template.id, user.id)
+        row = result["row_groups"][0]["site_rows"][0]
+        cell = row["computed"]["DIV0"]
+        assert cell["value"] is None
+        assert cell["error"] is not None
+        assert "zero" in cell["error"].lower() or "division" in cell["error"].lower()
 
 
 class TestPivotGrandTotalExclusion:
