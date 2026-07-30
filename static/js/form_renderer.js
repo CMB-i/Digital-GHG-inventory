@@ -41,6 +41,14 @@
     const formContainer = document.createElement("div");
     formContainer.className = "space-y-5 bg-white p-6 rounded-xl border border-slate-200/80 shadow-sm";
 
+    function fieldUploadLimitBytes(fieldConfig) {
+      const byteLimit = fieldConfig.max_file_size_bytes || fieldConfig.max_upload_size_bytes;
+      if (byteLimit) return parseInt(byteLimit, 10);
+      const mbLimit = fieldConfig.max_file_size_mb || fieldConfig.max_upload_size_mb;
+      if (mbLimit) return Math.floor(parseFloat(mbLimit) * 1024 * 1024);
+      return null;
+    }
+
     // Recalculate function to run client-side previews
     function recalculate() {
       let changed = true;
@@ -279,6 +287,13 @@
             fileInput.onchange = function (e) {
               const file = e.target.files[0];
               if (!file) return;
+              // UX-only hint; the upload endpoint enforces this server-side.
+              const maxBytes = fieldUploadLimitBytes(fieldConfig);
+              if (maxBytes && file.size > maxBytes) {
+                alert("Upload failed: file is too large.");
+                fileInput.value = "";
+                return;
+              }
 
               labelTxt.textContent = "Uploading " + file.name + "...";
               labelTxt.className = "mt-2 block text-xs font-bold text-indigo-600 animate-pulse";

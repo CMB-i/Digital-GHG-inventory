@@ -5,7 +5,7 @@ from app.common.permissions import has_permission
 from app.common.responses import success_response, error_response
 from app.modules.ACCESS.service import get_user_permissions
 from app.modules.SITEMST.model import Site
-from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument, SubmissionPackage
+from app.modules.SUBMIT.model import Submission, SubmissionValue, SubmissionPackage
 from app.modules.FORMBLD.service import get_form_version_fields
 from app.modules.APPROV.model import ApprovalAction, Issue
 from app.modules.APPROV.service import (
@@ -33,6 +33,7 @@ from app.modules.SUBMIT.service import (
     serialize_submission_value_issue,
     submission_value_issues_map,
     fy_start_year_for,
+    active_proofs_by_field,
 )
 
 MODULE_CODE = "APPROV"
@@ -384,9 +385,8 @@ def get_submission_details(submission_id):
             }
 
         # Load proofs
-        proofs = ProofDocument.query.filter_by(submission_id=submission_id, is_deleted=False).all()
         proofs_data = {}
-        for p in proofs:
+        for p in active_proofs_by_field(submission_id).values():
             proofs_data[p.field_id] = {
                 "id": p.id,
                 "original_name": p.original_name,

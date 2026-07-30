@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 
 from app.modules.AUDITL.model import AuditLog
 from app.modules.SUBMIT.model import ProofDocument, Submission, WorkbookFieldValue
@@ -13,6 +14,7 @@ def _login(client, user):
 def _workbook_scoped_submission(
     make_user, make_site, make_access_grant, make_form, make_field,
     make_reporting_period, make_workflow, make_workbook, make_submission,
+    file_field_config=None,
 ):
     submitter = make_user()
     unassigned = make_user()
@@ -20,7 +22,13 @@ def _workbook_scoped_submission(
     site = make_site()
     form, form_version = make_form()
     number_field, number_version = make_field(form, form_version, "field_a", field_type="number")
-    file_field, file_version = make_field(form, form_version, "proof_doc", field_type="file")
+    file_field, file_version = make_field(
+        form,
+        form_version,
+        "proof_doc",
+        field_type="file",
+        field_config=file_field_config,
+    )
     period = make_reporting_period(site)
     workflow_version = make_workflow([approver])
     workbook = make_workbook(form, site, workflow_version=workflow_version, submitters=[submitter])
@@ -44,7 +52,7 @@ def _workbook_scoped_submission(
 
 
 def _mock_save_file(monkeypatch):
-    def fake_save_file(file_storage):
+    def fake_save_file(file_storage, **kwargs):
         return {
             "storage_key": "proofs/fake-proof.txt",
             "original_name": file_storage.filename,
@@ -53,6 +61,12 @@ def _mock_save_file(monkeypatch):
         }
 
     monkeypatch.setattr("app.modules.SUBMIT.views.save_file", fake_save_file)
+
+
+def _use_temp_upload_folder(monkeypatch, tmp_path):
+    import app.common.file_storage as file_storage
+
+    monkeypatch.setattr(file_storage, "UPLOAD_FOLDER", str(tmp_path))
 
 
 def test_site_authorized_unassigned_user_cannot_mutate_workbook_scoped_submission(
@@ -82,6 +96,55 @@ def test_site_authorized_unassigned_user_cannot_mutate_workbook_scoped_submissio
     assert autosave.status_code == 400
     assert upload.status_code == 403
     assert submit.status_code == 400
+
+
+def test_upload_to_non_file_field_is_rejected(
+    client, monkeypatch, make_user, make_site, make_access_grant, make_form,
+    make_field, make_reporting_period, make_workflow, make_workbook,
+    make_submission, db_session,
+):
+    ctx = _workbook_scoped_submission(
+        make_user, make_site, make_access_grant, make_form, make_field,
+        make_reporting_period, make_workflow, make_workbook, make_submission,
+    )
+    db_session.commit()
+    _mock_save_file(monkeypatch)
+    _login(client, ctx["submitter"])
+
+    resp = client.post(
+        f"/module/SUBMIT/api/submissions/{ctx['submission'].id}/proof/field_a",
+        data={"file": (io.BytesIO(b"proof"), "proof.pdf", "application/pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 400
+    assert "only allowed for file fields" in resp.get_json()["error"]
+    assert ProofDocument.query.filter_by(submission_id=ctx["submission"].id).count() == 0
+
+
+def test_upload_rejects_mime_allowed_globally_but_not_by_field_contract(
+    client, monkeypatch, make_user, make_site, make_access_grant, make_form,
+    make_field, make_reporting_period, make_workflow, make_workbook,
+    make_submission, db_session,
+):
+    ctx = _workbook_scoped_submission(
+        make_user, make_site, make_access_grant, make_form, make_field,
+        make_reporting_period, make_workflow, make_workbook, make_submission,
+        file_field_config={"accepted_mime_types": ["application/pdf"]},
+    )
+    db_session.commit()
+    _mock_save_file(monkeypatch)
+    _login(client, ctx["submitter"])
+
+    resp = client.post(
+        f"/module/SUBMIT/api/submissions/{ctx['submission'].id}/proof/proof_doc",
+        data={"file": (io.BytesIO(b"a,b\n1,2\n"), "proof.csv", "text/csv")},
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 400
+    assert "not allowed for this field" in resp.get_json()["error"]
+    assert ProofDocument.query.filter_by(submission_id=ctx["submission"].id).count() == 0
 
 
 def test_workbook_with_zero_submitter_assignments_denies_site_permission_only_user(
@@ -120,6 +183,117 @@ def test_workbook_with_zero_submitter_assignments_denies_site_permission_only_us
     assert submit.status_code == 400
 
 
+def test_repeated_upload_keeps_one_active_proof_and_review_sees_newest(
+    client, monkeypatch, tmp_path, make_user, make_site, make_access_grant,
+    make_form, make_field, make_reporting_period, make_workflow, make_workbook,
+    make_submission, db_session, created_objects,
+):
+    ctx = _workbook_scoped_submission(
+        make_user, make_site, make_access_grant, make_form, make_field,
+        make_reporting_period, make_workflow, make_workbook, make_submission,
+        file_field_config={"accepted_mime_types": ["application/pdf"]},
+    )
+    make_access_grant(ctx["submitter"], "submission", scope_type="site", scope_site_id=ctx["site"].id, can_view=True, can_approve=True)
+    db_session.commit()
+    _use_temp_upload_folder(monkeypatch, tmp_path)
+    _login(client, ctx["submitter"])
+
+    first = client.post(
+        f"/module/SUBMIT/api/submissions/{ctx['submission'].id}/proof/proof_doc",
+        data={"file": (io.BytesIO(b"first"), "first.pdf", "application/pdf")},
+        content_type="multipart/form-data",
+    )
+    second = client.post(
+        f"/module/SUBMIT/api/submissions/{ctx['submission'].id}/proof/proof_doc",
+        data={"file": (io.BytesIO(b"second"), "second.pdf", "application/pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    proofs = ProofDocument.query.filter_by(
+        submission_id=ctx["submission"].id,
+        field_id=ctx["file_field"].id,
+    ).order_by(ProofDocument.uploaded_at.asc(), ProofDocument.id.asc()).all()
+    created_objects.extend(proofs)
+    active = [proof for proof in proofs if not proof.is_deleted]
+    superseded = [proof for proof in proofs if proof.is_deleted]
+    assert len(active) == 1
+    assert len(superseded) == 1
+    assert active[0].original_name == "second.pdf"
+    assert superseded[0].original_name == "first.pdf"
+
+    details = client.get(f"/module/SUBMIT/api/submissions/{ctx['submission'].id}")
+    review = client.get(f"/module/APPROV/api/submissions/{ctx['submission'].id}")
+    download = client.get(f"/module/SUBMIT/submissions/download/{active[0].storage_key}")
+
+    assert details.get_json()["values"]["proof_doc"]["original_name"] == "second.pdf"
+    assert review.get_json()["data"]["proofs"][str(ctx["file_field"].id)]["original_name"] == "second.pdf"
+    assert download.status_code == 200
+
+
+def test_failed_metadata_commit_removes_newly_saved_file(
+    client, monkeypatch, tmp_path, make_user, make_site, make_access_grant,
+    make_form, make_field, make_reporting_period, make_workflow, make_workbook,
+    make_submission, db_session,
+):
+    ctx = _workbook_scoped_submission(
+        make_user, make_site, make_access_grant, make_form, make_field,
+        make_reporting_period, make_workflow, make_workbook, make_submission,
+        file_field_config={"accepted_mime_types": ["application/pdf"]},
+    )
+    db_session.commit()
+    _use_temp_upload_folder(monkeypatch, tmp_path)
+    _login(client, ctx["submitter"])
+
+    def fail_audit(*args, **kwargs):
+        raise RuntimeError("forced metadata failure")
+
+    monkeypatch.setattr("app.modules.AUDITL.service.log_audit", fail_audit)
+
+    resp = client.post(
+        f"/module/SUBMIT/api/submissions/{ctx['submission'].id}/proof/proof_doc",
+        data={"file": (io.BytesIO(b"orphan"), "orphan.pdf", "application/pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 400
+    assert list(Path(tmp_path).rglob("*.*")) == []
+
+
+def test_field_specific_upload_size_limit_accepts_under_and_rejects_over(
+    client, monkeypatch, tmp_path, make_user, make_site, make_access_grant,
+    make_form, make_field, make_reporting_period, make_workflow, make_workbook,
+    make_submission, db_session, created_objects,
+):
+    ctx = _workbook_scoped_submission(
+        make_user, make_site, make_access_grant, make_form, make_field,
+        make_reporting_period, make_workflow, make_workbook, make_submission,
+        file_field_config={"accepted_mime_types": ["application/pdf"], "max_file_size_bytes": 6},
+    )
+    db_session.commit()
+    _use_temp_upload_folder(monkeypatch, tmp_path)
+    _login(client, ctx["submitter"])
+
+    under = client.post(
+        f"/module/SUBMIT/api/submissions/{ctx['submission'].id}/proof/proof_doc",
+        data={"file": (io.BytesIO(b"123456"), "under.pdf", "application/pdf")},
+        content_type="multipart/form-data",
+    )
+    over = client.post(
+        f"/module/SUBMIT/api/submissions/{ctx['submission'].id}/proof/proof_doc",
+        data={"file": (io.BytesIO(b"1234567"), "over.pdf", "application/pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert under.status_code == 200
+    assert over.status_code == 400
+    assert "too large" in over.get_json()["error"]
+    proofs = ProofDocument.query.filter_by(submission_id=ctx["submission"].id).all()
+    created_objects.extend(proofs)
+    assert [proof.original_name for proof in proofs if not proof.is_deleted] == ["under.pdf"]
+
+
 def test_workbook_assigned_user_can_autosave_upload_proof_and_submit(
     client, monkeypatch, make_user, make_site, make_access_grant, make_form,
     make_field, make_reporting_period, make_workflow, make_workbook,
@@ -144,7 +318,7 @@ def test_workbook_assigned_user_can_autosave_upload_proof_and_submit(
     submit = client.post(f"/module/SUBMIT/api/submissions/{ctx['submission'].id}/submit")
 
     assert autosave.status_code == 200
-    assert upload.status_code == 200
+    assert upload.status_code == 200, upload.get_json()
     assert submit.status_code == 200
 
     proof = ProofDocument.query.filter_by(submission_id=ctx["submission"].id).one()
@@ -177,7 +351,7 @@ def test_workbook_assigned_user_can_create_initial_draft(
         },
     )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.get_json()
     submission = db_session.get(Submission, resp.get_json()["data"]["submission_id"])
     created_objects.append(submission)
     assert submission.site_id == site.id
