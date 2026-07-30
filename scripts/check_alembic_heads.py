@@ -1,3 +1,5 @@
+# Read-only tooling check: this script inspects migration metadata and must not
+# commit data. If it gains a persisted mutation path, use scripts/_script_safety.py.
 """
 Fails if the Alembic migration chain has more than one head.
 

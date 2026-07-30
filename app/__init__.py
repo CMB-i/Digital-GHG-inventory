@@ -1,6 +1,7 @@
 from datetime import timezone
 from zoneinfo import ZoneInfo
 
+import click
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import text
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -122,14 +123,13 @@ def create_app(config_class=Config):
     def no_access():
         return render_template("no_access.html"), 403
 
-    with app.app_context():
+    @app.cli.command("seed-notifications")
+    def seed_notifications_command():
+        """Seed default notification configuration explicitly."""
         from app.modules.NOTIFY.service import seed_default_notification_configs
-        from sqlalchemy import inspect
-        try:
-            if inspect(db.engine).has_table("notification_configs"):
-                seed_default_notification_configs()
-        except Exception as e:
-            app.logger.warning(f"Failed to seed default notifications: {e}")
+
+        seed_default_notification_configs()
+        click.echo("Default notification configurations seeded.")
 
     return app
 

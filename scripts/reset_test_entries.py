@@ -20,6 +20,7 @@ Run manually:
 """
 
 import sys
+import argparse
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +30,7 @@ from sqlalchemy import inspect as sa_inspect, text
 
 from app import create_app
 from app.database import db
+from scripts._script_safety import add_safety_arguments, build_safety, guarded_commit
 
 
 def delete(table: str, where: str = "", params: dict = None) -> int:
@@ -40,15 +42,10 @@ def delete(table: str, where: str = "", params: dict = None) -> int:
 
 
 def run() -> None:
-    confirm = input(
-        "\nThis will delete all transactional/entry data (submissions, values, "
-        "issues, notifications, reporting periods, etc.) while leaving every "
-        "structural/config table and every user untouched.\n"
-        "Type CONFIRM to proceed: "
-    ).strip()
-    if confirm != "CONFIRM":
-        print("Aborted.")
-        return
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_safety_arguments(parser)
+    args = parser.parse_args()
+    safety = build_safety(args)
 
     app = create_app()
     with app.app_context():
@@ -81,8 +78,8 @@ def run() -> None:
             # Reporting periods (parent of submissions/submission_packages)
             n = delete("reporting_periods");  print(f"  reporting_periods:        {n} rows")
 
-            db.session.commit()
-            print("\nReset complete. All structural/config tables and users untouched.")
+            if guarded_commit(db.session, safety, "delete transactional and entry data"):
+                print("\nReset complete. All structural/config tables and users untouched.")
 
         except Exception as exc:
             db.session.rollback()

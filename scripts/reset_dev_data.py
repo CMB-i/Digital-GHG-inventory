@@ -10,6 +10,7 @@ Run manually:
 """
 
 import sys
+import argparse
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,7 @@ from sqlalchemy import inspect as sa_inspect, text
 
 from app import create_app
 from app.database import db
+from scripts._script_safety import add_safety_arguments, build_safety, guarded_commit
 
 ADMIN_EMAIL = "admin@example.com"
 
@@ -32,13 +34,10 @@ def delete(table: str, where: str = "", params: dict = None) -> int:
 
 
 def run() -> None:
-    confirm = input(
-        "\nThis will delete all data except the initial admin.\n"
-        "Type CONFIRM to proceed: "
-    ).strip()
-    if confirm != "CONFIRM":
-        print("Aborted.")
-        return
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_safety_arguments(parser)
+    args = parser.parse_args()
+    safety = build_safety(args)
 
     app = create_app()
     with app.app_context():
@@ -169,8 +168,8 @@ def run() -> None:
             else:
                 print(f"  WARNING: expected 11 admin rows, got {result.cnt if result else 0}")
 
-            db.session.commit()
-            print("\nReset complete.")
+            if guarded_commit(db.session, safety, "delete all data except the initial admin"):
+                print("\nReset complete.")
 
         except Exception as exc:
             db.session.rollback()
