@@ -424,7 +424,7 @@
         </div>
 
         <!-- tabbed lists deck (Fields & Value Sets) -->
-        <div class="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm min-h-[320px] flex flex-col">
+        <div id="operand-palette-card" class="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm min-h-[320px] flex flex-col">
           <div class="tab-deck">
             <button id="tab-fields" class="tab-btn active" onclick="switchSidebarTab('fields')">Fields</button>
             <button id="tab-valsets" class="tab-btn" onclick="switchSidebarTab('valsets')">Value Sets</button>
@@ -513,7 +513,7 @@
           <textarea id="expression" class="hidden" aria-hidden="true"></textarea>
 
           <!-- 3D Tactile calculator keys panel -->
-          <div class="flex flex-wrap items-center gap-1.5 p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl shadow-inner">
+          <div id="calculator-keys-panel" class="flex flex-wrap items-center gap-1.5 p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl shadow-inner">
             <button type="button" draggable="true" data-op=" + " onclick="insertOperator(' + ')" class="skeuo-key skeuo-key-op w-10 h-10 text-base">+</button>
             <button type="button" draggable="true" data-op=" - " onclick="insertOperator(' - ')" class="skeuo-key skeuo-key-op w-10 h-10 text-base">−</button>
             <button type="button" draggable="true" data-op=" * " onclick="insertOperator(' * ')" class="skeuo-key skeuo-key-op w-10 h-10 text-base">×</button>

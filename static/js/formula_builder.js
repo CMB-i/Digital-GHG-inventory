@@ -31,6 +31,13 @@ document.addEventListener("DOMContentLoaded", function () {
   const _returnVersionId = _fbUrlParams.get("version_id");
   const _openFormulaId = parseInt(_fbUrlParams.get("open_formula_id")) || null;
   const _openVersionId = parseInt(_fbUrlParams.get("open_version_id")) || null;
+  // Read-only viewer round trip (see FORMBLD form_builder.js's "View Formula"
+  // button): opens the *current published* version of a specific Formula
+  // straight into the editor with every editing control disabled. Distinct
+  // from _openFormulaId/_openVersionId above, which open a formula's latest
+  // (possibly draft) version for continued editing.
+  const _readonlyFormulaId = parseInt(_fbUrlParams.get("formula_id")) || null;
+  const _readonlyMode = _fbUrlParams.get("readonly") === "1" && _readonlyFormulaId !== null;
   // RPTBLD's computed-columns round trip (see RPTBLD/reports.js
   // goBuildComputedColumnFormula()): context=report switches the palette
   // this file draws from (see loadReportMetricsPalette()) instead of
@@ -664,6 +671,24 @@ document.addEventListener("DOMContentLoaded", function () {
           btnPublishFormula.classList.remove("hidden");
         }
 
+        // Read-only viewer: isPublished above already blocks every insertion
+        // path (insertToken/insertOperator/drop handlers all early-return on
+        // isPublished) and hides Save/Publish, but Delete, Validate Syntax,
+        // the form-context selector, and the operand palette are still live --
+        // lock those down too so the whole page reads as view-only.
+        if (_readonlyMode) {
+          editorStatusBadge.textContent = `v${data.version.version_number} (Read-only)`;
+          editorStatusBadge.className = "px-2 py-0.5 rounded-full font-bold uppercase text-[9px] bg-slate-200 text-slate-600";
+          if (btnDeleteFormula) btnDeleteFormula.classList.add("hidden");
+          if (btnValidate) btnValidate.classList.add("hidden");
+          if (validationResultContainer) validationResultContainer.classList.add("hidden");
+          if (formVersionSelect) formVersionSelect.disabled = true;
+          const calcKeysPanel = document.getElementById("calculator-keys-panel");
+          if (calcKeysPanel) calcKeysPanel.classList.add("opacity-40", "pointer-events-none");
+          const operandPaletteCard = document.getElementById("operand-palette-card");
+          if (operandPaletteCard) operandPaletteCard.classList.add("opacity-40", "pointer-events-none");
+        }
+
         scanVariablesAndInitPreview();
       })
       .catch(err => {
@@ -1258,10 +1283,39 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
+  // ── Read-only viewer: resolve formula_id → its current published version ──
+  // /api's list already carries current_version_id per formula, so no new
+  // backend endpoint is needed -- this is the same field editFormula() (list
+  // view's "Edit / Details") reads, just scoped to the one formula and always
+  // the *current* (published) version rather than whichever one a click sends.
+  function openFormulaReadonly(formulaId) {
+    if (landingView) landingView.classList.add("hidden");
+    if (listView) listView.classList.add("hidden");
+    if (editorView) editorView.classList.remove("hidden");
+
+    fetch("/module/FRMULA/api")
+      .then(res => res.json())
+      .then(data => {
+        const target = (data || []).find(f => f.id === formulaId);
+        if (!target || !target.current_version_id) {
+          throw new Error("Formula has no published version.");
+        }
+        loadVersionDetails(target.current_version_id);
+      })
+      .catch(err => {
+        console.error("Error loading formula for read-only view:", err);
+        showToast("This formula has no published version to view.", "error");
+        if (editorView) editorView.classList.add("hidden");
+        if (landingView) landingView.classList.remove("hidden");
+      });
+  }
+
   // ── Initial load ──────────────────────────────────────────────────────
   const initialPaletteLoad = _isReportContext ? loadReportMetricsPalette() : loadFormFields(formVersionSelect.value);
   initialPaletteLoad.then(() => {
-    if (_openVersionId) {
+    if (_readonlyMode) {
+      openFormulaReadonly(_readonlyFormulaId);
+    } else if (_openVersionId) {
       if (landingView) landingView.classList.add("hidden");
       if (listView) listView.classList.add("hidden");
       if (editorView) editorView.classList.remove("hidden");
