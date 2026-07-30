@@ -1820,8 +1820,10 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("prop-section-file").classList.add("hidden");
     const _fHint = document.getElementById("formula-publish-hint");
     const _fOk   = document.getElementById("formula-status-ok");
+    const _fView = document.getElementById("btn-view-formula");
     if (_fHint) _fHint.classList.add("hidden");
     if (_fOk)   _fOk.classList.add("hidden");
+    if (_fView) _fView.classList.add("hidden");
 
     const config = field.field_config || {};
 
@@ -1871,6 +1873,7 @@ document.addEventListener("DOMContentLoaded", function () {
       const formulaSelect = document.getElementById("prop-formula");
       const formulaHint   = document.getElementById("formula-publish-hint");
       const formulaOk     = document.getElementById("formula-status-ok");
+      const formulaView   = document.getElementById("btn-view-formula");
       const calcUnitInput = document.getElementById("prop-calc-unit");
       const calcDecimalsInput = document.getElementById("prop-calc-decimals");
       if (calcDecimalsInput) {
@@ -1890,9 +1893,11 @@ document.addEventListener("DOMContentLoaded", function () {
         formulaSelect.value = config.formula_version_id;
         if (formulaHint) formulaHint.classList.add("hidden");
         if (formulaOk)   formulaOk.classList.remove("hidden");
+        if (formulaView) formulaView.classList.remove("hidden");
       } else {
         if (formulaHint)   formulaHint.classList.remove("hidden");
         if (formulaOk)     formulaOk.classList.add("hidden");
+        if (formulaView)   formulaView.classList.add("hidden");
       }
       // Unit is a property of the field's output, independent of whether a
       // formula happens to be attached yet -- always populated, never cleared
@@ -2389,6 +2394,13 @@ document.addEventListener("DOMContentLoaded", function () {
       bulkActionsBar.querySelectorAll("input, select, button").forEach(el => { el.disabled = !isEditable; });
     }
     formWorkspace.querySelectorAll(".field-bulk-checkbox").forEach(cb => { cb.disabled = !isEditable; });
+
+    // View Formula is a read-only action -- unlike Create New Formula/Open
+    // Value Sets (which lead to mutations and stay locked), it should stay
+    // pressable even when this sheet is Published and everything else above
+    // just got disabled.
+    const btnViewFormula = document.getElementById("btn-view-formula");
+    if (btnViewFormula) btnViewFormula.disabled = false;
   }
 
   if (btnEditAsDraft) {
@@ -2761,6 +2773,35 @@ document.addEventListener("DOMContentLoaded", function () {
         "&version_id=" + selectedVersionId +
         "&field_id=" + encodeURIComponent(selectedFieldCode || "");
       window.location.href = url;
+    };
+  }
+
+  // View Formula nav button -- opens the currently attached formula version's
+  // parent Formula in the Formula Builder's read-only viewer. formula_version_id
+  // (stored on the field) identifies a FormulaVersion, but the viewer URL wants
+  // the owning Formula's id, so this resolves that one hop server-side before
+  // navigating (same lookup ensureFormulaOptionPresent already uses for labels).
+  const btnViewFormula = document.getElementById("btn-view-formula");
+  if (btnViewFormula) {
+    btnViewFormula.onclick = function (e) {
+      e.preventDefault();
+      const versionId = document.getElementById("prop-formula").value;
+      if (!versionId) return;
+      fetch(`/module/FRMULA/api/version/${versionId}`)
+        .then(res => res.json())
+        .then(resData => {
+          if (!resData || !resData.formula) throw new Error("Formula not found in response");
+          const url = "/module/FRMULA/?formula_id=" + resData.formula.id +
+            "&readonly=1" +
+            "&return_to=" + encodeURIComponent("/module/FORMBLD/") +
+            "&form_id=" + selectedFormId +
+            "&version_id=" + selectedVersionId +
+            "&field_id=" + encodeURIComponent(selectedFieldCode || "");
+          window.location.href = url;
+        })
+        .catch(() => {
+          showToast("Error opening formula for viewing.", "error");
+        });
     };
   }
 
