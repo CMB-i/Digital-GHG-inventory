@@ -8,28 +8,36 @@ This README is the single source of truth for the project. There is no separate 
 
 ## Stack
 
-| Layer | Technology |
-|---|---|
-| Backend | Python 3 / Flask |
-| Database | PostgreSQL |
-| ORM | SQLAlchemy via Flask-SQLAlchemy |
-| Migrations | Alembic directly, not Flask-Migrate |
-| Templates | Jinja2 |
-| Styling | Tailwind CSS via CDN, no build step |
-| JavaScript | Vanilla JS, no React and no npm |
-| WSGI server | Waitress |
-| Formula engine | simpleeval |
-| Excel export | openpyxl |
+
+| Layer          | Technology                          |
+| -------------- | ----------------------------------- |
+| Backend        | Python 3 / Flask                    |
+| Database       | PostgreSQL                          |
+| ORM            | SQLAlchemy via Flask-SQLAlchemy     |
+| Migrations     | Alembic directly, not Flask-Migrate |
+| Templates      | Jinja2                              |
+| Styling        | Tailwind CSS via CDN, no build step |
+| JavaScript     | Vanilla JS, no React and no npm     |
+| WSGI server    | Waitress                            |
+| Formula engine | simpleeval                          |
+| Excel export   | openpyxl                            |
+
 
 ---
 
+
+
 ## Local Setup
+
+
 
 ### Prerequisites
 
 - Python 3.10+
 - PostgreSQL running locally, or access to a shared development database
 - No Docker required
+
+
 
 ### 1. Clone the repository and create a virtual environment
 
@@ -38,12 +46,16 @@ git clone <repo-url>
 cd Digital-GHG-inventory
 ```
 
+
+
 #### macOS / Linux
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
+
+
 
 #### Windows
 
@@ -52,11 +64,15 @@ python -m venv .venv
 .venv\Scripts\activate
 ```
 
+
+
 ### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
+
+
 
 ### 3. Configure environment variables
 
@@ -71,6 +87,8 @@ DATABASE_URL=postgresql://ghg_user:ghg_password@localhost:5432/ghg_inventory
 SECRET_KEY=change-me-in-production
 FLASK_ENV=development
 ```
+
+
 
 ### 4. Run database migrations
 
@@ -117,12 +135,18 @@ For a production-style startup using Waitress:
 waitress-serve --call app:create_app
 ```
 
+
+
 ### Health Checks
 
-| URL | Expected response |
-|---|---|
-| `/health` | `{"status": "ok"}` |
+
+| URL          | Expected response           |
+| ------------ | --------------------------- |
+| `/health`    | `{"status": "ok"}`          |
 | `/db-health` | `{"database": "connected"}` |
+
+
+
 
 ### Financial Year Model
 
@@ -136,12 +160,14 @@ Example: `FY 2024 = April 2024 – March 2025`. This has been stable and unchang
 
 ### Reporting Period Statuses
 
-| Status | Submitter can enter data | Reviewer can act |
-|---|---:|---:|
-| `OPEN` | Yes | No |
-| `REOPENED` | Yes | No |
-| `SUBMISSION_CLOSED` | No | No |
-| `LOCKED` | No | No |
+
+| Status              | Submitter can enter data | Reviewer can act |
+| ------------------- | ------------------------ | ---------------- |
+| `OPEN`              | Yes                      | No               |
+| `REOPENED`          | Yes                      | No               |
+| `SUBMISSION_CLOSED` | No                       | No               |
+| `LOCKED`            | No                       | No               |
+
 
 This four-state model and its transitions have never changed across the project's visible history. `transition_period` locks the period row (`SELECT ... FOR UPDATE`), and `submit_submission` re-checks the period's status under its own lock on that same row right before its final transition, so a period lock landing mid-submit and a submission racing a period lock can no longer both win.
 
@@ -156,10 +182,12 @@ Always inspect the generated migration before running it. The migration chain mu
 
 ### Development Scripts
 
-| Script | Purpose |
-|---|---|
-| `scripts/seed.py` | Seeds a development admin account and global AccessMatrix permissions |
+
+| Script                      | Purpose                                                                                                                                                    |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/seed.py`           | Seeds a development admin account and global AccessMatrix permissions                                                                                      |
 | `scripts/_script_safety.py` | Required safety convention for any new mutating operational script: explicit environment, dry-run support, and confirmed commits. See `scripts/README.md`. |
+
 
 No `scripts/test_*.py` files are permitted. Real tests belong in `tests/`; manual smoke scripts must use a non-`test_` name and follow the script-safety pattern.
 
@@ -177,24 +205,28 @@ New features should come with tests going forward — this is a lightweight expe
 
 ### Module Prefix Reference
 
-| URL prefix | Module |
-|---|---|
-| `/login`, `/logout` | `USRMGMT` authentication |
-| `/module/ACCESS/` | AccessMatrix management |
-| `/module/APPROV/` | Approval queue and package review |
-| `/module/FORMBLD/` | Sheet Builder |
-| `/module/FRMULA/` | Formula Builder |
-| `/module/NOTIFY/` | Notifications |
-| `/module/PERIOD/` | Reporting periods |
-| `/module/RPTBLD/` | Report Builder |
-| `/module/SITEMST/` | Site management |
-| `/module/SUBMIT/` | Submitter data-entry runtime |
-| `/module/USRMGMT/` | User management |
-| `/module/VALSET/` | Value Set Builder |
-| `/module/WFLWBLD/` | Approval Path Builder |
-| `/workbooks/` | Workbook management |
+
+| URL prefix          | Module                            |
+| ------------------- | --------------------------------- |
+| `/login`, `/logout` | `USRMGMT` authentication          |
+| `/module/ACCESS/`   | AccessMatrix management           |
+| `/module/APPROV/`   | Approval queue and package review |
+| `/module/FORMBLD/`  | Sheet Builder                     |
+| `/module/FRMULA/`   | Formula Builder                   |
+| `/module/NOTIFY/`   | Notifications                     |
+| `/module/PERIOD/`   | Reporting periods                 |
+| `/module/RPTBLD/`   | Report Builder                    |
+| `/module/SITEMST/`  | Site management                   |
+| `/module/SUBMIT/`   | Submitter data-entry runtime      |
+| `/module/USRMGMT/`  | User management                   |
+| `/module/VALSET/`   | Value Set Builder                 |
+| `/module/WFLWBLD/`  | Approval Path Builder             |
+| `/workbooks/`       | Workbook management               |
+
 
 ---
+
+
 
 ## Module Reference
 
@@ -234,7 +266,7 @@ A workbook groups published sheets (`WorkbookForm`), is assigned to sites (`Work
 
 Readiness now revalidates each assigned submitter's actual `submission` permission at that workbook's site via `has_permission()`, not just the existence of a `WorkbookSiteSubmitter` row. An invalid assignment blocks readiness with a specific message naming the user/site that needs fixing.
 
-**WKBK's simplified chain editor (`api_save_site_chain` in `WKBK/views.py`) is currently the only accessible way to configure approval chains.** The standalone Approval Path Builder (WFLWBLD, below) still exists in code, and its service layer (`save_workflow_draft_levels`, `publish_workflow_version`, etc.) is still used internally — WKBK's chain editor calls into it directly rather than duplicating its validation. But WFLWBLD's own UI has been disabled, since multi-level/`SEQUENTIAL` chains aren't needed at the current complexity level. It can be re-enabled by removing the `before_request` block at the top of `WFLWBLD/views.py` (and restoring its nav/dashboard links) if that need arises — see [Consistency Guidelines](#consistency-guidelines).
+**WKBK's simplified chain editor (**`api_save_site_chain` **in** `WKBK/views.py`**) is currently the only accessible way to configure approval chains.** The standalone Approval Path Builder (WFLWBLD, below) still exists in code, and its service layer (`save_workflow_draft_levels`, `publish_workflow_version`, etc.) is still used internally — WKBK's chain editor calls into it directly rather than duplicating its validation. But WFLWBLD's own UI has been disabled, since multi-level/`SEQUENTIAL` chains aren't needed at the current complexity level. It can be re-enabled by removing the `before_request` block at the top of `WFLWBLD/views.py` (and restoring its nav/dashboard links) if that need arises — see [Consistency Guidelines](#consistency-guidelines).
 
 Deactivating a workbook, or deleting the `Workflow` it points to, now both have dependency checks — `deactivate_workbook` refuses if any in-progress submission (`Draft`/`Submitted`/`Resubmitted`/`Under Review`/`Changes Requested`) still depends on it via the workbook's assigned sheets/sites, and `delete_workflow` (see WFLWBLD below) refuses if an active `Workbook` still points to it. Both raise a clear error instead of silently stranding a submission or workbook.
 
@@ -244,7 +276,7 @@ Permission checks on every WKBK endpoint — including publish and site/submitte
 
 Fields (`Field`/`FieldVersion`) are properly versioned — publishing a new draft doesn't retroactively change what a live submission sees, because submissions pin to a specific `form_version_id`.
 
-**`FormSection` is now versioned**, the same way fields are — it carries a `form_version_id` (unique per `code` within a version), so editing sections while drafting a new version (rename, reorder, remove) is isolated to the draft and no longer retroactively mutates what's currently live for the *published* version.
+`FormSection` **is now versioned**, the same way fields are — it carries a `form_version_id` (unique per `code` within a version), so editing sections while drafting a new version (rename, reorder, remove) is isolated to the draft and no longer retroactively mutates what's currently live for the *published* version.
 
 Publish readiness for a sheet requires non-empty fields, dropdown fields to have options, and calculated fields to reference a *published* formula version. Field deletion — whether one field omitted from a re-saved draft (`save_form_draft_fields`), or the whole cascade from deleting a sheet (`delete_sheet`) — is blocked up front if any formula still references the field being removed, via `_formulas_referencing_field`'s scan of published formula tokens; the caller gets a clear error naming the blocking formula(s) instead of the field silently disappearing out from under them.
 
@@ -254,7 +286,7 @@ Publish readiness for a sheet requires non-empty fields, dropdown fields to have
 
 The real, validated writer for workflow levels/approvers (`save_workflow_draft_levels`): requires a valid `approval_mode`, ≥1 approver per level, active/existing users, real sites for site-scoped approvers, and unique sequence numbers for `SEQUENTIAL` mode. Publishing requires ≥1 level, ≥1 approver per level, all active, unique sequence numbers where relevant.
 
-**`get_eligible_level_approvers` now filters on `is_active` as well as `is_deleted`**, matching the check `publish_workflow_version` already applies at publish time — if every approver at a level is later deactivated, that level is correctly treated as having no eligible approver instead of silently matching deactivated users.
+`get_eligible_level_approvers` **now filters on** `is_active` **as well as** `is_deleted`, matching the check `publish_workflow_version` already applies at publish time — if every approver at a level is later deactivated, that level is correctly treated as having no eligible approver instead of silently matching deactivated users.
 
 `update_details` (the workflow-detail edit endpoint) no longer reads or writes `form.description["workflow_id"]` / `["sites"]` — the legacy write path that fed the standalone builder's "Covered Sites" checkbox has been removed (it only ever updates `Workflow.name` now). Site-eligibility routing runs exclusively through `WorkbookSite`, which this never affected either way; the checkbox UI itself still exists in `workflow_builder.js`, but since the module's UI is fully disabled (see above), it's unreachable and its data no longer goes anywhere.
 
@@ -302,7 +334,7 @@ Records status changes and resolves human-readable entity descriptions for the a
 
 ### NOTIFY — notifications (in-app, desktop, email, WhatsApp)
 
-Multi-channel routing with per-user preferences. **`resolve_recipients`'s role-based and dynamic (`site_admins`) recipient resolution now calls the shared `get_user_permissions()` / `has_permission()`** instead of hand-rolling its own `AccessMatrix` query, matching the RPTBLD permission-resolver remediation (see [Consistency Guidelines](#consistency-guidelines)) — so a user with a blanket "all entities" grant is no longer silently skipped as a notification recipient.
+Multi-channel routing with per-user preferences. `resolve_recipients`**'s role-based and dynamic (**`site_admins`**) recipient resolution now calls the shared** `get_user_permissions()` **/** `has_permission()` instead of hand-rolling its own `AccessMatrix` query, matching the RPTBLD permission-resolver remediation (see [Consistency Guidelines](#consistency-guidelines)) — so a user with a blanket "all entities" grant is no longer silently skipped as a notification recipient.
 
 Email/WhatsApp delivery attempts are persisted as `Notification` rows with `channel == "email"` / `"whatsapp"`. Their outcome is stored in `delivery_status` (`"sent"` or `"failed"`) and `delivery_error`; in-app and desktop rows default to `"sent"` because they are database inserts rather than external-provider sends.
 
@@ -332,19 +364,21 @@ Password reset OTPs are rate-limited and locked after repeated failed verificati
 
 ---
 
+
+
 ## Key Design Rules
 
 These are enforced (or intended to be enforced) throughout the codebase. Violations should be flagged in code review.
 
 - **AccessMatrix is the permission source of truth.** Call `has_permission()` / `get_user_permissions()` from the `ACCESS` module for every authorization check. Do not hand-roll a narrower `AccessMatrix` query and do not use hardcoded roles — see [Known Gaps](#known-gaps) for where this is currently violated.
 - **Every state-changing request needs CSRF.** Application-wide CSRF validation covers `POST`, `PUT`, `PATCH`, and `DELETE` with a session token rendered into the page as `<meta name="csrf-token">` and sent by `static/js/csrf.js` as `X-CSRFToken` for same-origin fetch mutations. There are no route or blueprint exemptions.
-- **`WorkbookSite` is the authoritative source for workbook-site assignment.** The legacy `form.description["sites"]` field must never be read for runtime routing (it is still, unfortunately, actively *written* by one dead-end UI — see the WFLWBLD module notes and [Known Gaps](#known-gaps)).
-- **`WorkbookSiteSubmitter` gates submitter workbook visibility, with no AccessMatrix fallback.** Seeing/submitting a workbook at a site requires both an AccessMatrix `submission` grant at that site *and* an explicit `WorkbookSiteSubmitter` row for that workbook/site — AccessMatrix access alone is never enough. `WorkbookSiteSubmitter` is a deliberate, explicit assignment ("this exact person submits this exact workbook"), not a permission proxy. When a user has the AccessMatrix grant but no `WorkbookSiteSubmitter` row, this is surfaced explicitly (`needs_submitter_assignment` from `get_annual_workbook_options` / `get_spoc_sheets_buckets`) rather than left as an unexplained empty state.
-- **`Workbook.workflow_id` is the approval path source.** Form-level workflow metadata (`form.description["workflow_id"]`) must never be used for submission routing — it is also still actively written by the same dead-end UI noted above, but never read for routing.
-- **`WorkbookForm` is the source of workbook sheets.** Runtime sheet tabs must come from the selected workbook's configured sheet list.
-- **No manual `ALTER TABLE`.** All schema changes must go through Alembic migrations, and the migration chain must remain linear with a single head (see [Known Gaps](#known-gaps) — this isn't mechanically enforced yet).
+- `WorkbookSite` **is the authoritative source for workbook-site assignment.** The legacy `form.description["sites"]` field must never be read for runtime routing (it is still, unfortunately, actively *written* by one dead-end UI — see the WFLWBLD module notes and [Known Gaps](#known-gaps)).
+- `WorkbookSiteSubmitter` **gates submitter workbook visibility, with no AccessMatrix fallback.** Seeing/submitting a workbook at a site requires both an AccessMatrix `submission` grant at that site *and* an explicit `WorkbookSiteSubmitter` row for that workbook/site — AccessMatrix access alone is never enough. `WorkbookSiteSubmitter` is a deliberate, explicit assignment ("this exact person submits this exact workbook"), not a permission proxy. When a user has the AccessMatrix grant but no `WorkbookSiteSubmitter` row, this is surfaced explicitly (`needs_submitter_assignment` from `get_annual_workbook_options` / `get_spoc_sheets_buckets`) rather than left as an unexplained empty state.
+- `Workbook.workflow_id` **is the approval path source.** Form-level workflow metadata (`form.description["workflow_id"]`) must never be used for submission routing — it is also still actively written by the same dead-end UI noted above, but never read for routing.
+- `WorkbookForm` **is the source of workbook sheets.** Runtime sheet tabs must come from the selected workbook's configured sheet list.
+- **No manual** `ALTER TABLE`**.** All schema changes must go through Alembic migrations, and the migration chain must remain linear with a single head (see [Known Gaps](#known-gaps) — this isn't mechanically enforced yet).
 - **Missing or blank values are never treated as zero** in formula calculations. The formula evaluator excludes blank/missing values from evaluation inputs rather than coercing them.
-- **Calculated values on a non-locked submission are not fully pinned to their `form_version`'s formula — this is a deliberate, narrow exception, not a pattern to extend.** `Submission.form_version_id` never changes after creation, but a calculated field's `field_config.formula_version_id` is a live, in-place edit (unlike the `Formula` row itself, which is never edited in place once published — see FRMULA above). When that live formula reference changes to a genuinely different `Formula`, `recalc_or_flag_submissions_for_formula_swap` (`SUBMIT/service.py`) recalculates every Draft/Submitted/Resubmitted/Under Review/Changes Requested submission on that sheet against the *current* live formula, not the formula that was live when each row was entered. Only raw input values, and calculated values on submissions already `Approved` + `is_locked=True`, are truly immutable — locked submissions are never silently recomputed; they're flagged `needs_recalc_review` instead, gated by the existing final-approval check. Do not generalize this "recompute against current state" behavior to any other versioned entity (`Form`, `Workflow`, `ValueSet`) — those remain fully pinned to their version at all times.
+- **Calculated values on a non-locked submission are not fully pinned to their** `form_version`**'s formula — this is a deliberate, narrow exception, not a pattern to extend.** `Submission.form_version_id` never changes after creation, but a calculated field's `field_config.formula_version_id` is a live, in-place edit (unlike the `Formula` row itself, which is never edited in place once published — see FRMULA above). When that live formula reference changes to a genuinely different `Formula`, `recalc_or_flag_submissions_for_formula_swap` (`SUBMIT/service.py`) recalculates every Draft/Submitted/Resubmitted/Under Review/Changes Requested submission on that sheet against the *current* live formula, not the formula that was live when each row was entered. Only raw input values, and calculated values on submissions already `Approved` + `is_locked=True`, are truly immutable — locked submissions are never silently recomputed; they're flagged `needs_recalc_review` instead, gated by the existing final-approval check. Do not generalize this "recompute against current state" behavior to any other versioned entity (`Form`, `Workflow`, `ValueSet`) — those remain fully pinned to their version at all times.
 - **Reports use only approved and locked values.** RPTBLD's report query filters on `status == "Approved"` and `is_locked == True`.
 - **Soft delete by default.** Most records use an `is_deleted` flag with partial unique indexes. Hard delete is only allowed for assignment join rows where appropriate.
 - **No hardcoded site names, form names, GHG categories, workflow labels, or role names in business logic.**
@@ -352,40 +386,40 @@ These are enforced (or intended to be enforced) throughout the codebase. Violati
 
 ---
 
+
+
 ## Consistency Guidelines
 
 Added to prevent the kind of drift documented in [Known Gaps](#known-gaps) from recurring.
 
-1. **Check `app/common/` before adding a new constant.** Before introducing a new status enum, permission check, or date-math constant (FY boundaries, period math, etc.), check whether one already exists in `app/common/` or in a sibling module. Extend or import the existing one instead of writing a parallel copy.
-
-2. **`current_version_id` always means "the currently published version," app-wide.** `Form.current_version_id`, `Workflow.current_version_id`, `ValueSet.current_version_id`, and `Formula.current_version_id` are all set only at publish time. `Field.current_version_id` is the one exception — it's set on every draft save, published or not, which is inconsistent with every sibling field of the same name. This is believed to be drift from multiple contributors, not intentional. It's currently harmless (nothing reads `Field.current_version_id` today), but any new code must follow the app-wide convention ("currently published"), not `Field`'s current behavior. Fixing `Field` itself is low priority since nothing depends on it, but don't copy its pattern.
-
-3. **Never reimplement `AccessMatrix` scoping logic.** Always call `has_permission()` / `get_user_permissions()` from `ACCESS`. Two modules (RPTBLD and, until recently, NOTIFY) independently hand-rolled their own narrower version of this query and both got it wrong the same way (missing the `entity_type == "all"` wildcard) — see [Known Gaps](#known-gaps).
-
+1. **Check** `app/common/` **before adding a new constant.** Before introducing a new status enum, permission check, or date-math constant (FY boundaries, period math, etc.), check whether one already exists in `app/common/` or in a sibling module. Extend or import the existing one instead of writing a parallel copy.
+2. `current_version_id` **always means "the currently published version," app-wide.** `Form.current_version_id`, `Workflow.current_version_id`, `ValueSet.current_version_id`, and `Formula.current_version_id` are all set only at publish time. `Field.current_version_id` is the one exception — it's set on every draft save, published or not, which is inconsistent with every sibling field of the same name. This is believed to be drift from multiple contributors, not intentional. It's currently harmless (nothing reads `Field.current_version_id` today), but any new code must follow the app-wide convention ("currently published"), not `Field`'s current behavior. Fixing `Field` itself is low priority since nothing depends on it, but don't copy its pattern.
+3. **Never reimplement** `AccessMatrix` **scoping logic.** Always call `has_permission()` / `get_user_permissions()` from `ACCESS`. Two modules (RPTBLD and, until recently, NOTIFY) independently hand-rolled their own narrower version of this query and both got it wrong the same way (missing the `entity_type == "all"` wildcard) — see [Known Gaps](#known-gaps).
 4. **One validated backend can serve more than one UI — never fork the validation logic between them.** WKBK's per-workbook chain editor calls into WFLWBLD's validated service functions (`save_workflow_draft_levels`'s helpers, via `save_site_chain_levels`) rather than re-implementing its own weaker rules. Right now this is less about two live UIs sharing a backend and more about one: the standalone WFLWBLD Approval Path Builder's own UI is currently disabled (see the WKBK module section above), so WKBK's chain editor is the only interface to this backend today. The rule still applies going forward — if the standalone UI is re-enabled, or another simplified UI is added later, it must call the same validated functions rather than duplicating them.
-
-   `Formula` is a second, deliberate instance of this same rule, not a special case: `context` (`"field"` / `"report"`) lets FORMBLD's calculated fields and RPTBLD's computed report columns share one `Formula`/`FormulaVersion` schema and one `evaluate_formula()`, with only `publish_formula_version`'s token-validation step branching per context. **The `context` branch in `publish_formula_version` is not dead code or an accidental fork — it is the whole point.** Don't "simplify" it back down to a single validation path, and don't add a third caller without extending that same branch rather than writing a parallel validator. RPTBLD's own Formula Builder round trip (`reports.js` → `/module/FRMULA/?context=report&report_template_id=...` → `formula_builder.js`) is the UI-reuse half of this: it navigates to FRMULA's existing page rather than forking its contenteditable chip engine into `reports.js`, the same way WKBK's chain editor reuses WFLWBLD's backend instead of reimplementing it.
-
+  `Formula` is a second, deliberate instance of this same rule, not a special case: `context` (`"field"` / `"report"`) lets FORMBLD's calculated fields and RPTBLD's computed report columns share one `Formula`/`FormulaVersion` schema and one `evaluate_formula()`, with only `publish_formula_version`'s token-validation step branching per context. **The** `context` **branch in** `publish_formula_version` **is not dead code or an accidental fork — it is the whole point.** Don't "simplify" it back down to a single validation path, and don't add a third caller without extending that same branch rather than writing a parallel validator. RPTBLD's own Formula Builder round trip (`reports.js` → `/module/FRMULA/?context=report&report_template_id=...` → `formula_builder.js`) is the UI-reuse half of this: it navigates to FRMULA's existing page rather than forking its contenteditable chip engine into `reports.js`, the same way WKBK's chain editor reuses WFLWBLD's backend instead of reimplementing it.
 5. **Shared vocabularies that already exist — extend these, don't fork them:**
-   - **Submission status** — `STATUS_DRAFT` / `STATUS_SUBMITTED` / `STATUS_RESUBMITTED` / `STATUS_UNDER_REVIEW` / `STATUS_CHANGES_REQUESTED` / `STATUS_APPROVED` / `STATUS_REJECTED`, plus the `EDITABLE_SUBMISSION_STATUSES` / `REVIEWABLE_STATUSES` groupings and `SUBMISSION_STATUS_LABELS`, all defined once in `app/common/submission_status.py` and imported by both `SUBMIT/service.py` and `APPROV/service.py`. `PERIOD` and `VALSET` have their own, separate status lifecycles and are not part of this vocabulary — don't fold them in.
-   - **Calculated-field status** — `calc_status` (`"ok"` / `"error"` / `"pending"`), defined in `SUBMIT/service.py`. This is the canonical vocabulary produced by the shared `resolve_calculated_fields` resolver (used by both the persisted and preview paths) for "can this calculated field's value be trusted right now." The annual sheet-result path (`_compose_sheet_results`) still has its own, different vocabulary (`not_configured`/`needs_input`/`calculated`/`error`/`partial`) since it resolves a structurally different value shape — new code resolving ordinary per-row calculated fields should use `calc_status`'s vocabulary, not invent a third. `partial` means a `SUM_MONTHS`-style FY aggregate computed from whatever months are present (`blank_policy` defaults to allowing this; an explicit `blank_policy: "strict"` on the field still blocks and returns `needs_input` instead). `calculated` means literally every month is present — the two never overlap. This partial-computation behavior is specific to cross-month aggregation in `_compose_sheet_results`; `resolve_calculated_fields` (row-level formulas like `Total = A * B`) is untouched and still returns `pending` for a missing same-row operand, since that genuinely can't be computed at all, partially or otherwise.
-   - **Cell state** — `CELL_STATE_BLANK_EDITABLE` / `_DRAFT_FILLED` / `_SUBMITTED` / `_APPROVED_LOCKED` / `_CHANGES_REQUESTED` / `_LATE_ENTRY`, defined in `SUBMIT/service.py`. This is the canonical per-value lifecycle state. The frontend (`static/js/workbook_sheet.js`) reads its display colors from one shared `CELL_STATE_META` map (also used by the reviewer legend) — if you add a cell state, add it there and nowhere else.
+  - **Submission status** — `STATUS_DRAFT` / `STATUS_SUBMITTED` / `STATUS_RESUBMITTED` / `STATUS_UNDER_REVIEW` / `STATUS_CHANGES_REQUESTED` / `STATUS_APPROVED` / `STATUS_REJECTED`, plus the `EDITABLE_SUBMISSION_STATUSES` / `REVIEWABLE_STATUSES` groupings and `SUBMISSION_STATUS_LABELS`, all defined once in `app/common/submission_status.py` and imported by both `SUBMIT/service.py` and `APPROV/service.py`. `PERIOD` and `VALSET` have their own, separate status lifecycles and are not part of this vocabulary — don't fold them in.
+  - **Calculated-field status** — `calc_status` (`"ok"` / `"error"` / `"pending"`), defined in `SUBMIT/service.py`. This is the canonical vocabulary produced by the shared `resolve_calculated_fields` resolver (used by both the persisted and preview paths) for "can this calculated field's value be trusted right now." The annual sheet-result path (`_compose_sheet_results`) still has its own, different vocabulary (`not_configured`/`needs_input`/`calculated`/`error`/`partial`) since it resolves a structurally different value shape — new code resolving ordinary per-row calculated fields should use `calc_status`'s vocabulary, not invent a third. `partial` means a `SUM_MONTHS`-style FY aggregate computed from whatever months are present (`blank_policy` defaults to allowing this; an explicit `blank_policy: "strict"` on the field still blocks and returns `needs_input` instead). `calculated` means literally every month is present — the two never overlap. This partial-computation behavior is specific to cross-month aggregation in `_compose_sheet_results`; `resolve_calculated_fields` (row-level formulas like `Total = A * B`) is untouched and still returns `pending` for a missing same-row operand, since that genuinely can't be computed at all, partially or otherwise.
+  - **Cell state** — `CELL_STATE_BLANK_EDITABLE` / `_DRAFT_FILLED` / `_SUBMITTED` / `_APPROVED_LOCKED` / `_CHANGES_REQUESTED` / `_LATE_ENTRY`, defined in `SUBMIT/service.py`. This is the canonical per-value lifecycle state. The frontend (`static/js/workbook_sheet.js`) reads its display colors from one shared `CELL_STATE_META` map (also used by the reviewer legend) — if you add a cell state, add it there and nowhere else.
 
 ---
+
+
 
 ## Known Gaps
 
 Honest, short list of things known to be wrong or unfinished today. If you fix one of these, delete it from this list in the same change.
 
 - **"SPOC" and "Submitter" (and "Approver" and "Reviewer") coexist in the codebase.** See [Terminology](#terminology) below — user-facing copy mostly says Submitter/Reviewer, but module names, JS filenames, CSS classes, and some newer admin-facing strings still say SPOC/Approver.
-- **`Field.current_version_id` means something different from every sibling `current_version_id`** in the app (see [Consistency Guidelines](#consistency-guidelines)). Harmless today since nothing reads it, but a landmine for anyone who assumes it follows the app-wide convention.
-- **There is no single "correct" default for which group a `%` Contribution/Variation computed column divides against.** The real source workbook this feature was modeled on always divided its `% Contribution`/`Variation` columns by the Core group's subtotal, even for non-Core rows — that was a hardcoded assumption in a spreadsheet formula, not a deliberate design decision. This system doesn't reproduce that assumption as a default; instead, which group's subtotal a `pct_of_group`/`variation_from_group_avg`-style computed column references is an explicit, per-formula choice, made by whichever `{group_id}__{metric_key}` token the formula's author picks when building it in FRMULA. Don't assume "divide by the reference-base group" is the intended behavior when reading or writing one of these formulas — read the actual token.
-- **`metric_aliases` keyed by a computed column's own `id` (rather than a canonical metric key) is a deliberate per-site override escape hatch, not an inconsistency.** It exists because the real source workbook had specific sites (referred to during development as the PNP/MELT case) that sourced a value like Energy Intensity directly from upstream instead of it being computed from other cells. `pivot_report_data` honors an override entry over formula evaluation for that site/column and marks the cell `"source": "override"` (vs `"computed"`) precisely so this is visible at every layer above it — in the API response, the Excel export's cell, and the preview table — rather than silently indistinguishable from a normal computed value. This phase (4) doesn't expose UI for authoring override entries — they can currently only arrive via a template's `config_json` written directly or carried over from an earlier config — so it renders correctly wherever it already exists but isn't yet editable from the drawer.
+- `Field.current_version_id` **means something different from every sibling** `current_version_id` in the app (see [Consistency Guidelines](#consistency-guidelines)). Harmless today since nothing reads it, but a landmine for anyone who assumes it follows the app-wide convention.
+- **There is no single "correct" default for which group a** `%` **Contribution/Variation computed column divides against.** The real source workbook this feature was modeled on always divided its `% Contribution`/`Variation` columns by the Core group's subtotal, even for non-Core rows — that was a hardcoded assumption in a spreadsheet formula, not a deliberate design decision. This system doesn't reproduce that assumption as a default; instead, which group's subtotal a `pct_of_group`/`variation_from_group_avg`-style computed column references is an explicit, per-formula choice, made by whichever `{group_id}__{metric_key}` token the formula's author picks when building it in FRMULA. Don't assume "divide by the reference-base group" is the intended behavior when reading or writing one of these formulas — read the actual token.
+- `metric_aliases` **keyed by a computed column's own** `id` **(rather than a canonical metric key) is a deliberate per-site override escape hatch, not an inconsistency.** It exists because the real source workbook had specific sites (referred to during development as the PNP/MELT case) that sourced a value like Energy Intensity directly from upstream instead of it being computed from other cells. `pivot_report_data` honors an override entry over formula evaluation for that site/column and marks the cell `"source": "override"` (vs `"computed"`) precisely so this is visible at every layer above it — in the API response, the Excel export's cell, and the preview table — rather than silently indistinguishable from a normal computed value. This phase (4) doesn't expose UI for authoring override entries — they can currently only arrive via a template's `config_json` written directly or carried over from an earlier config — so it renders correctly wherever it already exists but isn't yet editable from the drawer.
 - **RPTBLD's "Add computed column" round trip to FRMULA requires the report template to already be saved.** Unlike FORMBLD (whose Form/Field rows are persisted before its own "Open Formula Builder" button is ever reachable), RPTBLD's create-template drawer holds every panel — General/Scoping/Forms/Sites/Row Groups/Metric Aliasing — in browser memory only until a single final save. Building a computed column's formula means navigating away to a different page, so "Add Computed Column" stays disabled until the template has a real id: a brand-new template must be saved once (row groups and metric aliases included, computed columns still empty) before its computed columns can be added via the FRMULA round trip. This is the reason `create_report_template`/`update_report_template` gained no new "draft" concept in this phase — the existing create-then-edit flow was reused rather than inventing incremental autosave.
-- **Three calculated-result tests still encode the superseded three-decimal expectation.** The stale assertions are `round(0.026 * 47.3, 3)`-style checks that fail by about `0.0002` now that calculated fields are expected to use four-decimal precision (`1.2298`). This is unrelated to the security/correctness remediation batches and still needs a separate precision-policy cleanup.
 - **Two data-cleanup migrations have not been exercised against real data yet.** The proof-document active-uniqueness migration (`e1f2a3b4c5d6`) and AccessMatrix active-uniqueness migration (`f6a7b8c9d0e2`) are written to soft-delete duplicate active rows before adding partial unique indexes, but they still need staging-first verification before production.
 
 ---
+
+
 
 ## Terminology
 
