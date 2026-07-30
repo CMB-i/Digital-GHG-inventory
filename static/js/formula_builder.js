@@ -961,9 +961,9 @@ document.addEventListener("DOMContentLoaded", function () {
       }
       const result = window.FormulaRuntime.evaluate(expr, values);
       const fieldConfig = fieldConfigMap[_returnFieldId] || {};
-      let decimals = (fieldConfig.round_off_decimals !== undefined) ? parseInt(fieldConfig.round_off_decimals, 10) : 3;
+      let decimals = (fieldConfig.round_off_decimals !== undefined) ? parseInt(fieldConfig.round_off_decimals, 10) : 4;
       if (isNaN(decimals) || decimals < 1 || decimals > 9) {
-        decimals = 3;
+        decimals = 4;
       }
       if (result !== null && result !== undefined && !isNaN(result)) {
         previewResultValue.textContent = parseFloat(result.toFixed(decimals));

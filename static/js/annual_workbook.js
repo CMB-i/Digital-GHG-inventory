@@ -549,6 +549,9 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
     sheetResultsSection.innerHTML = html;
+    if (window.WorkbookSheet && typeof window.WorkbookSheet.initializeScopeBreakdowns === "function") {
+      window.WorkbookSheet.initializeScopeBreakdowns(sheetResultsSection);
+    }
     sheetResultsSection.classList.remove("hidden");
   }
 
@@ -562,6 +565,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const rows = state.workbook.rows || [];
     const sheetResults = state.workbook.sheet_results || [];
     const hasMonthlyFields = fields.length > 0;
+    const sheetName = state.workbook.selected_form ? state.workbook.selected_form.name : "";
 
     // A sheet can have zero monthly-table fields and still have published
     // fields if all of them are annual ("Sheet/FY result below table")
@@ -587,6 +591,7 @@ document.addEventListener("DOMContentLoaded", function () {
         workbookValues: state.workbook.workbook_values || {},
         canEditWorkbookValues: hasOpenWorkbookPeriod(),
         sheetResults,
+        sheetName,
         rows: rows.map(row => ({
           ...row,
           editable: mode === "calc_results" ? false : Boolean(row.editability && row.editability.editable),
@@ -616,7 +621,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // With no monthly table, nothing renders these results into an in-table
     // footer, so show all of them here instead of just the overflow subset.
-    renderSheetResultsOverflow(sheetResults, { showAll: !hasMonthlyFields });
+    renderSheetResultsOverflow(sheetResults, { showAll: !hasMonthlyFields, sheetName });
 
     // Check sent back badge
     const needsCorrectionRow = rows.find(row => 

@@ -14,7 +14,10 @@ from app.modules.RPTBLD.service import (
     generate_report_data,
     pivot_report_data,
     export_report_to_excel,
+    compose_cross_site_intensity_report,
+    latest_fy_start_year_with_data,
     METRIC_KEY_DISPLAY_ORDER,
+    CROSS_SITE_SHEET1_COLUMNS,
     _get_user_allowed_sites,
 )
 from app.modules.SITEMST.model import Site
@@ -202,10 +205,62 @@ def api_pivot_preview_template(template_id):
         return jsonify({"status": "error", "message": "Failed to generate pivot preview."}), 500
 
 
+@bp.route("/api/templates/<int:template_id>/cross-site-preview")
+@require_permission("report", "view")
+def api_cross_site_preview_template(template_id):
+    """
+    Read-only preview for the cross-site GHG intensity summary report
+    (compose_cross_site_intensity_report). Never writes. Site access is
+    scoped down to the user's allowed sites the same way pivot-preview does,
+    rather than trusting config_json's row_groups site_ids unconditionally.
+    """
+    user = current_user()
+    t = get_report_template(template_id)
+    if not t:
+        return jsonify({"status": "error", "message": "Template not found."}), 404
+
+    try:
+        allowed_site_ids, _is_global = _get_user_allowed_sites(user.id, "report")
+        config = t.config_json or {}
+        row_groups = [
+            {**group, "site_ids": [sid for sid in (group.get("site_ids") or []) if sid in allowed_site_ids]}
+            for group in (config.get("row_groups") or [])
+        ]
+        scoped_config = {**config, "row_groups": row_groups}
+        site_ids = [sid for group in row_groups for sid in group["site_ids"]]
+
+        # No calendar-date default here -- a brand-new FY commonly has zero
+        # submissions for a while after it starts, which would silently
+        # render an all-blank report. latest_fy_start_year_with_data() picks
+        # the most recent FY that actually has data for these sites instead.
+        fy_param = request.args.get("fy_start_year")
+        if fy_param is None:
+            fy_start_year = latest_fy_start_year_with_data(site_ids)
+        else:
+            try:
+                fy_start_year = int(fy_param)
+            except (TypeError, ValueError):
+                return jsonify({"status": "error", "message": "fy_start_year must be an integer."}), 400
+
+        data = compose_cross_site_intensity_report(site_ids, fy_start_year, scoped_config)
+        return jsonify({"status": "success", "data": data})
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+    except Exception:
+        return jsonify({"status": "error", "message": "Failed to generate cross-site preview."}), 500
+
+
 @bp.route("/api/canonical-metrics")
 @require_permission("report", "view")
 def api_canonical_metrics():
-    return jsonify({"metrics": list(METRIC_KEY_DISPLAY_ORDER)})
+    # sheet1_columns: the cross-site composer's real column order/labels --
+    # served from here (not hardcoded a second time in reports.js) so the
+    # web preview and the Excel export can never drift apart the way they
+    # did before.
+    return jsonify({
+        "metrics": list(METRIC_KEY_DISPLAY_ORDER),
+        "sheet1_columns": list(CROSS_SITE_SHEET1_COLUMNS),
+    })
 
 
 @bp.route("/api/templates/<int:template_id>/export")

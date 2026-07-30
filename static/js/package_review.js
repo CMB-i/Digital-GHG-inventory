@@ -194,6 +194,7 @@ document.addEventListener("DOMContentLoaded", function () {
         sections: sheet.sections || [],
         workbookValues: sheet.workbook_values || {},
         canEditWorkbookValues: false,
+        sheetName: sheet.form_name || sheet.sheet_name || "",
         rows: sheet.rows || [{
           row_key: `submission-${sheet.submission_id}`,
           label: reviewData.package.period_label,
@@ -232,13 +233,17 @@ document.addEventListener("DOMContentLoaded", function () {
       sheetResultsSection.innerHTML = "";
       return;
     }
-    const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(results, { showAll });
+    const sheet = activeSheet();
+    const html = window.WorkbookSheet.renderSheetResultsOverflowHtml(results, { showAll, sheetName: sheet ? (sheet.form_name || sheet.sheet_name || "") : "" });
     if (!html) {
       sheetResultsSection.classList.add("hidden");
       sheetResultsSection.innerHTML = "";
       return;
     }
     sheetResultsSection.innerHTML = html;
+    if (window.WorkbookSheet && typeof window.WorkbookSheet.initializeScopeBreakdowns === "function") {
+      window.WorkbookSheet.initializeScopeBreakdowns(sheetResultsSection);
+    }
     sheetResultsSection.classList.remove("hidden");
   }
 

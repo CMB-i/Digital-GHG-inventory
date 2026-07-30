@@ -694,7 +694,7 @@ def synthesize_automatic_fy_totals(monthly_fields, explicit_result_fields):
             "field_config": {
                 "auto_aggregate_source_field_code": code,
                 "unit": config.get("unit") or "",
-                "round_off_decimals": config.get("round_off_decimals", 3),
+                "round_off_decimals": config.get("round_off_decimals", 4),
                 "display_region": "under_input_column",
             },
         })
@@ -1112,9 +1112,7 @@ def resolve_calculated_fields(
     persist=False (the preview path) computes the same statuses read-only.
 
     apply_rounding controls whether a resolved value is rounded to the field's
-    configured round_off_decimals -- the persisted/authoritative path has never
-    rounded stored calculated_value, while the preview path always has, and
-    that's a real, preserved difference between the two, not an oversight.
+    configured round_off_decimals.
 
     Returns {field_code: {"status": "ok"|"error"|"pending", "value": float|None,
     "error_message": str|None}} for every calculated field in fields_map.
@@ -1212,13 +1210,13 @@ def resolve_calculated_fields(
         try:
             result = evaluate_formula(formula_version.expression, field_values, value_set_snapshot)
             if apply_rounding and result is not None:
-                decimals = info["field_config"].get("round_off_decimals", 3)
+                decimals = info["field_config"].get("round_off_decimals", 4)
                 try:
                     decimals = int(decimals)
                     if not (1 <= decimals <= 9):
-                        decimals = 3
+                        decimals = 4
                 except (ValueError, TypeError):
-                    decimals = 3
+                    decimals = 4
                 try:
                     result = round(float(result), decimals)
                 except (ValueError, TypeError):
@@ -1620,6 +1618,545 @@ class _CrossSheetResolver:
         return self._results_cache[form.id]
 
 
+def _decimal_sheet_value(value):
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.0001"))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _find_result_value(results_by_code, *, codes=(), label_includes=()):
+    for code in codes:
+        result = results_by_code.get(code)
+        value = _decimal_sheet_value((result or {}).get("value"))
+        if value is not None:
+            return value
+    lowered_needles = [needle.lower() for needle in label_includes]
+    for result in results_by_code.values():
+        label = (result.get("label") or result.get("field_code") or "").lower()
+        if all(needle in label for needle in lowered_needles):
+            value = _decimal_sheet_value(result.get("value"))
+            if value is not None:
+                return value
+    return None
+
+
+def _find_form_by_label(sheet_rows, *needles):
+    normalized_needles = [needle.lower() for needle in needles]
+    for workbook_form, form in sheet_rows:
+        label = (workbook_form.sheet_label or human_sheet_label(form) or "").lower()
+        if all(needle in label for needle in normalized_needles):
+            return form
+    return None
+
+
+def _find_result(results_by_code, *, codes=(), label_includes=()):
+    for code in codes:
+        result = results_by_code.get(code)
+        if result:
+            return result
+    lowered_needles = [needle.lower() for needle in label_includes]
+    for result in results_by_code.values():
+        label = (result.get("label") or result.get("field_code") or "").lower()
+        if all(needle in label for needle in lowered_needles):
+            return result
+    return None
+
+
+def _find_result_code(results_by_code, *, codes=(), label_includes=()):
+    result = _find_result(results_by_code, codes=codes, label_includes=label_includes)
+    return result.get("field_code") if result else None
+
+
+def _decimal_series_value(value):
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.0001"))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _sum_decimal_series(values):
+    total = Decimal("0")
+    for value in values or []:
+        decimal_value = _decimal_series_value(value)
+        if decimal_value is not None:
+            total += decimal_value
+    return total.quantize(Decimal("0.0001"))
+
+
+def _series_minus(left, right):
+    return [
+        float((_decimal_series_value(a) or Decimal("0")) - (_decimal_series_value(b) or Decimal("0")))
+        for a, b in zip(left or [], right or [])
+    ]
+
+
+def _series_plus(*series_list):
+    length = max((len(series or []) for series in series_list), default=0)
+    totals = []
+    for index in range(length):
+        total = Decimal("0")
+        for series in series_list:
+            if index < len(series or []):
+                total += _decimal_series_value(series[index]) or Decimal("0")
+        totals.append(float(total.quantize(Decimal("0.0001"))))
+    return totals
+
+
+def _series_reconciles(series, total):
+    expected = _decimal_sheet_value(total)
+    if expected is None:
+        return False
+    return _sum_decimal_series(series) == expected
+
+
+def _series_adjusted_to_total(series, total):
+    expected = _decimal_sheet_value(total)
+    if expected is None:
+        return series or []
+    adjusted = list(series or [])
+    if not adjusted:
+        return adjusted
+    current = _sum_decimal_series(adjusted)
+    residual = (expected - current).quantize(Decimal("0.0001"))
+    if residual == Decimal("0"):
+        return adjusted
+    target_index = next(
+        (index for index in range(len(adjusted) - 1, -1, -1) if _decimal_series_value(adjusted[index]) is not None),
+        len(adjusted) - 1,
+    )
+    target_value = _decimal_series_value(adjusted[target_index]) or Decimal("0")
+    adjusted[target_index] = float((target_value + residual).quantize(Decimal("0.0001")))
+    return adjusted
+
+
+def _monthly_result_series(result_fields, monthly_fields, rows, *, annual_fields=None, workbook_values=None):
+    if not result_fields:
+        return {}
+
+    value_set_snapshot = get_approved_valsets_snapshot()
+    result_codes = [field["field_code"] for field in result_fields]
+    fields_by_code = {field["field_code"]: field for field in result_fields}
+    monthly_fields_by_code = {field["field_code"]: field for field in monthly_fields}
+    annual_fields_by_code = {
+        field["field_code"]: field
+        for field in (annual_fields or [])
+        if field.get("field_type") != "calculated"
+        and field.get("field_code") not in monthly_fields_by_code
+    }
+    workbook_values = workbook_values or {}
+
+    formula_version_ids = [
+        (field.get("field_config") or {}).get("formula_version_id")
+        for field in result_fields
+        if (field.get("field_config") or {}).get("formula_version_id")
+    ]
+    formula_versions = {
+        fv.id: fv
+        for fv in FormulaVersion.query.filter(FormulaVersion.id.in_(formula_version_ids or [0])).all()
+    }
+
+    token_keys_by_code = {}
+    for code, field in fields_by_code.items():
+        formula_version_id = (field.get("field_config") or {}).get("formula_version_id")
+        formula_version = formula_versions.get(formula_version_id)
+        token_keys_by_code[code] = list((formula_version.tokens or {}).keys()) if formula_version else []
+
+    order, cyclic = _topological_order_with_cycles(
+        result_codes, lambda code: [name for name in token_keys_by_code[code] if name in fields_by_code]
+    )
+    ordered_codes = order + [code for code in cyclic if code not in order]
+    series_by_code = {code: [] for code in result_codes}
+
+    for row in rows:
+        context_values = {}
+        row_values = row.get("values") or {}
+        for annual_code, payload in workbook_values.items():
+            if annual_code not in annual_fields_by_code:
+                continue
+            value = _coerce_sheet_result_number(payload)
+            if value is not None:
+                context_values[annual_code] = value
+
+        for code in ordered_codes:
+            field = fields_by_code[code]
+            config = field.get("field_config") or {}
+            auto_source_code = config.get("auto_aggregate_source_field_code")
+
+            try:
+                if auto_source_code:
+                    value = _coerce_sheet_result_number(row_values.get(auto_source_code))
+                    series_by_code[code].append(float(value) if value is not None else None)
+                    context_values[code] = value
+                    continue
+
+                formula_version_id = config.get("formula_version_id")
+                formula_version = formula_versions.get(formula_version_id) if formula_version_id else None
+                if not formula_version:
+                    series_by_code[code].append(None)
+                    continue
+
+                aggregate_names = aggregate_operand_names(formula_version.expression)
+                for name in aggregate_names:
+                    value = _coerce_sheet_result_number(row_values.get(name))
+                    if value is None:
+                        raise ValueError(f"{name} is missing.")
+                    context_values[name] = [value]
+
+                for name in token_keys_by_code[code]:
+                    if name in aggregate_names or name in value_set_snapshot or name in context_values:
+                        continue
+                    if name in monthly_fields_by_code:
+                        value = _coerce_sheet_result_number(row_values.get(name))
+                        if value is None:
+                            raise ValueError(f"{name} is missing.")
+                        context_values[name] = value
+
+                value = evaluate_formula(formula_version.expression, context_values, value_set_snapshot)
+                decimals = config.get("round_off_decimals", 4)
+                try:
+                    decimals = int(decimals)
+                    if not (1 <= decimals <= 9):
+                        decimals = 4
+                except (ValueError, TypeError):
+                    decimals = 4
+                if value is not None:
+                    value = round(float(value), decimals)
+                series_by_code[code].append(value)
+                context_values[code] = value
+            except Exception:
+                series_by_code[code].append(None)
+    return series_by_code
+
+
+def _sheet_monthly_context(cross_sheet_resolver, form):
+    fields, monthly_fields, sheet_result_fields = cross_sheet_resolver._sheet_shape_for(form)
+    rows = _monthly_rows_for_calc(cross_sheet_resolver.site_id, form, monthly_fields, cross_sheet_resolver.fy_start_year)
+    workbook_values = workbook_values_payload(cross_sheet_resolver.site_id, form.id, cross_sheet_resolver.fy_start_year, fields)
+    results = cross_sheet_resolver._results_for_form(form)
+    series_by_code = _monthly_result_series(
+        sheet_result_fields,
+        monthly_fields,
+        rows,
+        annual_fields=fields,
+        workbook_values=workbook_values,
+    )
+    return {
+        "fields": fields,
+        "monthly_fields": monthly_fields,
+        "rows": rows,
+        "results": results,
+        "series_by_code": series_by_code,
+    }
+
+
+def _monthly_raw_series(context, code):
+    return [
+        _coerce_sheet_result_number((row.get("values") or {}).get(code))
+        for row in context.get("rows") or []
+    ]
+
+
+def _component_result_series(context, predicate):
+    matched = []
+    for code, result in (context.get("results") or {}).items():
+        if predicate(code, result):
+            series = (context.get("series_by_code") or {}).get(code)
+            if series:
+                matched.append(series)
+    return _series_plus(*matched)
+
+
+def _attach_gri_breakdowns_and_charts(sheet_results, cross_sheet_resolver, sheet_rows, form):
+    current_label = (cross_sheet_resolver.label_by_form_id.get(form.id) or human_sheet_label(form) or "").lower()
+    if "gri" not in current_label:
+        return
+
+    cargo_form = _find_form_by_label(sheet_rows, "cargo")
+    electricity_form = _find_form_by_label(sheet_rows, "electricity")
+    fuel_form = _find_form_by_label(sheet_rows, "fuel consumption")
+    ofr_form = _find_form_by_label(sheet_rows, "other fuels")
+    if not cargo_form or not electricity_form or not fuel_form or not ofr_form:
+        return
+
+    cargo_context = _sheet_monthly_context(cross_sheet_resolver, cargo_form)
+    electricity_context = _sheet_monthly_context(cross_sheet_resolver, electricity_form)
+    fuel_context = _sheet_monthly_context(cross_sheet_resolver, fuel_form)
+    ofr_context = _sheet_monthly_context(cross_sheet_resolver, ofr_form)
+
+    electricity_results = electricity_context["results"]
+    fuel_results = fuel_context["results"]
+    ofr_results = ofr_context["results"]
+    gri_results = {result["field_code"]: result for result in sheet_results}
+
+    electricity_gj = _find_result_value(
+        electricity_results,
+        codes=("fy_total_electricity_gj", "total_electricity_gj", "electricity_gj"),
+        label_includes=("total", "electricity", "gj"),
+    )
+    electricity_tco2 = _find_result_value(
+        electricity_results,
+        codes=("fy_total_electricity_tco2e", "total_electricity_ghg_emission", "electricity_ghg_emission"),
+        label_includes=("total", "electricity", "tco"),
+    )
+    fuel_total_gj = _find_result_value(
+        fuel_results,
+        codes=("fy_total_fuel_energy_gj", "field_1785125247525"),
+        label_includes=("fuel", "energy"),
+    )
+    fuel_total_tco2 = _find_result_value(
+        fuel_results,
+        codes=("fy_total_fuel_emissions_tco2e", "field_1785125337634"),
+        label_includes=("fuel", "emissions"),
+    )
+    ofr_gj = _find_result_value(
+        ofr_results,
+        codes=("ofr_other_fuels_energy_gj", "other_fuels_energy_gj"),
+        label_includes=("other", "fuels", "energy"),
+    )
+    ofr_tco2 = _find_result_value(
+        ofr_results,
+        codes=("ofr_total_emissions_tco2", "total_emissions_tco2"),
+        label_includes=("total", "emissions"),
+    )
+    gri_total_gj = _find_result_value(
+        gri_results,
+        codes=("total_energy_gj", "total_energy_consumption_gj", "field_1785127047261"),
+        label_includes=("total", "energy"),
+    )
+    gri_total_tco2 = _find_result_value(
+        gri_results,
+        codes=("total_emissions_tco2e", "gri_total_emissions_tco2", "field_1785127097345"),
+        label_includes=("total", "emissions"),
+    )
+
+    if any(value is None for value in (electricity_tco2, fuel_total_tco2, ofr_tco2, gri_total_tco2)):
+        return
+
+    # Fuel Consumption's FY total already carries OFR in the current setup.
+    # Split it into "fuel excluding OFR" plus OFR for the visual breakdown so
+    # the sub-rows reconcile to the same GRI total that formulas already show.
+    fuel_combustion_tco2 = fuel_total_tco2 - ofr_tco2
+    scope_1_tco2 = fuel_combustion_tco2 + ofr_tco2
+    scope_2_tco2 = electricity_tco2
+    scope_breakdown = {
+        "kind": "scope",
+        "toggle_label": "Show scope breakdown",
+        "chart_label": "Scope 1 and Scope 2 emissions donut chart",
+        "reconciles": (scope_1_tco2 + scope_2_tco2) == gri_total_tco2,
+        "unit": "tCO2e",
+        "total_value": float(gri_total_tco2),
+        "slices": [
+            {
+                "label": "Scope 1 (direct)",
+                "value": float(scope_1_tco2),
+                "rows": [
+                    {"label": "Fuel Consumption (excluding OFR)", "value": float(fuel_combustion_tco2)},
+                    {"label": "Other Fuels & Refrigerants", "value": float(ofr_tco2)},
+                ],
+            },
+            {
+                "label": "Scope 2 (indirect)",
+                "value": float(scope_2_tco2),
+                "rows": [
+                    {"label": "Electricity", "value": float(electricity_tco2)},
+                ],
+            },
+        ],
+    }
+
+    energy_breakdown = None
+    if all(value is not None for value in (electricity_gj, fuel_total_gj, ofr_gj, gri_total_gj)):
+        fuel_combustion_gj = fuel_total_gj - ofr_gj
+        direct_energy_gj = fuel_combustion_gj + ofr_gj
+        purchased_electricity_gj = electricity_gj
+        energy_breakdown = {
+            "kind": "energy",
+            "toggle_label": "Show energy breakdown",
+            "chart_label": "Direct fuel-based energy and purchased electricity donut chart",
+            "reconciles": (direct_energy_gj + purchased_electricity_gj) == gri_total_gj,
+            "unit": "GJ",
+            "total_value": float(gri_total_gj),
+            "slices": [
+                {
+                    "label": "Direct fuel-based energy",
+                    "value": float(direct_energy_gj),
+                    "rows": [
+                        {"label": "Fuel Consumption (excluding OFR)", "value": float(fuel_combustion_gj)},
+                        {"label": "Other Fuels & Refrigerants", "value": float(ofr_gj)},
+                    ],
+                },
+                {
+                    "label": "Purchased electricity",
+                    "value": float(purchased_electricity_gj),
+                    "rows": [
+                        {"label": "Electricity", "value": float(electricity_gj)},
+                    ],
+                },
+            ],
+        }
+
+    electricity_gj_code = _find_result_code(
+        electricity_results,
+        codes=("fy_total_electricity_gj", "total_electricity_gj", "electricity_gj"),
+        label_includes=("total", "electricity", "gj"),
+    )
+    electricity_tco2_code = _find_result_code(
+        electricity_results,
+        codes=("fy_total_electricity_tco2e", "total_electricity_ghg_emission", "electricity_ghg_emission"),
+        label_includes=("total", "electricity", "tco"),
+    )
+    fuel_gj_code = _find_result_code(
+        fuel_results,
+        codes=("fy_total_fuel_energy_gj", "field_1785125247525"),
+        label_includes=("fuel", "energy"),
+    )
+    fuel_tco2_code = _find_result_code(
+        fuel_results,
+        codes=("fy_total_fuel_emissions_tco2e", "field_1785125337634"),
+        label_includes=("fuel", "emissions"),
+    )
+    cargo_code = _find_result_code(
+        cargo_context["results"],
+        codes=("fy_total_cargo", "cargo__auto_fy_total"),
+        label_includes=("total", "cargo"),
+    )
+    if cargo_code:
+        cargo_result = cargo_context["results"].get(cargo_code) or {}
+        cargo_label = (cargo_result.get("label") or "").lower()
+        cargo_unit = (cargo_result.get("unit") or "").lower()
+        if "teu" in cargo_label or "teu" in cargo_unit:
+            cargo_code = None
+    if not cargo_code:
+        cargo_code = next(
+            (
+                field["field_code"]
+                for field in cargo_context["monthly_fields"]
+                if "cargo" in ((field.get("field_name") or field.get("field_code") or "").lower())
+                and "teu" not in ((field.get("field_name") or field.get("field_code") or "").lower())
+            ),
+            None,
+        )
+
+    labels = [row.get("label") or row.get("period_label") or f"{row.get('month')}/{row.get('year')}" for row in cargo_context["rows"]]
+    electricity_emissions_series = electricity_context["series_by_code"].get(electricity_tco2_code, [])
+    electricity_energy_series = electricity_context["series_by_code"].get(electricity_gj_code, [])
+    ofr_emissions_code = _find_result_code(
+        ofr_results,
+        codes=("ofr_total_emissions_tco2", "total_emissions_tco2"),
+        label_includes=("total", "emissions"),
+    )
+    ofr_energy_code = _find_result_code(
+        ofr_results,
+        codes=("ofr_other_fuels_energy_gj", "other_fuels_energy_gj"),
+        label_includes=("other", "fuels", "energy"),
+    )
+    ofr_emissions_series = ofr_context["series_by_code"].get(ofr_emissions_code, [])
+    ofr_energy_series = ofr_context["series_by_code"].get(ofr_energy_code, [])
+
+    def _is_fuel_energy_component(code, result):
+        label = (result.get("label") or code or "").lower()
+        unit = (result.get("unit") or "").lower()
+        return (
+            "gj" in unit
+            and "stationary" not in label
+            and "mobile" not in label
+            and "fy total" not in label
+            and "auto_fy_total" not in code
+            and "total fuel" not in label
+        )
+
+    def _is_fuel_emissions_component(code, result):
+        label = (result.get("label") or code or "").lower()
+        unit = (result.get("unit") or "").lower()
+        return (
+            ("tco" in unit or "emission" in label or "ch4" in label or "n2o" in label)
+            and "stationary" not in label
+            and "mobile" not in label
+            and "fy total" not in label
+            and "auto_fy_total" not in code
+            and "total fuel" not in label
+        )
+
+    fuel_combustion_energy_series = _component_result_series(fuel_context, _is_fuel_energy_component)
+    fuel_combustion_emissions_series = _component_result_series(fuel_context, _is_fuel_emissions_component)
+    direct_energy_series = _series_plus(fuel_combustion_energy_series, ofr_energy_series)
+    direct_emissions_series = _series_plus(fuel_combustion_emissions_series, ofr_emissions_series)
+    emissions_series = _series_adjusted_to_total(
+        _series_plus(direct_emissions_series, electricity_emissions_series),
+        gri_total_tco2,
+    )
+    cargo_series = (
+        cargo_context["series_by_code"].get(cargo_code, [])
+        if cargo_code in cargo_context["series_by_code"]
+        else _monthly_raw_series(cargo_context, cargo_code)
+    )
+    cargo_total = _find_result_value(cargo_context["results"], codes=(cargo_code,), label_includes=("total", "cargo"))
+    cargo_series = _series_adjusted_to_total(cargo_series, cargo_total)
+
+    trend_charts = {
+        "labels": labels,
+        "monthly_emissions": {
+            "unit": "tCO2e",
+            "values": emissions_series,
+            "reconciles": _series_reconciles(emissions_series, gri_total_tco2),
+        },
+        "cargo_vs_emissions": {
+            "cargo_unit": "MT",
+            "emissions_unit": "tCO2e",
+            "cargo_values": cargo_series,
+            "emissions_values": emissions_series,
+            "cargo_reconciles": _series_reconciles(cargo_series, cargo_total),
+            "emissions_reconciles": _series_reconciles(emissions_series, gri_total_tco2),
+        },
+    }
+
+    if electricity_gj_code:
+        energy_series = _series_adjusted_to_total(
+            _series_plus(direct_energy_series, electricity_energy_series),
+            gri_total_gj,
+        )
+        trend_charts["monthly_energy"] = {
+            "unit": "GJ",
+            "values": energy_series,
+            "reconciles": _series_reconciles(energy_series, gri_total_gj),
+        }
+
+    chart_attached = False
+    energy_attached = False
+    scope_attached = False
+    for result in sheet_results:
+        label = (result.get("label") or result.get("field_code") or "").lower()
+        code = result.get("field_code")
+        if not energy_attached and (
+            code in ("total_energy_gj", "total_energy_consumption_gj", "field_1785127047261")
+            or ("total" in label and "energy" in label)
+        ):
+            if energy_breakdown:
+                result["energy_breakdown"] = energy_breakdown
+            result["gri_trend_charts"] = trend_charts
+            energy_attached = True
+            chart_attached = True
+            continue
+        if not scope_attached and (
+            code in ("total_emissions_tco2e", "gri_total_emissions_tco2", "field_1785127097345")
+            or ("total" in label and "emissions" in label)
+        ):
+            result["scope_breakdown"] = scope_breakdown
+            if not chart_attached:
+                result["gri_trend_charts"] = trend_charts
+                chart_attached = True
+            scope_attached = True
+
+
+def _attach_gri_scope_breakdown(sheet_results, cross_sheet_resolver, sheet_rows, form):
+    _attach_gri_breakdowns_and_charts(sheet_results, cross_sheet_resolver, sheet_rows, form)
+
+
 def _group_blocking_causes_by_sheet(causes):
     """
     causes: an iterable of (sheet_label, field_label) tuples (already
@@ -1889,13 +2426,13 @@ def _compose_sheet_results(
                 result = sum_months(context_values[auto_source_code])
             else:
                 result = evaluate_formula(formula_version.expression, context_values, value_set_snapshot)
-            decimals = config.get("round_off_decimals", 3)
+            decimals = config.get("round_off_decimals", 4)
             try:
                 decimals = int(decimals)
                 if not (1 <= decimals <= 9):
-                    decimals = 3
+                    decimals = 4
             except (ValueError, TypeError):
-                decimals = 3
+                decimals = 4
             if result is not None:
                 try:
                     result = round(float(result), decimals)
@@ -2105,6 +2642,7 @@ def compose_annual_workbook_data(user_id, site_id, workbook_id, fy_start_year, s
         workbook_values=workbook_values,
     )
     cross_sheet_resolver.finish_external_for(form, sheet_results)
+    _attach_gri_scope_breakdown(sheet_results, cross_sheet_resolver, sheet_rows, form)
 
     return {
         "financial_year": {
@@ -2326,6 +2864,7 @@ def compose_readonly_workbook_context(site_id, form_id, fy_start_year, active_pe
         workbook_values=workbook_values,
     )
     cross_sheet_resolver.finish_external_for(form, sheet_results)
+    _attach_gri_scope_breakdown(sheet_results, cross_sheet_resolver, sheet_rows, form)
 
     return {
         "financial_year": {
@@ -3064,6 +3603,7 @@ def recalculate_submission_formulas(submission, fields_map, user_id):
         persist=True,
         get_or_create_row=_get_or_create_calc_row,
         user_id=user_id,
+        apply_rounding=True,
     )
 
     calculation_errors = {

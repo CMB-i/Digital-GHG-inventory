@@ -72,9 +72,9 @@
 
             let decimals = (field.field_config.round_off_decimals !== undefined) 
               ? parseInt(field.field_config.round_off_decimals, 10) 
-              : 3;
+              : 4;
             if (isNaN(decimals) || decimals < 1 || decimals > 9) {
-              decimals = 3;
+              decimals = 4;
             }
 
             const oldNumeric = oldVal !== undefined && oldVal !== null && oldVal !== "" ? parseFloat(oldVal) : null;
@@ -364,7 +364,7 @@
           if (fieldConfig.round_off_decimals !== undefined) {
             inputEl.setAttribute("data-decimals", fieldConfig.round_off_decimals);
           } else {
-            inputEl.setAttribute("data-decimals", "3");
+            inputEl.setAttribute("data-decimals", "4");
           }
 
           // Fetch precalculated or calculate value
@@ -372,7 +372,14 @@
           if (val && typeof val === "object") {
             val = val.calculated_value !== undefined ? val.calculated_value : (val.raw_value || "");
           }
-          inputEl.value = val;
+          const decimals = parseInt(inputEl.getAttribute("data-decimals") || "4", 10);
+          const numericVal = val !== null && val !== undefined && val !== "" ? parseFloat(val) : null;
+          if (numericVal !== null && !Number.isNaN(numericVal) && Number.isFinite(numericVal)) {
+            const safeDecimals = Number.isInteger(decimals) && decimals >= 1 && decimals <= 9 ? decimals : 4;
+            inputEl.value = parseFloat(numericVal.toFixed(safeDecimals));
+          } else {
+            inputEl.value = val;
+          }
         } else {
           // text or number input
           inputEl.type = field.field_type === "number" ? "number" : "text";

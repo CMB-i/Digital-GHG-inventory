@@ -25,6 +25,28 @@
   const previewPivotWrapper = document.getElementById("preview_pivot_wrapper");
   const previewPivotThead = document.getElementById("preview_pivot_thead");
   const previewPivotTbody = document.getElementById("preview_pivot_tbody");
+  const previewDraftBanner = document.getElementById("preview_draft_banner");
+  const previewFyYearContainer = document.getElementById("preview_fy_year_container");
+  const previewFyYearSelect = document.getElementById("preview_fy_year_select");
+  const previewFullscreenBtn = document.getElementById("preview_fullscreen_btn");
+
+  // Fullscreen overlay -- mirrors whatever's currently shown in the main
+  // preview pane (same data, same render functions), just aimed at a
+  // full-viewport panel instead of the constrained split-grid column.
+  const fullscreenOverlay = document.getElementById("preview_fullscreen_overlay");
+  const fullscreenTitle = document.getElementById("fullscreen_preview_title");
+  const fullscreenSubtitle = document.getElementById("fullscreen_preview_subtitle");
+  const fullscreenFyYearContainer = document.getElementById("fullscreen_fy_year_container");
+  const fullscreenFyYearSelect = document.getElementById("fullscreen_fy_year_select");
+  const fullscreenSearch = document.getElementById("fullscreen_preview_search");
+  const fullscreenExportBtn = document.getElementById("fullscreen_export_btn");
+  const fullscreenCloseBtn = document.getElementById("preview_fullscreen_close_btn");
+  const fullscreenDraftBanner = document.getElementById("fullscreen_draft_banner");
+  const fullscreenTableWrapper = document.getElementById("fullscreen_table_wrapper");
+  const fullscreenTbody = document.getElementById("fullscreen_tbody");
+  const fullscreenPivotWrapper = document.getElementById("fullscreen_pivot_wrapper");
+  const fullscreenPivotThead = document.getElementById("fullscreen_pivot_thead");
+  const fullscreenPivotTbody = document.getElementById("fullscreen_pivot_tbody");
 
   // Row Groups panel
   const rowGroupsList = document.getElementById("row_groups_list");
@@ -59,11 +81,33 @@
   const reviewPreviewPivotWrapper = document.getElementById("review_preview_pivot_wrapper");
   const reviewPreviewPivotThead = document.getElementById("review_preview_pivot_thead");
   const reviewPreviewPivotTbody = document.getElementById("review_preview_pivot_tbody");
+  const reviewDraftBanner = document.getElementById("review_draft_banner");
+
+  // Templates with this code are read via the SUM_MONTHS-correct
+  // compose_cross_site_intensity_report composer (cross-site-preview
+  // endpoint) instead of the generic pivot-preview endpoint, which builds
+  // its flat_index from generate_report_data()'s last-write-wins flat rows
+  // -- silently wrong for any multi-month FY total. Gated by template code,
+  // not just "row_groups.length > 1", since the composer's config shape
+  // (specific metric_aliases keys, per-group suppress_own_subtotal) is
+  // purpose-built for this one template, not a generic multi-group case.
+  const CROSS_SITE_COMPOSER_TEMPLATE_CODE = "cross_site_ghg_intensity_summary";
 
   let activePreviewData = [];
+  let activeCrossSitePreviewTemplateId = null;
+
+  // Tracks whatever the main preview pane is currently showing, purely so
+  // the fullscreen overlay can mirror it on demand without a second fetch --
+  // "flat" (activePreviewData) or "pivot" (lastPivotData/lastPivotConfig,
+  // covers both generic pivot_report_data templates and the cross-site
+  // composer, since both render through renderPivotPreviewTable).
+  let lastPreviewMode = null; // "flat" | "pivot" | null
+  let lastPivotData = null;
+  let lastPivotConfig = null;
 
   // null => Step 1 not yet saved; a real template id from Step 1 onward.
   let currentTemplateId = null;
+  let currentTemplateCode = null;
   // The most recently loaded/saved config_json, kept around so panels that
   // don't have UI in this phase (e.g. computed-column override entries in
   // metric_aliases) are preserved rather than silently dropped on save.
@@ -73,6 +117,12 @@
   let highestVisitedStepIndex = 0;
 
   let canonicalMetrics = [];
+  // The cross-site composer's real Sheet1 column order/labels -- fetched
+  // from /api/canonical-metrics (RPTBLD/service.py's CROSS_SITE_SHEET1_COLUMNS
+  // is the single source of truth for this, shared with the Excel export)
+  // rather than hardcoded here a second time, which is exactly how these
+  // two drifted out of sync before.
+  let crossSiteSheet1Columns = [];
   let formsListCache = null;
   const fieldOptionsCache = {}; // form_id -> [{field_id, field_code, field_name, form_name}]
   let rowGroupBlockCounter = 0;
@@ -247,6 +297,7 @@
   // ════════════════════════════════════════════════════════════════════
   function resetWizardState() {
     currentTemplateId = null;
+    currentTemplateCode = null;
     existingConfigJson = null;
     currentStepIndex = 0;
     highestVisitedStepIndex = 0;
@@ -275,6 +326,7 @@
       const t = await res.json();
       resetWizardState();
       currentTemplateId = templateId;
+      currentTemplateCode = t.code || null;
       existingConfigJson = t.config_json || {};
 
       document.getElementById("template_name").value = t.name || "";
@@ -397,7 +449,10 @@
       block.dataset.rgId = candidate;
 
       const siteIds = Array.from(block.querySelectorAll(".rg-site-checkbox:checked")).map(cb => parseInt(cb.value, 10));
+      const existing = ((existingConfigJson && existingConfigJson.row_groups) || [])
+        .find(group => group && group.id === block.dataset.rgId) || {};
       return {
+        ...existing,
         id: candidate,
         label: label,
         subtotal_label: block.querySelector(".rg-subtotal-label").value.trim(),
@@ -416,6 +471,7 @@
     const res = await fetch("/module/RPTBLD/api/canonical-metrics");
     const data = await res.json();
     canonicalMetrics = data.metrics || [];
+    crossSiteSheet1Columns = data.sheet1_columns || [];
     return canonicalMetrics;
   }
 
@@ -611,20 +667,22 @@
   function addComputedColumnEntry(prefill) {
     computedColumnCounter += 1;
     const hasFormula = !!(prefill && prefill.formula_id);
+    const isCrossSite = !!(prefill && prefill.kind === "cross_site");
 
     const row = document.createElement("div");
     row.className = "computed-column-row border border-slate-200 rounded-md p-2.5 bg-slate-50 flex flex-wrap items-center gap-2";
     row.dataset.ccUid = "cc_" + computedColumnCounter;
     row.dataset.ccId = (prefill && prefill.id) || "";
+    row.dataset.ccKind = isCrossSite ? "cross_site" : "";
     row.dataset.formulaId = hasFormula ? String(prefill.formula_id) : "";
 
     row.innerHTML = `
       <input type="text" class="cc-label flex-1 min-w-[160px] rounded-md border border-slate-300 px-2.5 py-1.5 text-xs focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
              placeholder="e.g. Energy Intensity (Aggregate)" value="${prefill ? escapeHtml(prefill.label || "") : ""}">
-      <span class="cc-status text-[10px] font-semibold ${hasFormula ? "text-emerald-600" : "text-amber-600"}">
-        ${hasFormula ? "Formula attached" : "No formula yet"}
+      <span class="cc-status text-[10px] font-semibold ${isCrossSite || hasFormula ? "text-emerald-600" : "text-amber-600"}">
+        ${isCrossSite ? "Cross-site aggregation" : (hasFormula ? "Formula attached" : "No formula yet")}
       </span>
-      <button type="button" class="cc-build-btn text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 whitespace-nowrap">
+      <button type="button" class="cc-build-btn ${isCrossSite ? "hidden" : ""} text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 whitespace-nowrap">
         ${hasFormula ? "View Formula →" : "Build Formula →"}
       </button>
       <button type="button" class="remove-computed-column-btn text-rose-500 hover:text-rose-700 text-[11px] font-bold">✕</button>
@@ -656,7 +714,18 @@
         }
         usedIds.add(candidate);
         row.dataset.ccId = candidate;
+        const existing = ((existingConfigJson && existingConfigJson.computed_columns) || [])
+          .find(col => col && col.id === row.dataset.ccId) || {};
+        if (row.dataset.ccKind === "cross_site") {
+          return {
+            ...existing,
+            id: candidate,
+            label: label,
+            kind: "cross_site",
+          };
+        }
         return {
+          ...existing,
           id: candidate,
           label: label,
           formula_id: row.dataset.formulaId ? parseInt(row.dataset.formulaId, 10) : null,
@@ -725,6 +794,7 @@
         return false;
       }
       currentTemplateId = data.template.id;
+      currentTemplateCode = data.template.code || null;
       existingConfigJson = data.template.config_json || {};
       document.getElementById("template_code").disabled = true; // immutable from here on
       drawerTitle.textContent = "Edit Report Template";
@@ -898,12 +968,142 @@
     previewTitle.textContent = "Report Preview";
     previewSubtitle.textContent = "Select a report template to preview aggregated data.";
     previewActions.classList.add("hidden");
+    previewFyYearContainer.classList.add("hidden");
     previewEmptyState.classList.remove("hidden");
     previewLoadingState.classList.add("hidden");
     previewTableWrapper.classList.add("hidden");
     previewPivotWrapper.classList.add("hidden");
     activePreviewData = [];
+    activeCrossSitePreviewTemplateId = null;
+    lastPreviewMode = null;
+    lastPivotData = null;
+    lastPivotConfig = null;
+    closeFullscreenPreview();
   }
+
+  // Mirrors whatever the main preview pane currently shows into the
+  // fullscreen overlay -- same title/subtitle/banner/export-link/FY value,
+  // and re-runs the SAME render function (renderPivotPreviewTable or
+  // renderPreviewTable) against the SAME cached data, just aimed at the
+  // fullscreen elements. No network request here; call this right after
+  // the main pane's own render call, once its DOM state (banner, FY select,
+  // export href, title text) is already up to date.
+  function renderFullscreenMirror() {
+    fullscreenTitle.textContent = previewTitle.textContent;
+    fullscreenSubtitle.textContent = previewSubtitle.textContent;
+    fullscreenExportBtn.setAttribute("href", previewExportBtn.getAttribute("href") || "#");
+    fullscreenDraftBanner.classList.toggle("hidden", previewDraftBanner.classList.contains("hidden"));
+
+    const fyVisible = !previewFyYearContainer.classList.contains("hidden");
+    fullscreenFyYearContainer.classList.toggle("hidden", !fyVisible);
+    if (fyVisible) fullscreenFyYearSelect.value = previewFyYearSelect.value;
+
+    if (lastPreviewMode === "pivot" && lastPivotData) {
+      fullscreenTableWrapper.classList.add("hidden");
+      fullscreenPivotWrapper.classList.remove("hidden");
+      renderPivotPreviewTable(lastPivotData, lastPivotConfig, fullscreenPivotWrapper, fullscreenPivotThead, fullscreenPivotTbody);
+    } else if (lastPreviewMode === "flat" && activePreviewData) {
+      fullscreenPivotWrapper.classList.add("hidden");
+      fullscreenTableWrapper.classList.remove("hidden");
+      fullscreenSearch.value = "";
+      renderPreviewTable(activePreviewData, fullscreenTableWrapper, fullscreenTbody);
+    }
+  }
+
+  let fullscreenTriggerEl = null;
+
+  function openFullscreenPreview() {
+    if (!lastPreviewMode) return; // nothing loaded yet -- nothing to expand
+    fullscreenTriggerEl = document.activeElement;
+    renderFullscreenMirror();
+    fullscreenOverlay.classList.remove("hidden");
+    fullscreenCloseBtn.focus();
+    document.addEventListener("keydown", handleFullscreenKeydown);
+  }
+
+  function closeFullscreenPreview() {
+    fullscreenOverlay.classList.add("hidden");
+    document.removeEventListener("keydown", handleFullscreenKeydown);
+    if (fullscreenTriggerEl && typeof fullscreenTriggerEl.focus === "function") {
+      fullscreenTriggerEl.focus();
+    }
+    fullscreenTriggerEl = null;
+  }
+
+  function handleFullscreenKeydown(e) {
+    if (e.key === "Escape") closeFullscreenPreview();
+  }
+
+  if (previewFullscreenBtn) previewFullscreenBtn.addEventListener("click", openFullscreenPreview);
+  if (fullscreenCloseBtn) fullscreenCloseBtn.addEventListener("click", closeFullscreenPreview);
+  if (fullscreenOverlay) {
+    fullscreenOverlay.addEventListener("click", function (e) {
+      if (e.target === fullscreenOverlay) closeFullscreenPreview();
+    });
+  }
+
+  // Fetches and renders the cross-site composer preview for templateId.
+  // fyStartYear omitted => server picks latest_fy_start_year_with_data()
+  // (the actual FY with submitted data, not "today's calendar FY" -- a
+  // brand-new FY commonly has zero submissions yet, which silently produced
+  // an all-blank report before this fix). Reused by both the initial
+  // preview-button click and the FY selector's change handler.
+  async function loadCrossSitePreview(templateId, config, fyStartYear) {
+    previewLoadingState.classList.remove("hidden");
+    previewTableWrapper.classList.add("hidden");
+    previewPivotWrapper.classList.add("hidden");
+    previewDraftBanner.classList.add("hidden");
+
+    const query = fyStartYear ? `?fy_start_year=${encodeURIComponent(fyStartYear)}` : "";
+    try {
+      const res = await fetch(`/module/RPTBLD/api/templates/${templateId}/cross-site-preview${query}`);
+      const resData = await res.json();
+      previewLoadingState.classList.add("hidden");
+      if (resData.status !== "success") {
+        previewSubtitle.textContent = "Error loading report data.";
+        previewEmptyState.classList.remove("hidden");
+        showFeedback(resData.message || "Failed to fetch preview data.", "error");
+        return;
+      }
+
+      activePreviewData = null;
+      await loadCanonicalMetrics();
+      renderPivotPreviewTable(resData.data, config);
+      previewDraftBanner.classList.toggle("hidden", !resData.data.include_unapproved);
+      previewSubtitle.textContent = `Grouped pivot preview -- FY ${resData.data.fy_start_year}.`;
+      previewFyYearContainer.classList.remove("hidden");
+      if (resData.data.fy_start_year != null) {
+        previewFyYearSelect.value = String(resData.data.fy_start_year);
+      }
+      previewActions.classList.remove("hidden");
+      previewExportBtn.setAttribute("href", `/module/RPTBLD/api/templates/${templateId}/export`);
+
+      lastPreviewMode = "pivot";
+      lastPivotData = resData.data;
+      lastPivotConfig = config;
+      renderFullscreenMirror();
+    } catch (err) {
+      console.error(err);
+      previewLoadingState.classList.add("hidden");
+      previewSubtitle.textContent = "Connection error.";
+      previewEmptyState.classList.remove("hidden");
+      showFeedback("Failed to connect to server.", "error");
+    }
+  }
+
+  function reloadCrossSitePreviewForYear(fyStartYear) {
+    if (!activeCrossSitePreviewTemplateId) return;
+    fetch(`/module/RPTBLD/api/templates/${activeCrossSitePreviewTemplateId}`)
+      .then(res => res.json())
+      .then(t => loadCrossSitePreview(activeCrossSitePreviewTemplateId, t.config_json, fyStartYear));
+  }
+
+  previewFyYearSelect.addEventListener("change", function () {
+    reloadCrossSitePreviewForYear(this.value);
+  });
+  fullscreenFyYearSelect.addEventListener("change", function () {
+    reloadCrossSitePreviewForYear(this.value);
+  });
 
   // Preview Action -- branches to the pivot renderer when the template has
   // row_groups configured, otherwise keeps the original flat rendering path
@@ -918,15 +1118,26 @@
       previewEmptyState.classList.add("hidden");
       previewTableWrapper.classList.add("hidden");
       previewPivotWrapper.classList.add("hidden");
+      previewFyYearContainer.classList.add("hidden");
       previewLoadingState.classList.remove("hidden");
       previewActions.classList.add("hidden");
       previewTitle.textContent = `Preview: ${templateName}`;
       previewSubtitle.textContent = "Fetching environmental data...";
 
+      previewDraftBanner.classList.add("hidden");
+      activeCrossSitePreviewTemplateId = null;
+
       fetch(`/module/RPTBLD/api/templates/${templateId}`)
         .then(res => res.json())
         .then(t => {
           const isPivot = !!(t.config_json && t.config_json.row_groups && t.config_json.row_groups.length);
+          const isCrossSite = t.code === CROSS_SITE_COMPOSER_TEMPLATE_CODE;
+
+          if (isCrossSite) {
+            activeCrossSitePreviewTemplateId = templateId;
+            return loadCrossSitePreview(templateId, t.config_json);
+          }
+
           const endpoint = isPivot
             ? `/module/RPTBLD/api/templates/${templateId}/pivot-preview`
             : `/module/RPTBLD/api/templates/${templateId}/preview`;
@@ -946,14 +1157,20 @@
                 activePreviewData = null;
                 await loadCanonicalMetrics();
                 renderPivotPreviewTable(resData.data, t.config_json);
+                previewDraftBanner.classList.toggle("hidden", !resData.data.include_unapproved);
                 previewSubtitle.textContent = "Grouped pivot preview (row groups configured).";
+                lastPreviewMode = "pivot";
+                lastPivotData = resData.data;
+                lastPivotConfig = t.config_json;
               } else {
                 activePreviewData = resData.data;
                 renderPreviewTable(activePreviewData);
                 previewSubtitle.textContent = `Aggregated metrics from ${activePreviewData.length} records.`;
+                lastPreviewMode = "flat";
               }
               previewActions.classList.remove("hidden");
               previewExportBtn.setAttribute("href", `/module/RPTBLD/api/templates/${templateId}/export`);
+              renderFullscreenMirror();
             });
         })
         .catch(err => {
@@ -1013,13 +1230,58 @@
     wrapperEl.classList.remove("hidden");
   }
 
+  // Column-level number formatting for the pivot table: large absolute
+  // totals (cargo, raw energy/emissions) read better with no decimals --
+  // forcing 2-4 decimals on an 8-digit cargo figure is noise, not precision.
+  // Ratios/intensities are the opposite -- 2 decimals is the meaningful
+  // precision there. Keyed by canonical metric_key AND computed_column id
+  // (same flat namespace both draw from).
+  const ZERO_DECIMAL_REPORT_COLUMNS = new Set([
+    "cargo", "energy_elec", "energy_fossil", "energy_total_gj",
+    "scope1", "scope2", "total_ghg", "total_ghg_emission",
+  ]);
+  const PERCENT_SUFFIX_REPORT_COLUMNS = new Set(["pct_contribution_total_ghg"]);
+
+  function formatReportNumber(value, columnKey) {
+    if (value === null || value === undefined) {
+      return `<span class="text-slate-300 italic text-[11px] select-none">–</span>`;
+    }
+    if (typeof value !== "number") return escapeHtml(String(value));
+    const decimals = ZERO_DECIMAL_REPORT_COLUMNS.has(columnKey) ? 0 : 2;
+    const formatted = value.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    return PERCENT_SUFFIX_REPORT_COLUMNS.has(columnKey) ? `${formatted}%` : formatted;
+  }
+
+  function isCrossSiteSheet1Config(config) {
+    const computedColumns = (config && config.computed_columns) || [];
+    return computedColumns.some(c => c && c.kind === "cross_site")
+      || (config && config.grand_total_label === "Total All Locations (incl. Non SPT)");
+  }
+
+  function buildPivotColumnSpecs(config, metricKeys, computedIds, computedLabels) {
+    if (isCrossSiteSheet1Config(config)) {
+      const metricSet = new Set(metricKeys);
+      const computedSet = new Set(computedIds);
+      return crossSiteSheet1Columns.filter(col =>
+        col.kind === "metric" ? metricSet.has(col.id) : computedSet.has(col.id)
+      );
+    }
+    return [
+      ...metricKeys.map(id => ({ kind: "metric", id: id, label: metricDisplayLabel(id) })),
+      ...computedIds.map(id => ({ kind: "computed", id: id, label: computedLabels[id] || id })),
+    ];
+  }
+
   // Render Table helper (pivot mode): per-site rows, a bold subtotal row per
   // group, a bold grand-total row. Amber background on any sourced-metric
   // cell whose verified flag is false, or an override computed-cell whose
   // verified flag is false -- matches the bg-amber-* "needs attention"
   // convention already used elsewhere in this app (workbook_sheet.js,
-  // package_review.js). null renders as an em dash; a computed cell with a
-  // non-null error renders that error text in rose/red, not blank.
+  // package_review.js). A computed cell with a non-null error renders that
+  // error text in rose/red, not blank. Group+Site are merged into a single
+  // sticky-left column (this table commonly runs 20+ columns wide) so
+  // scrolling right never loses track of which row you're on; the header
+  // row is sticky-top for the same reason scrolling down a long table.
   // Parameterized the same way as renderPreviewTable() above, for the same
   // reason (Review step reuse).
   function renderPivotPreviewTable(pivotData, config, wrapperEl, theadEl, tbodyEl) {
@@ -1033,66 +1295,122 @@
     const computedLabels = {};
     computedColumns.forEach(c => { computedLabels[c.id] = c.label || c.id; });
     const computedIds = computedColumns.map(c => c.id);
+    const columnSpecs = buildPivotColumnSpecs(config, metricKeys, computedIds, computedLabels);
+
+    const HEADER_CELL_CLASS = "sticky top-0 z-10 bg-slate-50 py-3 px-3 text-right align-bottom min-w-[140px] whitespace-normal break-words leading-snug border-b border-slate-200";
+    const CORNER_CELL_CLASS = "sticky top-0 left-0 z-30 bg-slate-50 py-3 px-3 text-left align-bottom min-w-[180px] whitespace-normal break-words leading-snug border-b border-r border-slate-200";
 
     theadEl.innerHTML = `
-      <tr class="border-b border-slate-200 text-xs font-bold uppercase text-slate-500">
-        <th class="pb-3 pr-3">Group</th>
-        <th class="pb-3 pr-3">Site</th>
-        ${metricKeys.map(k => `<th class="pb-3 pr-3 text-right">${escapeHtml(metricDisplayLabel(k))}</th>`).join("")}
-        ${computedIds.map(id => `<th class="pb-3 pr-3 text-right">${escapeHtml(computedLabels[id] || id)}</th>`).join("")}
+      <tr class="text-[11px] font-bold uppercase text-slate-500 tracking-wide">
+        <th class="${CORNER_CELL_CLASS}">${isCrossSiteSheet1Config(config) ? "Location" : "Group / Site"}</th>
+        ${columnSpecs.map(col => `<th class="${HEADER_CELL_CLASS}">${escapeHtml(col.label)}</th>`).join("")}
       </tr>
     `;
 
-    function formatValue(v) {
-      if (v === null || v === undefined) return `<span class="text-slate-300">—</span>`;
-      if (typeof v === "number") return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 });
-      return escapeHtml(String(v));
+    // This app's own global stylesheet (styles.css) has
+    // `body[data-theme="jsw-excel"] table.w-full tbody td { color: ...;
+    // border: ...; padding: ... }` and a `tbody tr:nth-child(even) {
+    // background }` zebra rule, BOTH targeting plain td/tr elements with
+    // higher CSS specificity than any Tailwind utility class -- so a <tr>
+    // class like text-white/font-bold/bg-slate-900 is silently defeated for
+    // its child <td>s (confirmed: the grand-total row's non-sticky cells
+    // rendered with the wrong nth-child-driven background and unreadable
+    // dark-on-dark text; the subtotal row's bold/top-border never rendered
+    // at all). This table also uses border-collapse, under which a cell's
+    // own border always wins over its row's border regardless of
+    // specificity -- another reason a <tr>-level border class has no
+    // effect here. Inline styles beat all of the above (none of those
+    // rules use !important), so every row-type distinction is applied
+    // per-<td> below, never per-<tr>.
+    const ROW_TREATMENT = {
+      siteWhite: { bg: "#ffffff" },
+      siteStripe: { bg: "#f8fafc" },
+      subtotal: { bg: "#e2e8f0", color: "#1e293b", weight: "700", borderTop: "2px solid #94a3b8" },
+      grandTotal: { bg: "#0f172a", color: "#ffffff", weight: "700", borderTop: "2px solid #334155" },
+    };
+    const AMBER_BG = "#fffbeb";
+    const ERROR_COLOR = "#e11d48";
+
+    function cellStyle(treatment, overrides) {
+      const t = Object.assign({}, treatment, overrides || {});
+      let style = `background-color:${t.bg};`;
+      if (t.color) style += `color:${t.color};`;
+      if (t.weight) style += `font-weight:${t.weight};`;
+      if (t.borderTop) style += `border-top:${t.borderTop};`;
+      return style;
     }
 
-    function metricCellHtml(cellInfo) {
-      if (!cellInfo) return `<td class="py-2.5 pr-3 text-right">—</td>`;
-      const amberClass = cellInfo.verified === false ? "bg-amber-50" : "";
-      return `<td class="py-2.5 pr-3 text-right ${amberClass}">${formatValue(cellInfo.value)}</td>`;
+    function metricCellHtml(cellInfo, key, treatment) {
+      if (!cellInfo) return `<td class="py-2.5 px-3 text-right whitespace-nowrap" style="${cellStyle(treatment)}">${formatReportNumber(null)}</td>`;
+      // A blank cell (nothing aliased/no data at all) has nothing to verify --
+      // only an actual unverified *value* gets the amber "needs attention" tint.
+      const isAmber = cellInfo.value !== null && cellInfo.verified === false;
+      const style = isAmber ? cellStyle(treatment, { bg: AMBER_BG }) : cellStyle(treatment);
+      return `<td class="py-2.5 px-3 text-right whitespace-nowrap" style="${style}">${formatReportNumber(cellInfo.value, key)}</td>`;
     }
 
-    function computedCellHtml(cellInfo) {
-      if (!cellInfo) return `<td class="py-2.5 pr-3 text-right">—</td>`;
+    function computedCellHtml(cellInfo, key, treatment) {
+      if (!cellInfo) return `<td class="py-2.5 px-3 text-right whitespace-nowrap" style="${cellStyle(treatment)}">${formatReportNumber(null)}</td>`;
       if (cellInfo.error) {
-        return `<td class="py-2.5 pr-3 text-right text-rose-600 text-[11px] font-semibold">${escapeHtml(cellInfo.error)}</td>`;
+        const style = cellStyle(treatment, { color: ERROR_COLOR, weight: "600" });
+        return `<td class="py-2.5 px-3 text-right text-[11px]" style="${style}">${escapeHtml(cellInfo.error)}</td>`;
       }
-      const amberClass = (cellInfo.source === "override" && cellInfo.verified === false) ? "bg-amber-50" : "";
-      return `<td class="py-2.5 pr-3 text-right ${amberClass}">${formatValue(cellInfo.value)}</td>`;
+      const isAmber = cellInfo.source === "override" && cellInfo.verified === false;
+      const style = isAmber ? cellStyle(treatment, { bg: AMBER_BG }) : cellStyle(treatment);
+      return `<td class="py-2.5 px-3 text-right whitespace-nowrap" style="${style}">${formatReportNumber(cellInfo.value, key)}</td>`;
     }
 
     const rowsHtml = [];
+    let zebraIndex = 0;
 
     (pivotData.row_groups || []).forEach(group => {
       group.site_rows.forEach(row => {
+        const treatment = zebraIndex % 2 === 0 ? ROW_TREATMENT.siteWhite : ROW_TREATMENT.siteStripe;
+        zebraIndex += 1;
         rowsHtml.push(`
-          <tr class="hover:bg-slate-50 transition-colors border-b border-slate-100">
-            <td class="py-2.5 pr-3 text-slate-500">${escapeHtml(group.label || group.id)}</td>
-            <td class="py-2.5 pr-3 font-medium text-slate-800">${escapeHtml(row.site_name || "")}</td>
-            ${metricKeys.map(k => metricCellHtml(row.metrics[k])).join("")}
-            ${computedIds.map(id => computedCellHtml(row.computed[id])).join("")}
+          <tr class="hover:bg-indigo-50/50 transition-colors border-b border-slate-100">
+            <td class="sticky left-0 z-[5] py-2.5 px-3 whitespace-nowrap border-r border-slate-100" style="${cellStyle(treatment)}">
+              <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">${escapeHtml(group.label || group.id)}</div>
+              <div class="font-medium text-slate-800">${escapeHtml(row.site_name || "")}</div>
+            </td>
+            ${columnSpecs.map(col => col.kind === "metric"
+              ? metricCellHtml(row.metrics[col.id], col.id, treatment)
+              : computedCellHtml(row.computed[col.id], col.id, treatment)
+            ).join("")}
           </tr>
         `);
       });
 
-      const subtotal = group.subtotal;
-      rowsHtml.push(`
-        <tr class="bg-slate-50 border-b border-slate-200 font-bold text-slate-800">
-          <td class="py-2.5 pr-3" colspan="2">${escapeHtml(group.label || group.id)} — ${escapeHtml(subtotal.label || "Subtotal")}</td>
-          ${metricKeys.map(k => `<td class="py-2.5 pr-3 text-right">${formatValue(subtotal.metrics[k])}</td>`).join("")}
-          ${computedIds.map(id => computedCellHtml(subtotal.computed[id])).join("")}
-        </tr>
-      `);
+      // suppress_own_subtotal (per-group config flag): this group's own
+      // subtotal is never shown on its own -- its label is really the grand
+      // total's label (e.g. "Total All Locations (incl. Non SPT)" IS the
+      // grand total, not an independent sum of just this group's rows).
+      // The grand_total row rendered below carries the correct combined
+      // value under that same label.
+      if (!group.suppress_own_subtotal) {
+        const subtotal = group.subtotal;
+        const treatment = ROW_TREATMENT.subtotal;
+        rowsHtml.push(`
+          <tr class="border-b border-slate-200">
+            <td class="sticky left-0 z-[5] py-2.5 px-3 whitespace-nowrap border-r border-slate-200" style="${cellStyle(treatment)}">${escapeHtml(group.label || group.id)} — ${escapeHtml(subtotal.label || "Subtotal")}</td>
+            ${columnSpecs.map(col => col.kind === "metric"
+              ? `<td class="py-2.5 px-3 text-right whitespace-nowrap" style="${cellStyle(treatment)}">${formatReportNumber(subtotal.metrics[col.id], col.id)}</td>`
+              : computedCellHtml(subtotal.computed[col.id], col.id, treatment)
+            ).join("")}
+          </tr>
+        `);
+      }
     });
 
+    const grandTotalLabel = (config && config.grand_total_label) || "Grand Total";
+    const gtTreatment = ROW_TREATMENT.grandTotal;
     rowsHtml.push(`
-      <tr class="bg-slate-900 text-white font-bold">
-        <td class="py-3 pr-3" colspan="2">Grand Total</td>
-        ${metricKeys.map(k => `<td class="py-3 pr-3 text-right">${formatValue(pivotData.grand_total.metrics[k])}</td>`).join("")}
-        ${computedIds.map(id => computedCellHtml(pivotData.grand_total.computed[id])).join("")}
+      <tr>
+        <td class="sticky left-0 z-[5] py-3 px-3 whitespace-nowrap" style="${cellStyle(gtTreatment)}">${escapeHtml(grandTotalLabel)}</td>
+        ${columnSpecs.map(col => col.kind === "metric"
+          ? `<td class="py-3 px-3 text-right whitespace-nowrap" style="${cellStyle(gtTreatment)}">${formatReportNumber(pivotData.grand_total.metrics[col.id], col.id)}</td>`
+          : computedCellHtml(pivotData.grand_total.computed[col.id], col.id, gtTreatment)
+        ).join("")}
       </tr>
     `);
 
@@ -1109,11 +1427,15 @@
     reviewLoadingState.classList.remove("hidden");
     reviewPreviewTableWrapper.classList.add("hidden");
     reviewPreviewPivotWrapper.classList.add("hidden");
+    reviewDraftBanner.classList.add("hidden");
 
     const isPivot = !!(existingConfigJson && existingConfigJson.row_groups && existingConfigJson.row_groups.length);
-    const endpoint = isPivot
-      ? `/module/RPTBLD/api/templates/${currentTemplateId}/pivot-preview`
-      : `/module/RPTBLD/api/templates/${currentTemplateId}/preview`;
+    const isCrossSite = currentTemplateCode === CROSS_SITE_COMPOSER_TEMPLATE_CODE;
+    const endpoint = isCrossSite
+      ? `/module/RPTBLD/api/templates/${currentTemplateId}/cross-site-preview`
+      : isPivot
+        ? `/module/RPTBLD/api/templates/${currentTemplateId}/pivot-preview`
+        : `/module/RPTBLD/api/templates/${currentTemplateId}/preview`;
 
     try {
       const res = await fetch(endpoint);
@@ -1129,6 +1451,7 @@
           resData.data, existingConfigJson,
           reviewPreviewPivotWrapper, reviewPreviewPivotThead, reviewPreviewPivotTbody,
         );
+        reviewDraftBanner.classList.toggle("hidden", !resData.data.include_unapproved);
       } else {
         renderPreviewTable(resData.data, reviewPreviewTableWrapper, reviewPreviewTbody);
       }
@@ -1139,28 +1462,35 @@
     }
   }
 
-  // Live Table Search Filter (flat mode only -- a no-op while a pivot preview is showing)
+  // Live Table Search Filter (flat mode only -- a no-op while a pivot preview
+  // is showing). Shared by both the main pane's search box and the
+  // fullscreen overlay's own copy, each rendering into its own table.
+  function filterFlatRecords(query) {
+    if (!query) return activePreviewData;
+    return activePreviewData.filter(r => {
+      return (
+        r.period_label.toLowerCase().includes(query) ||
+        r.site_name.toLowerCase().includes(query) ||
+        r.form_name.toLowerCase().includes(query) ||
+        r.field_code.toLowerCase().includes(query) ||
+        r.field_name.toLowerCase().includes(query) ||
+        (r.unit && r.unit.toLowerCase().includes(query)) ||
+        (r.value !== null && String(r.value).toLowerCase().includes(query))
+      );
+    });
+  }
+
   if (previewSearch) {
     previewSearch.addEventListener("input", function () {
       if (!activePreviewData) return;
-      const query = this.value.toLowerCase().trim();
-      if (!query) {
-        renderPreviewTable(activePreviewData);
-        return;
-      }
+      renderPreviewTable(filterFlatRecords(this.value.toLowerCase().trim()));
+    });
+  }
 
-      const filtered = activePreviewData.filter(r => {
-        return (
-          r.period_label.toLowerCase().includes(query) ||
-          r.site_name.toLowerCase().includes(query) ||
-          r.form_name.toLowerCase().includes(query) ||
-          r.field_code.toLowerCase().includes(query) ||
-          r.field_name.toLowerCase().includes(query) ||
-          (r.unit && r.unit.toLowerCase().includes(query)) ||
-          (r.value !== null && String(r.value).toLowerCase().includes(query))
-        );
-      });
-      renderPreviewTable(filtered);
+  if (fullscreenSearch) {
+    fullscreenSearch.addEventListener("input", function () {
+      if (!activePreviewData) return;
+      renderPreviewTable(filterFlatRecords(this.value.toLowerCase().trim()), fullscreenTableWrapper, fullscreenTbody);
     });
   }
 
