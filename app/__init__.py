@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import text
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.common.auth import current_user
 from app.common.csrf import csrf_token, validate_csrf
@@ -45,6 +46,10 @@ MODULE_BLUEPRINTS = [
 def create_app(config_class=Config):
     app = Flask(__name__, template_folder="../templates", static_folder="../static")
     app.config.from_object(config_class)
+    if not app.config.get("MAX_CONTENT_LENGTH"):
+        app.config["MAX_CONTENT_LENGTH"] = Config.MAX_CONTENT_LENGTH
+    if not app.config.get("MAX_PROOF_UPLOAD_BYTES"):
+        app.config["MAX_PROOF_UPLOAD_BYTES"] = app.config["MAX_CONTENT_LENGTH"]
 
     db.init_app(app)
 
@@ -80,6 +85,10 @@ def create_app(config_class=Config):
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
         return response
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def request_entity_too_large(error):
+        return jsonify({"error": "Uploaded file is too large."}), 413
 
     @app.context_processor
     def inject_auth_context():

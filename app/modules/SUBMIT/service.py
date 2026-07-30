@@ -837,6 +837,35 @@ def workbook_values_payload(site_id, form_id, fy_start_year, fields):
     }
 
 
+def active_proofs_query(submission_id, field_id=None):
+    query = ProofDocument.query.filter_by(submission_id=submission_id, is_deleted=False)
+    if field_id is not None:
+        query = query.filter_by(field_id=field_id)
+    return query.order_by(ProofDocument.uploaded_at.desc(), ProofDocument.id.desc())
+
+
+def active_proof_for_field(submission_id, field_id):
+    return active_proofs_query(submission_id, field_id=field_id).first()
+
+
+def active_proofs_by_field(submission_id):
+    proofs = {}
+    for proof in active_proofs_query(submission_id).all():
+        if proof.field_id is not None and proof.field_id not in proofs:
+            proofs[proof.field_id] = proof
+    return proofs
+
+
+def supersede_active_proofs(submission_id, field_id, user_id):
+    proofs = active_proofs_query(submission_id, field_id=field_id).all()
+    for proof in proofs:
+        proof.is_deleted = True
+        proof.deleted_at = datetime.now(timezone.utc)
+        proof.deleted_by = user_id
+        proof.delete_reason = "Superseded by a newer proof upload."
+    return proofs
+
+
 def _submission_values_payload(submission, fields):
     if not submission:
         return {}
@@ -846,13 +875,7 @@ def _submission_values_payload(submission, fields):
     values = {}
     db_values = SubmissionValue.query.filter_by(submission_id=submission.id).all()
 
-    proofs = {
-        proof.field_id: proof
-        for proof in ProofDocument.query.filter_by(
-            submission_id=submission.id,
-            is_deleted=False,
-        ).all()
-    }
+    proofs = active_proofs_by_field(submission.id)
 
     for value in db_values:
         code = field_id_to_code.get(value.field_id)
@@ -874,10 +897,7 @@ def _submission_values_payload(submission, fields):
 def submission_proofs_payload(submission):
     if not submission:
         return {}
-    proofs = ProofDocument.query.filter_by(
-        submission_id=submission.id,
-        is_deleted=False,
-    ).all()
+    proofs = active_proofs_by_field(submission.id).values()
     return {
         proof.field_id: {
             "original_name": proof.original_name,
@@ -4021,11 +4041,7 @@ def submit_submission(submission_id, user_id):
 
         # 2. Proof required check
         if config.get("proof_required") is True and fv.field_type == "file":
-            proof = ProofDocument.query.filter_by(
-                submission_id=submission_id,
-                field_id=f.id,
-                is_deleted=False
-            ).first()
+            proof = active_proof_for_field(submission_id, f.id)
             if not proof:
                 validation_errors[f.field_code] = f"Proof document is required for {fv.field_name}."
                 continue

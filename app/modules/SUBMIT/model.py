@@ -190,4 +190,11 @@ class ProofDocument(SoftDeleteMixin, db.Model):
     __table_args__ = (
         db.Index("idx_proof_docs_submission", "submission_id"),
         db.Index("idx_proof_docs_field", "field_id", postgresql_where=db.text("field_id IS NOT NULL")),
+        db.Index(
+            "uq_active_proof_document_submission_field",
+            "submission_id",
+            "field_id",
+            unique=True,
+            postgresql_where=db.text("is_deleted = false AND field_id IS NOT NULL"),
+        ),
     )

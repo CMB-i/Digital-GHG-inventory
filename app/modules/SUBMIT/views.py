@@ -5,7 +5,7 @@ from app.common.auth import current_user, require_login
 from app.common.permissions import has_permission
 from app.common.responses import success_response, error_response
 from app.database import db
-from app.common.file_storage import save_file, get_file_path
+from app.common.file_storage import delete_file, save_file, get_file_path
 from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument
 from app.modules.FORMBLD.model import Form, Field, FieldVersion
 from app.modules.PERIOD.model import ReportingPeriod
@@ -28,7 +28,10 @@ from app.modules.SUBMIT.service import (
     CELL_STATE_DRAFT_FILLED,
     DuplicateSubmissionError,
     SubmissionValidationError,
-    PackageSubmissionError
+    PackageSubmissionError,
+    active_proof_for_field,
+    active_proofs_by_field,
+    supersede_active_proofs,
 )
 
 MODULE_CODE = "SUBMIT"
@@ -37,6 +40,32 @@ bp = Blueprint(MODULE_CODE.lower(), __name__, url_prefix=f"/module/{MODULE_CODE}
 
 def _page_no_access():
     return render_template("no_access.html"), 403
+
+
+def _configured_field_mime_types(field_config):
+    values = field_config.get("accepted_mime_types")
+    if not isinstance(values, list):
+        return set()
+    return {str(value).strip().lower() for value in values if str(value).strip()}
+
+
+def _field_upload_limit_bytes(field_config):
+    limit = int(current_app.config.get("MAX_PROOF_UPLOAD_BYTES") or current_app.config.get("MAX_CONTENT_LENGTH"))
+    for key in ("max_file_size_bytes", "max_upload_size_bytes"):
+        value = field_config.get(key)
+        if value not in (None, ""):
+            limit = min(limit, int(value))
+    value = field_config.get("max_file_size_mb") or field_config.get("max_upload_size_mb")
+    if value not in (None, ""):
+        limit = min(limit, int(float(value) * 1024 * 1024))
+    return limit
+
+
+def _request_clearly_exceeds_upload_limit(limit):
+    if not request.content_length:
+        return False
+    multipart_overhead = 64 * 1024
+    return request.content_length > limit + multipart_overhead
 
 
 @bp.route("/")
@@ -162,7 +191,10 @@ def download_proof(storage_key):
     """
     Serves uploaded proof documents.
     """
-    proof = ProofDocument.query.filter_by(storage_key=storage_key, is_deleted=False).first()
+    proof = ProofDocument.query.filter_by(
+        storage_key=storage_key,
+        is_deleted=False,
+    ).order_by(ProofDocument.uploaded_at.desc(), ProofDocument.id.desc()).first()
     if not proof:
         return error_response("Proof document not found.", 404)
     submission = Submission.query.get(proof.submission_id)
@@ -368,6 +400,7 @@ def get_submission_details(submission_id):
         
     values_dict = {}
     calc_status_dict = {}
+    proofs_by_field = active_proofs_by_field(submission_id)
     for val in db_values:
         code = id_to_code.get(val.field_id)
         if not code:
@@ -375,11 +408,7 @@ def get_submission_details(submission_id):
 
         f_info = next((fd for fd in fields_data if fd["field_id"] == val.field_id), None)
         if f_info and f_info["field_type"] == "file":
-            proof = ProofDocument.query.filter_by(
-                submission_id=submission_id,
-                field_id=val.field_id,
-                is_deleted=False
-            ).first()
+            proof = proofs_by_field.get(val.field_id)
             if proof:
                 values_dict[code] = {
                     "storage_key": proof.storage_key,
@@ -465,17 +494,14 @@ def autosave_endpoint(submission_id):
         
         values_dict = {}
         calc_status_dict = {}
+        proofs_by_field = active_proofs_by_field(submission_id)
         for val in db_values:
             code = id_to_code.get(val.field_id)
             if not code:
                 continue
             f_info = next((fd for fd in fields_data if fd["field_id"] == val.field_id), None)
             if f_info and f_info["field_type"] == "file":
-                proof = ProofDocument.query.filter_by(
-                    submission_id=submission_id,
-                    field_id=val.field_id,
-                    is_deleted=False
-                ).first()
+                proof = proofs_by_field.get(val.field_id)
                 if proof:
                     values_dict[code] = {
                         "storage_key": proof.storage_key,
@@ -536,13 +562,6 @@ def upload_proof_endpoint(submission_id, field_code):
     if submission.status not in ("Draft", "Changes Requested"):
         return error_response(f"Cannot edit submission in status: {submission.status}", 400)
 
-    if "file" not in request.files:
-        return error_response("No file uploaded.", 400)
-
-    file = request.files["file"]
-    if file.filename == "":
-        return error_response("No file selected.", 400)
-
     field = Field.query.filter_by(form_id=submission.form_id, field_code=field_code, is_deleted=False).first()
     if not field:
         return error_response("Field not found.", 404)
@@ -550,14 +569,33 @@ def upload_proof_endpoint(submission_id, field_code):
     field_version = FieldVersion.query.filter_by(field_id=field.id, form_version_id=submission.form_version_id).first()
     if not field_version:
         return error_response("Field version not found.", 404)
+    if field_version.field_type != "file":
+        return error_response("Proof uploads are only allowed for file fields.", 400)
 
+    field_config = field_version.field_config or {}
+    accepted_mime_types = _configured_field_mime_types(field_config)
+    upload_limit = _field_upload_limit_bytes(field_config)
+    if _request_clearly_exceeds_upload_limit(upload_limit):
+        return error_response("File is too large.", 400)
+
+    if "file" not in request.files:
+        return error_response("No file uploaded.", 400)
+
+    file = request.files["file"]
+    if file.filename == "":
+        return error_response("No file selected.", 400)
+
+    mime_type = (file.content_type or "application/octet-stream").lower()
+    if accepted_mime_types and mime_type not in accepted_mime_types:
+        return error_response("File type is not allowed for this field.", 400)
+
+    saved_storage_key = None
     try:
-        prior_proof = ProofDocument.query.filter_by(
-            submission_id=submission_id,
-            field_id=field.id,
-            is_deleted=False,
-        ).order_by(ProofDocument.uploaded_at.desc(), ProofDocument.id.desc()).first()
-        saved_info = save_file(file)
+        prior_proof = active_proof_for_field(submission_id, field.id)
+        saved_info = save_file(file, max_size_bytes=upload_limit)
+        saved_storage_key = saved_info["storage_key"]
+        supersede_active_proofs(submission_id, field.id, user.id)
+        db.session.flush()
         
         # Save ProofDocument metadata
         proof = ProofDocument(
@@ -628,6 +666,8 @@ def upload_proof_endpoint(submission_id, field_code):
         )
     except Exception as e:
         db.session.rollback()
+        if saved_storage_key:
+            delete_file(saved_storage_key)
         return error_response(str(e), 400)
 
 

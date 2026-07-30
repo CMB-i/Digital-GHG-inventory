@@ -13,8 +13,8 @@ from app.modules.ACCESS.service import get_user_permissions
 from app.modules.SITEMST.model import Site
 from app.modules.PERIOD.model import ReportingPeriod
 from app.modules.FORMBLD.model import Form, Field, FieldVersion
-from app.modules.SUBMIT.model import Submission, SubmissionValue, ProofDocument
-from app.modules.SUBMIT.service import human_sheet_label
+from app.modules.SUBMIT.model import Submission, SubmissionValue
+from app.modules.SUBMIT.service import active_proof_for_field, human_sheet_label
 from app.modules.USRMGMT.model import User
 from app.modules.FRMULA.model import Formula, FormulaVersion
 from app.modules.FRMULA.service import (
@@ -368,7 +368,7 @@ def generate_report_data(template_id, user_id):
             if fv.field_type == "calculated":
                 display_val = float(val_obj.calculated_value) if val_obj.calculated_value is not None else None
             elif fv.field_type == "file":
-                proof = ProofDocument.query.filter_by(submission_id=sub.id, field_id=f.id, is_deleted=False).first()
+                proof = active_proof_for_field(sub.id, f.id)
                 display_val = proof.original_name if proof else "No Upload"
             else:
                 try:
