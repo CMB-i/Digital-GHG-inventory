@@ -1,3 +1,4 @@
+from app.common.models import utc_now
 from app.common.validators import ValidationError, validate_code
 from app.database import db
 from app.modules.ACCESS.model import AccessMatrix
@@ -77,6 +78,7 @@ def get_user_permissions(
 
 
 ENTITY_ROWS = (
+    {"key": "all", "label": "All Entities"},
     {"key": "user", "label": "Users"},
     {"key": "site", "label": "Sites"},
     {"key": "form", "label": "Forms"},
@@ -108,6 +110,7 @@ ENTITY_CHIP_CATEGORIES = {
 }
 
 SUPPORTED_PERMISSION_FLAGS = {
+    "all": set(PERMISSION_FLAGS),
     "user": {"can_view", "can_create", "can_manage_users"},
     "site": {"can_view", "can_create", "can_edit", "can_delete", "can_export"},
     "form": {"can_view", "can_create", "can_edit", "can_delete", "can_export", "can_manage_forms"},
@@ -256,6 +259,16 @@ def _permission_snapshot(row):
     return {flag: bool(getattr(row, flag)) for flag in PERMISSION_FLAGS}
 
 
+def _merged_permission_snapshot(rows):
+    if not rows:
+        return None
+    snapshot = empty_permissions()
+    for row in rows:
+        for flag in PERMISSION_FLAGS:
+            snapshot[flag] = snapshot[flag] or bool(getattr(row, flag))
+    return snapshot
+
+
 def upsert_access_row(
     user_id,
     scope_type,
@@ -296,7 +309,7 @@ def upsert_access_row(
             )
 
     normalized_scope_site_id = scope_site_id if scope_type == "site" else None
-    row = AccessMatrix.query.filter_by(
+    rows = AccessMatrix.query.filter_by(
         user_id=user_id,
         scope_type=scope_type,
         scope_site_id=normalized_scope_site_id,
@@ -304,9 +317,15 @@ def upsert_access_row(
         entity_type=validated_entity_type,
         entity_id=None,
         is_deleted=False,
-    ).first()
+    ).order_by(AccessMatrix.updated_at.desc(), AccessMatrix.id.desc()).all()
 
-    old_values = _permission_snapshot(row) if row is not None else None
+    row = rows[0] if rows else None
+    old_values = _merged_permission_snapshot(rows)
+    for duplicate in rows[1:]:
+        duplicate.is_deleted = True
+        duplicate.deleted_at = utc_now()
+        duplicate.deleted_by = actor_id
+        duplicate.delete_reason = "Superseded by active Access Matrix uniqueness enforcement."
     if row is None:
         row = AccessMatrix(
             user_id=user_id,

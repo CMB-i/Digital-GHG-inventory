@@ -5,9 +5,24 @@ blocking site-scoped-only users, and the entity_type == "all" wildcard being
 missed by hand-rolled AccessMatrix queries).
 """
 import pytest
+from sqlalchemy import text
 
 from app.common.permissions import has_permission
-from app.modules.ACCESS.service import get_user_permissions
+from app.modules.ACCESS.service import build_permission_matrix, get_user_permissions, upsert_access_row
+
+
+ACCESS_UNIQUE_INDEX_SQL = """
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_access_matrix_permission_scope
+ON access_matrix (
+    user_id,
+    scope_type,
+    coalesce(scope_site_id, 0),
+    coalesce(scope_region_id, 0),
+    entity_type,
+    coalesce(entity_id, 0)
+)
+WHERE is_deleted = false
+"""
 
 
 class TestHasPermissionScoping:
@@ -68,6 +83,127 @@ class TestHasPermissionScoping:
         perms = get_user_permissions(user_id=user.id, scope_type="site", scope_site_id=site.id, entity_type="submission")
         assert perms["can_view"] is True
         assert perms["can_approve"] is True
+
+    def test_duplicate_active_rows_are_collapsed_when_revoked(
+        self, db_session, make_user, system_user,
+    ):
+        from app.modules.ACCESS.model import AccessMatrix
+
+        db_session.execute(text("DROP INDEX IF EXISTS uq_active_access_matrix_permission_scope"))
+        db_session.commit()
+        user = None
+        try:
+            user = make_user()
+            for _ in range(2):
+                db_session.add(
+                    AccessMatrix(
+                        user_id=user.id,
+                        scope_type="global",
+                        entity_type="submission",
+                        can_view=True,
+                        created_by=system_user,
+                        updated_by=system_user,
+                    )
+                )
+            db_session.flush()
+            assert has_permission(user.id, "submission", "view") is True
+
+            upsert_access_row(
+                user_id=user.id,
+                scope_type="global",
+                scope_site_id=None,
+                entity_type="submission",
+                permission_values={"can_view": False},
+                actor_id=system_user,
+            )
+            db_session.flush()
+
+            assert has_permission(user.id, "submission", "view") is False
+            active_rows = AccessMatrix.query.filter_by(
+                user_id=user.id,
+                scope_type="global",
+                entity_type="submission",
+                is_deleted=False,
+            ).all()
+            assert len(active_rows) == 1
+            assert active_rows[0].can_view is False
+        finally:
+            if user is not None:
+                db_session.execute(text("DELETE FROM access_matrix WHERE user_id = :user_id"), {"user_id": user.id})
+            db_session.execute(text(ACCESS_UNIQUE_INDEX_SQL))
+            db_session.commit()
+
+    def test_user_creation_writes_non_sensitive_audit_log(
+        self, db_session, make_user, created_objects,
+    ):
+        from app.modules.AUDITL.model import AuditLog
+        from app.modules.USRMGMT.service import create_user
+
+        actor = make_user()
+        temporary_password = "TempPass123!"
+        user = create_user(
+            full_name="Created User",
+            email="created-user@example.com",
+            phone="9876543210",
+            temporary_password=temporary_password,
+            actor_id=actor.id,
+        )
+        db_session.flush()
+        created_objects.append(user)
+
+        audit = AuditLog.query.filter_by(
+            entity_type="user",
+            entity_id=str(user.id),
+            action="USER_CREATED",
+        ).one()
+        assert audit.actor_user_id == actor.id
+        assert set(audit.new_values.keys()) == {"id", "full_name", "email", "phone", "is_active"}
+        assert audit.new_values["id"] == user.id
+        assert audit.new_values["email"] == "created-user@example.com"
+        payload = f"{audit.old_values} {audit.new_values} {audit.metadata_json}"
+        assert temporary_password not in payload
+        assert "password" not in payload.lower()
+
+    def test_wildcard_all_grant_can_be_created_edited_and_revoked_through_access_service(
+        self, db_session, make_user, system_user,
+    ):
+        user = make_user()
+
+        row = upsert_access_row(
+            user_id=user.id,
+            scope_type="global",
+            scope_site_id=None,
+            entity_type="all",
+            permission_values={"can_view": True},
+            actor_id=system_user,
+        )
+        db_session.flush()
+        assert row.entity_type == "all"
+        assert has_permission(user.id, "report", "view") is True
+        assert build_permission_matrix(user.id, "global")["all"]["can_view"] is True
+
+        upsert_access_row(
+            user_id=user.id,
+            scope_type="global",
+            scope_site_id=None,
+            entity_type="all",
+            permission_values={"can_view": True, "can_export": True},
+            actor_id=system_user,
+        )
+        db_session.flush()
+        assert has_permission(user.id, "report", "export") is True
+
+        upsert_access_row(
+            user_id=user.id,
+            scope_type="global",
+            scope_site_id=None,
+            entity_type="all",
+            permission_values={},
+            actor_id=system_user,
+        )
+        db_session.flush()
+        assert has_permission(user.id, "report", "view") is False
+        assert has_permission(user.id, "report", "export") is False
 
 
 @pytest.fixture()
