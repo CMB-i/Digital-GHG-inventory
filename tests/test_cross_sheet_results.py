@@ -151,7 +151,11 @@ class TestCrossSheetValueResolution:
             "ofr_acetylene_gj",
             field_type="calculated",
             frequency="annual",
-            field_config={"formula_version_id": formula.id, "display_region": "below_monthly_table"},
+            field_config={
+                "formula_version_id": formula.id,
+                "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
+            },
         )
 
         downstream_form, downstream_version = make_form()
@@ -162,7 +166,11 @@ class TestCrossSheetValueResolution:
             "fuel_total",
             field_type="calculated",
             frequency="annual",
-            field_config={"formula_version_id": downstream_formula.id, "display_region": "below_monthly_table"},
+            field_config={
+                "formula_version_id": downstream_formula.id,
+                "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
+            },
         )
 
         site = make_site()
@@ -195,7 +203,7 @@ class TestCrossSheetValueResolution:
 
         results = {r["field_code"]: r for r in data["sheet_results"]}
         assert results["fuel_total"]["status"] == "calculated"
-        assert results["fuel_total"]["value"] == round(0.026 * 47.3 + 10, 3)
+        assert results["fuel_total"]["value"] == round(0.026 * 47.3 + 10, 4)
 
 
 class TestCrossSheetCircularDependency:

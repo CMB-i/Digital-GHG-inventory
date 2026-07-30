@@ -403,6 +403,7 @@ class TestComposeSheetResultsAnnualInputs:
             "field_config": {
                 "formula_version_id": formula_version.id,
                 "display_region": "below_monthly_table",
+                "round_off_decimals": 4,
             },
         }
 
@@ -421,7 +422,7 @@ class TestComposeSheetResultsAnnualInputs:
         )
 
         assert results[0]["status"] == "calculated"
-        assert results[0]["value"] == round(0.026 * 47.3, 3)
+        assert results[0]["value"] == round(0.026 * 47.3, 4)
 
     def test_blank_annual_raw_field_needs_input_not_unknown_variable(self, make_formula_version):
         formula = make_formula_version("annual_qty * 47.3", {"annual_qty": {}})
