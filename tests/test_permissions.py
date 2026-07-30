@@ -140,3 +140,124 @@ class TestSiteScopedSubmitterAccess:
 
         resp = client.get("/module/SUBMIT/", follow_redirects=False)
         assert resp.status_code == 403
+
+
+class TestWildcardGrantAuthorizationDecisions:
+    def test_wildcard_approve_grant_drives_landing_nav_and_approv_index(
+        self, client, make_user, make_access_grant,
+    ):
+        user = make_user()
+        make_access_grant(user, "all", scope_type="global", can_approve=True)
+        with client.session_transaction() as sess:
+            sess["user_id"] = user.id
+
+        resp = client.get("/", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/module/APPROV/")
+
+        resp = client.get("/module/APPROV/")
+        assert resp.status_code == 200
+        assert b"Review Queue" in resp.data
+
+    def test_wildcard_submission_grant_is_honored_by_submit_list_helpers(
+        self, make_user, make_site, make_access_grant, make_form, make_field,
+        make_reporting_period, make_workflow, make_workbook,
+    ):
+        from app.modules.SUBMIT.service import _user_submission_site_ids, get_spoc_sheets_buckets
+
+        submitter = make_user()
+        approver = make_user()
+        site = make_site()
+        form, form_version = make_form()
+        make_field(form, form_version, "field_a", field_type="number")
+        make_reporting_period(site)
+        workflow_version = make_workflow([approver])
+        make_workbook(form, site, workflow_version=workflow_version, submitters=[submitter])
+        make_access_grant(
+            submitter,
+            "all",
+            scope_type="site",
+            scope_site_id=site.id,
+            can_view=True,
+            can_submit=True,
+        )
+
+        assert site.id in _user_submission_site_ids(submitter.id)
+
+        buckets = get_spoc_sheets_buckets(submitter.id)
+        bucket_site_ids = {
+            item["site_id"]
+            for bucket_name in ("action_needed", "not_started", "submitted")
+            for item in buckets[bucket_name]
+        }
+        assert site.id in bucket_site_ids
+        assert buckets["needs_submitter_assignment"] is False
+
+
+class TestRptbldRouteScoping:
+    def _make_template(self, db_session, created_objects, system_user, site):
+        from app.modules.RPTBLD.model import ReportTemplate
+
+        template = ReportTemplate(
+            name=f"Site Report {site.id}",
+            code=f"site-report-{site.id}",
+            scope_type="site",
+            scope_site_id=site.id,
+            config_json={"site_ids": [site.id]},
+            created_by=system_user,
+            updated_by=system_user,
+        )
+        db_session.add(template)
+        db_session.flush()
+        created_objects.append(template)
+        return template
+
+    def _login(self, client, user):
+        with client.session_transaction() as sess:
+            sess["user_id"] = user.id
+
+    def test_global_report_access_can_load_report_template(
+        self, client, make_user, make_site, make_access_grant, db_session,
+        created_objects, system_user,
+    ):
+        site = make_site()
+        template = self._make_template(db_session, created_objects, system_user, site)
+        user = make_user()
+        make_access_grant(user, "report", scope_type="global", can_view=True)
+        self._login(client, user)
+
+        resp = client.get(f"/module/RPTBLD/api/templates/{template.id}")
+        assert resp.status_code == 200
+
+    def test_site_scoped_report_access_can_load_matching_report_template(
+        self, client, make_user, make_site, make_access_grant, db_session,
+        created_objects, system_user,
+    ):
+        site = make_site()
+        template = self._make_template(db_session, created_objects, system_user, site)
+        user = make_user()
+        make_access_grant(user, "report", scope_type="site", scope_site_id=site.id, can_view=True)
+        self._login(client, user)
+
+        resp = client.get(f"/module/RPTBLD/api/templates/{template.id}")
+        assert resp.status_code == 200
+
+    def test_site_scoped_report_access_is_denied_for_different_site_template(
+        self, client, make_user, make_site, make_access_grant, db_session,
+        created_objects, system_user,
+    ):
+        allowed_site = make_site()
+        other_site = make_site()
+        template = self._make_template(db_session, created_objects, system_user, other_site)
+        user = make_user()
+        make_access_grant(
+            user,
+            "report",
+            scope_type="site",
+            scope_site_id=allowed_site.id,
+            can_view=True,
+        )
+        self._login(client, user)
+
+        resp = client.get(f"/module/RPTBLD/api/templates/{template.id}")
+        assert resp.status_code == 403

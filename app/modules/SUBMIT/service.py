@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.database import db
 from app.common.permissions import has_permission
+from app.modules.ACCESS.service import get_user_permissions
 from app.common.submission_status import (
     STATUS_DRAFT,
     STATUS_SUBMITTED,
@@ -21,7 +22,6 @@ from app.common.submission_status import (
     REVIEWABLE_STATUSES,
     SUBMISSION_STATUS_LABELS,
 )
-from app.modules.ACCESS.model import AccessMatrix
 from app.modules.SITEMST.model import Site
 from app.modules.FORMBLD.model import Form, FormVersion, Field, FieldVersion
 from app.modules.FORMBLD.service import calculated_field_formula_swaps, get_form_version_fields
@@ -463,29 +463,29 @@ def _is_future_month(year, month):
     return (year, month) > (today.year, today.month)
 
 
-def _user_submission_site_ids(user_id):
-    rows = AccessMatrix.query.filter_by(
+def _user_submission_site_ids(user_id, actions=("view", "submit", "create", "edit")):
+    flag_names = {f"can_{action}" for action in actions}
+    global_perms = get_user_permissions(
         user_id=user_id,
         entity_type="submission",
-        is_deleted=False,
-    ).all()
-
-    is_global = False
-    allowed_site_ids = set()
-    for row in rows:
-        if not (row.can_view or row.can_submit or row.can_create or row.can_edit):
-            continue
-        if row.scope_type == "global":
-            is_global = True
-            break
-        if row.scope_type == "site" and row.scope_site_id:
-            allowed_site_ids.add(row.scope_site_id)
-
-    if is_global:
+        scope_type="global",
+    )
+    if any(global_perms.get(flag) for flag in flag_names):
         return {
             site.id
             for site in Site.query.filter_by(is_deleted=False).all()
         }
+
+    allowed_site_ids = set()
+    for site_id, in db.session.query(Site.id).filter(Site.is_deleted == False).all():
+        site_perms = get_user_permissions(
+            user_id=user_id,
+            entity_type="submission",
+            scope_type="site",
+            scope_site_id=site_id,
+        )
+        if any(site_perms.get(flag) for flag in flag_names):
+            allowed_site_ids.add(site_id)
     return allowed_site_ids
 
 
@@ -2917,24 +2917,8 @@ def get_spoc_sheets_buckets(user_id):
     Returns: { "action_needed": [...], "not_started": [...], "submitted": [...] }
     """
     # 1. Get user's allowed sites
-    matrix_rows = AccessMatrix.query.filter_by(user_id=user_id, entity_type="submission", is_deleted=False).all()
-    
-    is_global = False
-    allowed_site_ids = set()
-    
-    for row in matrix_rows:
-        if row.can_view or row.can_submit or row.can_create:
-            if row.scope_type == "global":
-                is_global = True
-                break
-            elif row.scope_type == "site" and row.scope_site_id is not None:
-                allowed_site_ids.add(row.scope_site_id)
-                
-    if is_global:
-        active_sites = Site.query.filter_by(is_deleted=False).all()
-        allowed_site_ids = {site.id for site in active_sites}
-    else:
-        active_sites = Site.query.filter(Site.id.in_(allowed_site_ids), Site.is_deleted == False).all()
+    allowed_site_ids = _user_submission_site_ids(user_id, actions=("view", "submit", "create"))
+    active_sites = Site.query.filter(Site.id.in_(allowed_site_ids or {0}), Site.is_deleted == False).all()
 
     matrix_site_ids = set(allowed_site_ids)
     workbook_site_ids = _get_user_workbook_site_ids(user_id)
