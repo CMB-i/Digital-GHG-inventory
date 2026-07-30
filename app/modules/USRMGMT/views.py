@@ -1,5 +1,6 @@
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 
+from app.common.auth import is_safe_internal_path
 from app.common.validators import ValidationError
 from app.database import db
 from app.modules.USRMGMT.service import (
@@ -25,10 +26,10 @@ def login():
             db.session.commit()
             session.clear()
             session["user_id"] = user.id
-            if request.args.get("next"):
-                return redirect(request.args.get("next"))
+            session["user_session_version"] = user.session_version
             from app import default_landing_url
-            return redirect(default_landing_url(user))
+            next_url = request.args.get("next")
+            return redirect(next_url if is_safe_internal_path(next_url) else default_landing_url(user))
         error = "Invalid email or password, or the user is inactive."
 
     return render_template("login.html", error=error)
@@ -62,6 +63,8 @@ def reset_password():
     email = request.values.get("email", "")
     if request.method == "POST":
         try:
+            if request.form.get("new_password") != request.form.get("confirm_password"):
+                raise ValidationError("Passwords do not match.")
             reset_password_with_otp(
                 request.form.get("email"),
                 request.form.get("otp_code"),
@@ -71,7 +74,7 @@ def reset_password():
             flash("Password reset. Sign in with your new password.", "success")
             return redirect(url_for("auth.login"))
         except ValidationError as error:
-            db.session.rollback()
+            db.session.commit()
             return render_template("reset_password.html", error=str(error), email=request.form.get("email", "")), 400
         except Exception:
             db.session.rollback()

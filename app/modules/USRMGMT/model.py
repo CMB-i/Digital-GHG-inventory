@@ -12,6 +12,7 @@ class User(FullLifecycleMixin, db.Model):
     is_active = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
     phone = db.Column(db.String(50), nullable=True)
+    session_version = db.Column(db.Integer, nullable=False, default=0, server_default="0")
 
     __table_args__ = (
         db.UniqueConstraint("email", name="uq_users_email"),
@@ -29,6 +30,8 @@ class PasswordResetOTP(db.Model):
     expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
     used = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     used_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    failed_attempts = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    locked_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     user = db.relationship("User")
 

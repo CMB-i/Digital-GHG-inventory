@@ -19,6 +19,8 @@ from app.modules.USRMGMT.model import PasswordResetOTP, User
 OTP_EXPIRY_MINUTES = 10
 OTP_RATE_LIMIT_MAX_REQUESTS = 3
 OTP_RATE_LIMIT_WINDOW_MINUTES = 15
+OTP_MAX_FAILED_ATTEMPTS = 5
+RESET_CODE_ERROR = "Invalid or expired reset code."
 
 
 def hash_password(plain_text):
@@ -116,19 +118,27 @@ def reset_password_with_otp(email, otp_code, new_password):
     ).order_by(PasswordResetOTP.created_at.desc()).first()
 
     if not reset_otp:
-        raise ValidationError("Invalid or expired reset code.")
+        raise ValidationError(RESET_CODE_ERROR)
     if _normalize_db_datetime(reset_otp.expires_at) <= now:
         reset_otp.used = True
         reset_otp.used_at = now
-        raise ValidationError("Invalid or expired reset code.")
+        raise ValidationError(RESET_CODE_ERROR)
+    if reset_otp.locked_at is not None:
+        raise ValidationError(RESET_CODE_ERROR)
     if not verify_password(otp_value, reset_otp.otp_hash):
-        raise ValidationError("Invalid or expired reset code.")
+        reset_otp.failed_attempts = (reset_otp.failed_attempts or 0) + 1
+        if reset_otp.failed_attempts >= OTP_MAX_FAILED_ATTEMPTS:
+            reset_otp.locked_at = now
+            reset_otp.used = True
+            reset_otp.used_at = now
+        raise ValidationError(RESET_CODE_ERROR)
 
     user = User.query.filter_by(id=reset_otp.user_id, is_deleted=False).one_or_none()
     if not user or not user.is_active:
-        raise ValidationError("Invalid or expired reset code.")
+        raise ValidationError(RESET_CODE_ERROR)
 
     user.password_hash = hash_password(validated_password)
+    user.session_version = (user.session_version or 0) + 1
     user.updated_by = user.id
     reset_otp.used = True
     reset_otp.used_at = now
